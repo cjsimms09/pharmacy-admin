@@ -1,9 +1,10 @@
 import "server-only";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, inArray, like } from "drizzle-orm";
+import { SITE_STARTS_ON } from "./books-start";
 import { db, schema } from "@/db";
 import { audit } from "./audit";
 import { getSettings } from "./settings";
-import { AH_FEE_CATEGORY, CS_RECOUPMENT_CATEGORY, adjustmentPostings, readAccessHealthPayment, type AccessHealthPayment } from "./accesshealth-payment";
+import { AH_FEE_CATEGORY, CS_RECOUPMENT_CATEGORY, adjustmentPostings, describeEftPayments, readAccessHealthPayment, type AccessHealthPayment } from "./accesshealth-payment";
 import { newId } from "./crypto";
 
 /** The openings of every adjustments paragraph this reader has written, so a re-read replaces its own and no one else's. */
@@ -75,7 +76,6 @@ export async function fileAccessHealthPayment(
   const { recordClaimPayment } = await import("./claim-payments");
   let posted = 0;
   let alreadyHeld = 0;
-  let matched = 0;
   let postedCents = 0;
   for (const section of p.sections) {
     for (const c of section.claims) {
@@ -87,7 +87,7 @@ export async function fileAccessHealthPayment(
         alreadyHeld++;
         continue;
       }
-      const r = await recordClaimPayment(
+      await recordClaimPayment(
         {
           rxNumber: c.rxNumber,
           dateFilled: c.fillDate,
@@ -104,7 +104,6 @@ export async function fileAccessHealthPayment(
       );
       posted++;
       postedCents += c.amountCents;
-      if (r.matched) matched++;
     }
   }
 
@@ -171,10 +170,35 @@ export async function fileAccessHealthPayment(
     await db.update(schema.documents).set({ notes: [...kept, adjustmentText].join("\n\n") }).where(eq(schema.documents.id, input.documentId));
   }
 
+  /*
+   * What the EFT's payments are, all of them — this read's and any already held — so a re-read that posts nothing still
+   * says what is on file, and "matched" is never the only word next to a large number (describeEftPayments).
+   */
+  const onFile = await db.query.claimPayments.findMany({
+    where: and(eq(schema.claimPayments.source, "plan"), like(schema.claimPayments.reference, `${p.eftNumber}/%`)),
+    columns: { amountCents: true, claimId: true, rxNumber: true, dateFilled: true },
+  });
+  const loose = onFile.filter((r) => !r.claimId && r.dateFilled && r.dateFilled >= SITE_STARTS_ON);
+  const reversedFills = new Set(
+    loose.length
+      ? (await db.query.claims.findMany({ where: and(inArray(schema.claims.rxNumber, [...new Set(loose.map((r) => r.rxNumber))]), eq(schema.claims.status, "reversed")), columns: { rxNumber: true, dateFilled: true } })).map((c) => `${c.rxNumber}|${c.dateFilled}`)
+      : [],
+  );
+  const kinds = describeEftPayments(
+    onFile.map((r) => ({
+      amountCents: r.amountCents,
+      matched: r.claimId !== null,
+      filledBeforeBooks: !!r.dateFilled && r.dateFilled < SITE_STARTS_ON,
+      onReversedClaim: reversedFills.has(`${r.rxNumber}|${r.dateFilled}`),
+    })),
+    SITE_STARTS_ON,
+  );
+
   const says = [
     p.says,
     receipt ? `The deposit banked for it on ${receipt.receivedOn} agrees, ${money(receipt.amountCents)}.` : `No deposit for ${p.eftNumber} is on file yet; the payer payment report or the EFT notice banks it.`,
-    `${posted} claim payment${posted === 1 ? "" : "s"} posted (${money(postedCents)}), ${matched} matched to a claim on this site${alreadyHeld ? `; ${alreadyHeld} already held under ${p.eftNumber}` : ""}. Nothing banked.`,
+    `${posted} claim payment${posted === 1 ? "" : "s"} posted by this read (${money(postedCents)})${alreadyHeld ? `, ${alreadyHeld} already held under ${p.eftNumber}` : ""}. Nothing banked.`,
+    kinds,
     adjustmentText,
   ].filter(Boolean).join(" ");
   await audit({ action: "claims.accesshealth_payment_read", userId: by.id ?? null, userName: by.name, entity: "document", entityId: input.documentId ?? undefined, details: says });
