@@ -8,6 +8,20 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts`, `money/page.tsx` (A's), `bank-statement.ts`, `bank-descriptors.ts` — a bank credit no feed names is never banked from the statement
+
+**Written before touching A's files.** Session 2's scanned-bank rehearsal (G-BANK-1..3): every unrecognised credit banked as
+third-party money from "City of Wichita", because that payer label's word is in the pharmacy's own name — 22 lines,
+$78,726.92, at least $48,889.32 twice. Changes:
+- `bank-statement.ts`: a payer or supplier is "mentioned" only by a whole word that is not one of the pharmacy's own
+  name and address words; a credit that only mentions one is left for a person, not banked. PSAO credits (Access Health,
+  ProviderPay) place as `psao_deposit`: confirm a held receipt or stay unplaced — the payer payment report and the EFT
+  notice are their doors. Prescription transfers and other named receipts stay unplaced until the owner says what they are.
+- `bank.ts`: `psao_deposit` beside `card_deposit`, never banked.
+- `bank-descriptors.ts`: Heartland spellings the scan produced (HRTI3ND, HRTTJqN D) via `HRT…PMTSYS`.
+- `scanned-bank-solve.ts` + `page.tsx`: a proved line whose reading is not a known amount while a one-character
+  alternative is goes to the person panel with that reason (three cancelling misreads proved 11–12 Aug).
+
 ### From 1 — 15 September, before the edit: `money/bank.ts`, `money/page.tsx` (A's) — the scanned Emprise statement is read from the upload
 
 **Written before touching either file.** The owner: Emprise cannot export CSV, QFX or OFX; the statement is a scanned PDF.
