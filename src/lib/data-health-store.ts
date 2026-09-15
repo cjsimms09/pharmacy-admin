@@ -410,7 +410,7 @@ export async function measureDataHealth(): Promise<{ measured: number; skipped: 
         owing.length === 0
           ? []
           : [
-              `${owing.length} invoice${owing.length === 1 ? "" : "s"} worth $${(owingCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} carry a total and no item lines — usually a scan with no text layer`,
+              `${owing.length} invoice${owing.length === 1 ? "" : "s"} worth $${(owingCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} carry a total and no item lines kept — either lines that did not add up to the total, or nothing recognised on the page`,
             ],
       note: invoiceRows.length === 0 ? "No supplier invoice has been filed." : null,
     };
