@@ -109,6 +109,16 @@ export type PayerSide = {
   remitCents: number | null;
   copayCents: number | null;
   otherPayerAmountCents: number | null;
+  /**
+   * What this payer's own claim carries. PioneerRx puts a voucher on the claim it applied to and DIR on the claim that
+   * owes it — measured 15 September 2026 (P-3) on September's 76 two-payer fills: a voucher on the primary only (2),
+   * never on the secondary, no message amount and no DIR on either. The fill-level copies below were written onto both
+   * rows, so a row-level sum counted the voucher twice. Optional: a CSV export has no per-claim figures.
+   */
+  evoucherCents?: number | null;
+  dirFeeCents?: number | null;
+  evoucherMessageCents?: number | null;
+  evoucherProgramme?: string | null;
 };
 
 export type PioneerFill = {
@@ -161,6 +171,10 @@ const sideOf = (r: PioneerClaimRow): PayerSide => ({
   remitCents: r.netPaidCents,
   copayCents: r.patientPayCents,
   otherPayerAmountCents: r.otherPayerCents,
+  evoucherCents: r.evoucherCents,
+  dirFeeCents: r.dirFeeCents,
+  evoucherMessageCents: r.evoucherMessageCents ?? null,
+  evoucherProgramme: r.evoucherProgramme ?? null,
 });
 
 /**

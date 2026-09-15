@@ -87,6 +87,19 @@ describe("a fill with two payers", () => {
     assert.deepEqual(r.disagree, []);
   });
 
+  test("REGRESSION: a voucher or DIR stays on the payer whose claim carries it, not on both", () => {
+    /*
+     * P-3, 15 September 2026: on September's 76 two-payer fills a voucher sat on the primary's claim only (2 fills),
+     * never on the secondary's. The fill-level figure was written onto both rows, so a row sum counted $50.04 twice.
+     */
+    const r = fillsFromClaimRows([{ ...primary, evoucherCents: 2_502, dirFeeCents: 150 }, secondary]);
+    const f = r.fills[0];
+    assert.equal(f.primary.evoucherCents, 2_502);
+    assert.equal(f.primary.dirFeeCents, 150);
+    assert.equal(f.secondary?.evoucherCents, null, "the secondary's claim carries no voucher");
+    assert.equal(f.secondary?.dirFeeCents, null);
+  });
+
   test("each payer keeps its own plan, network and contract", () => {
     const r = fillsFromClaimRows([primary, secondary]);
     const f = r.fills[0];
