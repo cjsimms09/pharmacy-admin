@@ -25,6 +25,46 @@ so the answer can be checked rather than taken on trust.
 | **8 claims where PioneerRx's cost disagrees with an invoice dated the same day** | **$419.53 overstated, all of it inside accrual COGS** | Where the pharmacy holds an invoice for the same NDC on the same day, should the site prefer the invoice over PioneerRx's `acquisition_cents` and show the difference — or leave PioneerRx's figure alone and only flag it? Nothing has been overwritten either way. **The measurement says PioneerRx is normally right**, which is what makes these eight worth asking about: across 758 solid-dose September claims with a pack size the catalogue corroborates, the median claim-to-invoice ratio is exactly 1.0000 and 487 are within 5% of it. So this is not two different cost bases — it is a few drug records whose cost was never updated when the price changed. Worst three: rx 337350 mirabegron ER 50mg, claim $297.98 against ParMed 7491190346 of the same day at $175.67 (1.70x, $122.31); rx 337512 ivermectin 3mg (1.63x, $186.57); rx 337115 doxepin 3mg (6.48x, $83.57) — and that last one carries two paid rows under two different NDCs, so it may be one of the stale rebills rather than a cost fault. Measured 12 September. |
 | **19 plans still unclassified** | the residual after 459 were adopted and 15 he decided himself | Almost all of it is the one question no document on file answers: is this employer insured, or does it fund its own plan. Needs a Form 5500 or the plan document, one plan at a time. Each row now shows what the plan pays for and whether it ever pays alone, which is what settles a card. |
 
+### Before he decides the brand book: six fills carry all of it — 15 September
+
+He asked about it ("2", the second item above). It is not ready to decide yet, and the reason is
+arithmetic already on the row.
+
+**OBSERVATION.** The brand book is −$2,019.24 of September gross profit (measured 12 September).
+Rexulti 1.0mg, 3 scripts, −$1,328.39, and Zepbound 12.5mg, 3 scripts, −$1,053.81, sum to
+**−$2,382.20 — 118% of the whole brand loss.** The other 176 brand scripts made **+$362.96.** And
+those six run at a margin of −44.4% and −50.5%: reimbursed at 0.556 and 0.495 of what they cost.
+
+**SHOULD BE.** A routine brand claim is paid close to what the drug costs the pharmacy. Contracts
+price brands at WAC or AWP less a modest percentage, so an independent pharmacy's brand losses run to
+low single figures — which is exactly what the other 176 show. A drug reimbursed at half its
+acquisition cost on an ordinary fill is outside that range by an order of magnitude. That is pharmacy
+practice, not an inference from this data.
+
+**DIFFERENCE.** Yes, and the size of it points at the measurement before the price. A loss of that
+depth on six fills, when the rest of the book is positive, is what a unit mismatch on the cost side
+looks like (Zepbound is a four-pen carton), or a second payer that was not counted (both drugs carry a
+manufacturer savings card), or a fill still in the will-call bin being set against its cost.
+
+**So the question has changed.** It was "stop dispensing these, or take it up with the contract". It
+is now "are these six real" — and until that is answered, **the brand book as a whole is not losing
+money on the evidence we have**, because remove six unverified fills and it is positive.
+
+**Pre-flight.** 1 Physical act: dispensing, or declining to dispense, Rexulti and Zepbound. 2 Time:
+September's six; the decision governs every one after. 3 What a pharmacist knows the tables do not:
+brands reimburse near cost; both drugs have savings cards; Zepbound is a four-pen carton. 4 Whose
+money / basis / already counted: accrual gross profit; a savings card paid as a second payer could be
+a separate row. 5 Units: **not verified — the likeliest fault.** 7 Worst case, ranked: **patient
+harm.** Acting on a false loss means declining a patient's Rexulti or Zepbound, which outranks every
+dollar on this list. 8 Could the check pass for the wrong reason: yes — the loss reconciles as
+arithmetic while resting on a cost in the wrong unit. 9 When he needs to know: before any
+do-not-dispense decision, which is now. 11 What else reads this figure: the answer given to "our
+accrual is too low for the month", which rested on it. **12 Not checked, and cannot be from here:**
+revenue on those six through `ingredientReceivedCents()` (the single definition since 14 September,
+after the claims book was found comparing cost against the plan's share net of copay); acquisition
+against the invoice or receipt for the same NDC; quantity dispensed against the carton; and whether any
+has a second payer or is still unsold. Asked of session 1, 15 September.
+
 ## Being corrected in another session
 
 | What | Money | What was asked |
