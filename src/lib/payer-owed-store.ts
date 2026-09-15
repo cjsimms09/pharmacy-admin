@@ -1,7 +1,7 @@
 import "server-only";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
-import { owedByPayer, type Receivable, type Received, type OwedSummary } from "./payer-owed";
+import { owedByPayer, splitReceivable, voucherProgrammeFor, type Receivable, type Received, type OwedSummary } from "./payer-owed";
 
 /**
  * Loads what each payer owes: its own receivables from the fills, and what has actually arrived.
@@ -65,8 +65,10 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
         receivedOn: schema.claimPayments.receivedOn,
         claimId: schema.claimPayments.claimId,
         payer: schema.claimPayments.payer,
+        source: schema.claimPayments.source,
         claimBin: schema.claims.bin,
         claimPayer: schema.claims.pbmName,
+        claimVoucher: schema.claims.evoucherCents,
       })
       .from(schema.claimPayments)
       .leftJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id))
@@ -88,15 +90,22 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
     const shares = payerShares(f);
     for (let i = 0; i < f.payers.length; i++) {
       const p = f.payers[i];
+      /*
+       * `payerShares` returns one share per payer in the same order, so the index is the join.
+       * Matching on bin and name instead would merge two rows of a fill billed twice to one BIN.
+       */
+      const remit = shares[i]?.receivableCents ?? p.remitCents;
+      /*
+       * A manufacturer voucher inside the remit is owed by its programme, not the plan (money map section 15). Without
+       * this, the programme's payment settled the plan's receivable — an unpaid plan looked paid — and a claim the plan
+       * will never pay any of (remit = voucher, as every RxLocal voucher is) sat "owed" by the plan for ever.
+       */
+      const { planCents, voucherCents } = splitReceivable(remit, p.evoucherCents ?? 0);
       receivables.push({
         bin: p.bin,
         name: p.name ?? null,
         dateFilled: f.dateFilled,
-        /*
-         * `payerShares` returns one share per payer in the same order, so the index is the join.
-         * Matching on bin and name instead would merge two rows of a fill billed twice to one BIN.
-         */
-        cents: shares[i]?.receivableCents ?? p.remitCents,
+        cents: planCents,
         /*
          * Asked of the plan register rather than taken off the fill. `Fill.cashPlan` is true when
          * the whole fill was cash-priced; a coordinated fill can carry one cash plan and one that
@@ -104,12 +113,20 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
          */
         cashPlan: cashPlanFor(p.bin, p.pcn, plans) !== null,
       });
+      if (voucherCents > 0) {
+        receivables.push({ bin: null, name: voucherProgrammeFor(p.bin), dateFilled: f.dateFilled, cents: voucherCents, cashPlan: false });
+      }
     }
   }
 
   const received: Received[] = payments.map((p) => ({
-    bin: p.claimBin,
-    payer: p.claimPayer ?? p.payer,
+    /*
+     * A voucher programme's payment on a claim with a voucher settles the voucher, never the plan; a plan's payment on
+     * the same claim settles the plan, as before. On a claim with no voucher, nothing changes.
+     */
+    ...(p.source === "copay_card" && (p.claimVoucher ?? 0) > 0
+      ? { bin: null, payer: voucherProgrammeFor(p.claimBin) }
+      : { bin: p.claimBin, payer: p.claimPayer ?? p.payer }),
     cents: p.amountCents,
     receivedOn: p.receivedOn,
     /*

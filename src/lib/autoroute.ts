@@ -2,7 +2,8 @@ import "server-only";
 import { looksLikeReturnsDetail, looksLikeApTransactions } from "./ap-transactions";
 import { looksLikeCopayRemit } from "./copay-remit";
 import { parseCsvRows } from "./reference";
-import { readSheet } from "./xlsx";
+import { readSheet, readSheets } from "./xlsx";
+import { looksLikeVeridikalReport } from "./veridikal-report";
 import { mapColumns } from "./claims";
 import { mapSupplierColumns } from "./suppliers";
 import { looksLikePioneerCatalog } from "./pioneer-catalog";
@@ -35,7 +36,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "sales_by_payment" | "empty_report" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "sales_by_payment" | "empty_report" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -254,6 +255,20 @@ export function classify(fileName: string, buf: Buffer): Classification {
       return { kind: "purchase_drilldown", why: "Named as a Purchase Drill Down.", headers: [] };
     }
     return { kind: "unrecognised", why: "A PDF this does not recognise. Filed as a document.", headers: [] };
+  }
+  /*
+   * Veridikal's eVoucher and Denial Conversion client summaries (veridikal-report.ts): workbooks whose first row is a
+   * title, with the header four or five rows down, so the header-row rules below never see their columns. Known by
+   * the title and the header together, on every tab.
+   */
+  if (/\.xlsx$/i.test(fileName) || buf.subarray(0, 2).toString("latin1") === "PK") {
+    try {
+      if (looksLikeVeridikalReport(readSheets(buf))) {
+        return { kind: "veridikal_report", why: "A Veridikal client summary: the eVoucher or Denial Conversion payments inside one Veridikal ACH, row by row, with its totals.", headers: [] };
+      }
+    } catch {
+      // Not a workbook this can open; the rules below decide.
+    }
   }
   /*
    * The daily "Rx Transaction Details By Submission Type" report — the claims feed — is, like the

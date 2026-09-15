@@ -1138,6 +1138,8 @@ async function loadClaimFlags(scope: ClaimScope) {
       payerLabel: c.payerLabel,
       quantityThousandths: c.quantityThousandths,
       remitCents: c.remitCents,
+      /* The manufacturer voucher inside the remit: owed by the voucher programme, not the plan (payer-owed-store.ts). */
+      evoucherCents: c.evoucherCents,
       copayCents: c.copayCents,
       patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents,
@@ -1579,6 +1581,8 @@ async function loadFills(from: string, to: string) {
       payerLabel: c.payerLabel,
       quantityThousandths: c.quantityThousandths,
       remitCents: c.remitCents,
+      /* The manufacturer voucher inside the remit: owed by the voucher programme, not the plan (payer-owed-store.ts). */
+      evoucherCents: c.evoucherCents,
       copayCents: c.copayCents,
       patientTotalCents: c.patientTotalCents,
       acquisitionCents: c.acquisitionCents,

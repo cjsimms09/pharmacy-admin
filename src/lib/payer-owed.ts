@@ -43,6 +43,31 @@
  */
 
 import { normalisePayerName } from "./payer-name";
+import { COPAY_BIN, COPAY_PAYER } from "./copay-remit";
+
+/**
+ * Who owes a claim's manufacturer voucher.
+ *
+ * RedSail's copay voucher pays the claims on its own BIN (copay-remit.ts); Veridikal's eVoucher summary carries the
+ * plans' BINs and, in the July sample, no row on RedSail's (money map section 15). Inferred from those two, not proven:
+ * a September summary from either would prove or break it.
+ */
+export function voucherProgrammeFor(bin: string | null): string {
+  return (bin ?? "").trim() === COPAY_BIN ? COPAY_PAYER : "Veridikal (eVoucher)";
+}
+
+/**
+ * A payer's receivable on a claim, split between the plan and the voucher programme.
+ *
+ * PioneerRx's remit includes the voucher: on September's voucher claims the plan's payment, where one is on file, is the
+ * remit less the voucher and never the remit (money map section 15). So the plan owes the remit less the voucher, and
+ * the programme the voucher. The two add back to the remit, which stays the fill's one figure; a voucher larger than the
+ * remit is capped at it rather than billing more than the claim carries.
+ */
+export function splitReceivable(remitCents: number, evoucherCents: number): { planCents: number; voucherCents: number } {
+  const voucherCents = Math.max(0, Math.min(evoucherCents, remitCents));
+  return { planCents: remitCents - voucherCents, voucherCents };
+}
 
 /** One payer's claim on one fill: what it said it would pay. */
 export type Receivable = {

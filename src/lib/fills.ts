@@ -61,6 +61,13 @@ export type ClaimRow = {
   payerLabel: string | null;
   quantityThousandths: number | null;
   remitCents: number | null;
+  /**
+   * The manufacturer e-voucher PioneerRx records on the claim (`EvoucherAmountPaid`), which the remit already includes.
+   *
+   * Measured on September's voucher claims (money map section 15): where a plan payment is on file it is the remit less
+   * the voucher, never the remit. So the plan owes the remit less this, and the voucher programme owes this.
+   */
+  evoucherCents?: number | null;
   copayCents: number | null;
   /**
    * What the patient was left owing after this adjudication — the report's "Total", not its "Copay".
@@ -95,6 +102,8 @@ export type FillPayer = {
   groupNumber: string | null;
   name: string | null;
   remitCents: number;
+  /** The part of `remitCents` a manufacturer voucher pays, not the plan. Nought where there is none. */
+  evoucherCents: number;
   /** What the patient was left owing after this payer adjudicated. */
   copayCents: number;
 };
@@ -371,6 +380,7 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       groupNumber: r.groupNumber ?? null,
       name: r.pbmName ?? r.payerLabel,
       remitCents: r.remitCents ?? 0,
+      evoucherCents: r.evoucherCents ?? 0,
       /*
        * The patient's residual, from the column that actually carries it.
        *
