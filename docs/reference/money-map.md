@@ -993,7 +993,7 @@ All 12 real files parse and **every one balances**: 25 payment lines, BPR total 
 - One file (24 August) pays $0.00: a payment and its reversal.
 - The 8 August files total **$5,541.37 — exactly the live August MTF rows.**
 - **Against the bank: every August MTF 835 with money (7) equals an MTF bank credit to the cent, on the same
-  day.** The bank's 7 earlier MTF credits (3–14 August, $4,790.21) have no file; the CLI's first download is
+  day.** The bank's 7 earlier MTF credits (3–14 August, $4,791.21) have no file; the CLI's first download is
   18 August.
 
 ### 4–5 · Where it lands, and which basis reads it
