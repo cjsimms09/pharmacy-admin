@@ -905,6 +905,16 @@ export async function importRecognised(
         routeResult = describeTransactionImport(outcome.report);
         if (outcome.report.claimsAdded || outcome.report.reversed) imported = true;
       }
+    } else if (cls.kind === "card_statement") {
+      /*
+       * Before the vendor-bill rule, not after it: the statement and the card batch reports come from the same
+       * forwarding address, and a vendor claiming that address must not turn the statement into a draft with no amount.
+       */
+      const { bookCardStatement } = await import("./card-statement-store");
+      const { pdfText } = await import("./pdf-text");
+      const r = await bookCardStatement({ text: pdfText(buf), documentId: filed?.documentId ?? null }, { userName: ctx.userName ?? "mailbox-sweep" });
+      routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
+      imported = !r.refused;
     } else if (await vendorBill(from)) {
       /*
        * A bill from somebody the pharmacy has told us about.

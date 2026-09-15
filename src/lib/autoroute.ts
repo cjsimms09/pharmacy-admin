@@ -12,6 +12,7 @@ import { looksLikeOnHand } from "./on-hand";
 import { looksLikeRxRescueCredit } from "./rxrescue-credit";
 import { looksLikePayerPayments } from "./payer-payments";
 import { pdfText } from "./pdf-text";
+import { looksLikeCardStatement } from "./card-statement";
 import { looksLikeRebateReport } from "./rebate-report";
 import { isDrillDownText } from "./drill-down-read";
 import { ALLOWED_MIME } from "./files";
@@ -31,7 +32,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "empty_report" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "empty_report" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -208,6 +209,10 @@ export function classify(fileName: string, buf: Buffer): Classification {
        */
       if (looksLikeCopayRemit(text)) {
         return { kind: "copay_remit", why: "A PDF whose text carries a copay-voucher remittance: a payment header and item rows that hold together.", headers: [] };
+      }
+      /* The monthly card processing statement: the only record of card fees. See card-statement.ts. */
+      if (looksLikeCardStatement(text)) {
+        return { kind: "card_statement", why: "A Global Payments merchant statement: the month's card processing fees and every batch deposited.", headers: [] };
       }
       if (looksLikeRebateReport(text)) {
         return {
