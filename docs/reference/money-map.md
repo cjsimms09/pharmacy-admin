@@ -12,8 +12,8 @@ expenses, bank statements, invoices, cogs, etc"*.
 
 ## How this was measured, so it can be re-run and disagreed with
 
-- **Code** read at `origin/feature/compliance` **5cdff17** (15 September 2026). File and line references
-  are to that commit.
+- **Code** read at `origin/feature/compliance` **5cdff17**, and at **8394955** for the payment-type report
+  added afterwards (both 15 September 2026). File and line references are to those commits.
 - **Live numbers**: read-only SELECT queries against the live database, owner-approved 15 September 2026
   in the auditing session. The probe opens its own client and issues no PRAGMA, so it cannot write.
   Probes live in `scripts/support/probe-*.ts` for the length of the audit and are deleted afterwards.
@@ -52,7 +52,8 @@ card-batch total.
 
 ## 1. Credit card batches
 
-**Checkpoint 1 of the audit. Code at 5cdff17; live numbers and the scratch-copy tests 15 September 2026.**
+**Checkpoint 1 of the audit. Code at 5cdff17, updated at 8394955 for the payment-type report; live
+numbers and the scratch-copy tests 15 September 2026.**
 
 ### 1 · What it is, who sends it, how often, through which door
 
@@ -177,7 +178,7 @@ not a shortfall and must not be reported as one.
 | Claims (what patients owed) | day, `claims.sold_on` = batch close date | **Session 1 measured**, 3–14 Sep: $34,112.41 card against $37,321.21 owed by patients on claims sold those days, **91.4%** overall, 74–128% a day. Within a range, not to the penny: no tender breakdown exists. |
 | Bank deposit | exact amount, ±7 days, one-to-one (`matchHeldDeposit`) | **expected-not-yet** — no bank statement read (`bank_lines` = 0) |
 | Card statement batch line | batch date ±1 day and exact amount, not batch number — the email's batch ID and the statement's sequence number are different series (`card-statement-store.ts` 97–111) | **expected-not-yet** — no card statement read. Its own note: the first statement able to cross-check batches already on file is **October's** |
-| POS tender (card / cash / cheque / charge) | — | **not-captured**; the owner will send PioneerRx payment-type reports, which are what would make batch = POS card = bank deposit exact |
+| POS tender (card / cash / cheque / charge) | PioneerRx "System Sales Totals By Payment Type": `card_net` (card less card refunds) against card-batch receipts with `receivedOn` inside the report's period (`sales-by-payment-store.ts` 74–90) | **reader built, nothing captured yet** — added in 8394955 after this checkpoint was first written. Live on 15 September: table `sales_by_payment` exists with **0 rows**, and **0** inbox items routed to it. The August sample session 1 read is not on the live database. The check has never run on real data. |
 
 Unmatched on live data, classified:
 
@@ -257,16 +258,38 @@ DIFFERENCE: not a fault — an unobserved state. **never-measured**. Check the n
 `cash_receipts.created_by` is the sweep, not a person.
 Owner: none; an observation to close.
 
-**G-CARD-5. No payment-type breakdown, so card cannot reconcile to copays to the penny.**
-**expected-not-yet** — the owner will send PioneerRx reports of card, cash, cheque and charge-account
-payments; session 1 judges whether they are sufficient. It is what would make card batch = POS card =
-bank deposit exact.
+**G-CARD-5. The payment-type check exists and has never run on real data.**
+OBSERVATION: session 1 built the reader for PioneerRx's "System Sales Totals By Payment Type" (8394955,
+RouteKind `sales_by_payment`, migration 0121). It books nothing and checks two things: the till's card
+figure against the card batches, and prescription money against the claims. On the live database: 0 rows,
+0 inbox items.
+SHOULD BE: the card batch, the till's card takings and the bank deposit are one sum of money seen three
+ways, and a daily reconciliation should hold all three to the cent.
+DIFFERENCE: **expected-not-yet** — the owner is to send the reports daily. Two joins are **unverified until
+real September reports arrive**, and either can make a correct day read as a discrepancy:
+- **the day boundary**: a batch is dated the day it *closed* (`receivedOn` = close date), the report the day
+  of *sale*. A batch closed after midnight, or one holding the last sales of the day before, lands on a
+  different day from the till's figure;
+- **reversals**: the prescription check takes claims with `reversedOn` null, and whether PioneerRx nets a
+  reversal out of the same period the same way is unknown.
+Owner: `sales-by-payment*.ts` — **not in the ownership table** (built by session 1).
+Proposed: nothing to fix yet. Measure both joins on the first week of real reports before either check is
+trusted to say a day is wrong.
 
 **G-CARD-6. Charge accounts.** The owner: *"rarely but sometimes they do and it is registered as an AR
 charge."* Accrual is unaffected (the claim's patient amount counts at sale). Cash counts it when the
 patient later pays at the till. The gap: the site holds no record of what is owed on accounts, and a copay
-charged that day makes that day's card total look short against copays. How rare — **never-measured**;
-for the payment-type report to show.
+charged that day makes that day's card total look short against copays. How rare — **never-measured**.
+The payment-type report now has a column for it (`A/R / Direct Dep`, stored as `account_cents`), so the
+first real reports will measure charges *to* accounts. See Q-CARD-2 for the half they may not show.
+
+**Q-CARD-2 (question for the owner, raised by session 1). Does PioneerRx's "System Sales Totals By
+Payment Type" report include money a patient pays *onto* a charge account, or only charges *to* one?**
+The A/R column shows charges to accounts; whether a later payment against the account appears anywhere in
+this report is unconfirmed. It matters for the card check: if account payments do not appear, then on a day
+a patient pays off an account by card, the card batch holds that money and the till's card figure does not,
+and the check reports the batches as holding more than the till — a correct day read as a discrepancy. If
+they do appear, the check holds. Only the report's behaviour, or PioneerRx, can say which.
 
 **Q-CARD-1 (question for the owner). Which day does a card sale belong to on the cash account — the day
 the batch closed, or the day the money reached the bank?**
