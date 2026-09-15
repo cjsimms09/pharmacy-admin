@@ -6,7 +6,7 @@ const TODAY = "2026-09-11";
 
 const claim = (over: Partial<Candidate> = {}): Candidate => ({
   claimId: "c1",
-  rxNumber: "336548",
+  rxNumber: "900000",
   fillNumber: 0,
   dateFilled: "2026-09-08",
   ndc11: "47781056601",
@@ -224,7 +224,7 @@ describe("the worklist", () => {
 /**
  * Whether a MAC list priced the claim at all, which is the question a PBM asks first.
  *
- * Caremark rejected the first appeal this pharmacy ever filed as a "non MAC claim". Rx 333968,
+ * Caremark rejected the first appeal this pharmacy ever filed as a "non MAC claim". Rx 900001,
  * amphetamine ER 12.5mg ODT, $192.24 below cost, came back with basis of reimbursement 03 —
  * ingredient cost reduced to AWP less a percentage. No MAC list priced it, so there was no MAC to
  * appeal, and nothing the form could have said would have changed the answer.
@@ -244,7 +244,7 @@ describe("a MAC appeal needs a MAC", () => {
   test("REGRESSION: basis 03 is AWP less a discount, and is refused", () => {
     // The actual claim, with its actual figures.
     const j = judge(
-      claim({ rxNumber: "333968", drugName: "AMPHETAMINE ER 12.5 MG ODT", basisOfReimbursement: "03", pbmName: "CVS Caremark", paidCents: 1_000, acquisitionCents: 20_224 }),
+      claim({ rxNumber: "900001", drugName: "AMPHETAMINE ER 12.5 MG ODT", basisOfReimbursement: "03", pbmName: "CVS Caremark", paidCents: 1_000, acquisitionCents: 20_224 }),
       terms({ pbmName: "CVS Caremark" }),
       new Set(),
       TODAY,

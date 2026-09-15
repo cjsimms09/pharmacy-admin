@@ -51,7 +51,7 @@ describe("one fill, however many payers priced it", () => {
 
   test("the patient's residual sits on one row, and is taken from that row", () => {
     /*
-     * Rx 336765, a real coordinated fill and the one that disproved this module's founding
+     * Rx 900000, a real coordinated fill and the one that disproved this module's founding
      * assumption. OptumRx paid $461.89 on the dispensing row; a second plan paid $100 and left the
      * patient owing $733.52. The pharmacy took $1,295.41 on a pen costing $1,302.73 — a $7.32 loss,
      * which is what PioneerRx says too.
@@ -61,8 +61,8 @@ describe("one fill, however many payers priced it", () => {
      * and nothing could contradict it until this fill arrived.
      */
     const [f] = groupIntoFills([
-      claim({ rxNumber: "336765", bin: "019158", payerLabel: "CNRX", remitCents: 10_000, copayCents: 73_352, patientTotalCents: 73_352, acquisitionCents: 0, quantityThousandths: 0, grossProfitCents: 83_352 }),
-      claim({ rxNumber: "336765", bin: "610011", payerLabel: "OptumRx", remitCents: 46_189, copayCents: 0, patientTotalCents: 0, acquisitionCents: 130_273, quantityThousandths: 2_000, grossProfitCents: -84_084 }),
+      claim({ rxNumber: "900000", bin: "019158", payerLabel: "CNRX", remitCents: 10_000, copayCents: 73_352, patientTotalCents: 73_352, acquisitionCents: 0, quantityThousandths: 0, grossProfitCents: 83_352 }),
+      claim({ rxNumber: "900000", bin: "610011", payerLabel: "OptumRx", remitCents: 46_189, copayCents: 0, patientTotalCents: 0, acquisitionCents: 130_273, quantityThousandths: 2_000, grossProfitCents: -84_084 }),
     ]);
     assert.equal(f.remitCents, 56_189, "both plans' money");
     assert.equal(f.patientPaidCents, 73_352, "what the one row leaving a residual actually left");
@@ -74,7 +74,7 @@ describe("one fill, however many payers priced it", () => {
 
   test("a fill the plans covered outright is not a puzzle: the patient paid nothing", () => {
     /*
-     * Rx 333968, a real fill. CVS paid $279.77 and a copay card $69.94 towards a $472.01 drug, and
+     * Rx 900001, a real fill. CVS paid $279.77 and a copay card $69.94 towards a $472.01 drug, and
      * every row reads $0.00 still owing. That is not ambiguity — it is a patient who paid nothing.
      *
      * With no residual reported anywhere, "the largest price any row established" collapses to the
@@ -84,8 +84,8 @@ describe("one fill, however many payers priced it", () => {
      * actually reported.
      */
     const [f] = groupIntoFills([
-      claim({ rxNumber: "333968", bin: "004336", payerLabel: "CVS Caremark", remitCents: 27_977, copayCents: 0, patientTotalCents: 0, acquisitionCents: 47_201 }),
-      claim({ rxNumber: "333968", bin: "024284", payerLabel: "ACR", remitCents: 6_994, copayCents: 0, patientTotalCents: 0, acquisitionCents: 0 }),
+      claim({ rxNumber: "900001", bin: "004336", payerLabel: "CVS Caremark", remitCents: 27_977, copayCents: 0, patientTotalCents: 0, acquisitionCents: 47_201 }),
+      claim({ rxNumber: "900001", bin: "024284", payerLabel: "ACR", remitCents: 6_994, copayCents: 0, patientTotalCents: 0, acquisitionCents: 0 }),
     ]);
     assert.equal(f.patientShareUncertain, false, "nothing about this is unclear");
     assert.equal(f.patientPaidCents, 0);
@@ -175,13 +175,13 @@ describe("one fill, however many payers priced it", () => {
     assert.equal(over.unreconciledCents, 3_315 - (20_000 - 12_868));
 
     /*
-     * Rx 316890, from the report as it used to be printed: $7.85 in on a $13.90 drug, which is a
+     * Rx 900002, from the report as it used to be printed: $7.85 in on a $13.90 drug, which is a
      * $6.05 loss, against a gross profit column reading −$0.49 because it was quietly carrying an
      * estimated rebate. The identity puts the $5.56 on screen instead of leaving it to be found in
      * a PDF weeks later.
      */
     const [under] = groupIntoFills([
-      claim({ rxNumber: "316890", remitCents: 785, copayCents: 0, patientTotalCents: 0, acquisitionCents: 1_390, grossProfitCents: -49 }),
+      claim({ rxNumber: "900002", remitCents: 785, copayCents: 0, patientTotalCents: 0, acquisitionCents: 1_390, grossProfitCents: -49 }),
     ]);
     assert.equal(under.marginCents, -605);
     assert.equal(under.agreesWithReport, false);
@@ -190,13 +190,13 @@ describe("one fill, however many payers priced it", () => {
 
   test("money that arrived later is the one difference the identity allows", () => {
     /*
-     * Rx 332359. The report, now that its gross profit column is only gross profit, makes this a
+     * Rx 900003. The report, now that its gross profit column is only gross profit, makes this a
      * $123.66 loss — and so do we, exactly. The $146.18 the plan promised sits in its own column,
      * and when the facilitator pays it the fill becomes $22.52 while the identity still holds,
      * because the payment is subtracted before the comparison.
      */
     const row = {
-      rxNumber: "332359",
+      rxNumber: "900003",
       fillNumber: 1,
       dateFilled: "2026-09-05",
       ndc11: "00597015290",
@@ -215,7 +215,7 @@ describe("one fill, however many payers priced it", () => {
 
     const [paid] = groupIntoFills(
       [claim(row)],
-      [{ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "00597015290", source: "mtf", payer: "MTF", amountCents: 14_618 }],
+      [{ rxNumber: "900003", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "00597015290", source: "mtf", payer: "MTF", amountCents: 14_618 }],
     );
     assert.equal(paid.marginCents, 2_252, "the script is worth $22.52 once the money lands");
     assert.equal(paid.agreesWithReport, true, "and the identity still holds, because the payment is taken out of both sides");
@@ -224,7 +224,7 @@ describe("one fill, however many payers priced it", () => {
 
   test("a copay card takes money off the copay; the rest does not disappear", () => {
     /*
-     * Rx 305766, a real fill, and the one that proved this wrong.
+     * Rx 900004, a real fill, and the one that proved this wrong.
      *
      * Blue Cross paid nothing and left the patient owing $160.57. The copay card then paid $46.26
      * and left the patient owing $115.57. The patient paid that. The pharmacy took $161.83 on a
@@ -237,8 +237,8 @@ describe("one fill, however many payers priced it", () => {
      * the copay, it does not make the remainder vanish.
      */
     const [f] = groupIntoFills([
-      claim({ rxNumber: "305766", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074662490", itemName: "SYNTHROID 100 MCG TABLET", bin: "610455", groupNumber: "MT207", payerLabel: "Blue Cross Blue Shield", quantityThousandths: 90_000, remitCents: 0, copayCents: 0, patientTotalCents: 0, acquisitionCents: 12_868, grossProfitCents: -12_868 }),
-      claim({ rxNumber: "305766", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074662490", itemName: "SYNTHROID 100 MCG TABLET", bin: "601341", groupNumber: "OH9010121", payerLabel: "Change Healthcare", quantityThousandths: 0, remitCents: 4_625, copayCents: 11_557, patientTotalCents: 11_557, acquisitionCents: 0, grossProfitCents: 16_182 }),
+      claim({ rxNumber: "900004", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074662490", itemName: "SYNTHROID 100 MCG TABLET", bin: "610455", groupNumber: "MT207", payerLabel: "Blue Cross Blue Shield", quantityThousandths: 90_000, remitCents: 0, copayCents: 0, patientTotalCents: 0, acquisitionCents: 12_868, grossProfitCents: -12_868 }),
+      claim({ rxNumber: "900004", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074662490", itemName: "SYNTHROID 100 MCG TABLET", bin: "601341", groupNumber: "OH9010121", payerLabel: "Change Healthcare", quantityThousandths: 0, remitCents: 4_625, copayCents: 11_557, patientTotalCents: 11_557, acquisitionCents: 0, grossProfitCents: 16_182 }),
     ]);
     assert.equal(f.remitCents, 4_625, "the plan paid nothing; the card paid $46.25");
     assert.equal(f.patientPaidCents, 11_557, "the $161.82 price, less the $46.25 the card paid down");
@@ -259,7 +259,7 @@ describe("one fill, however many payers priced it", () => {
      * whole of what the pharmacy took.
      */
     const [f] = groupIntoFills([
-      claim({ rxNumber: "305766", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074662490", bin: "601341", payerLabel: "Change Healthcare", remitCents: 4_625, copayCents: 11_557, patientTotalCents: 11_557, acquisitionCents: 12_868 }),
+      claim({ rxNumber: "900004", fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074662490", bin: "601341", payerLabel: "Change Healthcare", remitCents: 4_625, copayCents: 11_557, patientTotalCents: 11_557, acquisitionCents: 12_868 }),
     ]);
     assert.equal(f.revenueCents, 16_182);
     assert.equal(f.marginCents, 3_314);
@@ -300,8 +300,8 @@ describe("one fill, however many payers priced it", () => {
      * since arrived.
      */
     const [f] = groupIntoFills(
-      [claim({ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", remitCents: 20_457, copayCents: 0, patientTotalCents: 0, acquisitionCents: 32_823 })],
-      [{ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "81968004560", source: "mtf", payer: "Medicare Transaction Facilitator", amountCents: 14_618 }],
+      [claim({ rxNumber: "900003", fillNumber: 1, dateFilled: "2026-09-05", remitCents: 20_457, copayCents: 0, patientTotalCents: 0, acquisitionCents: 32_823 })],
+      [{ rxNumber: "900003", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "81968004560", source: "mtf", payer: "Medicare Transaction Facilitator", amountCents: 14_618 }],
     );
     assert.equal(f.laterPaymentsCents, 14_618);
     assert.equal(f.revenueCents, 20_457 + 14_618);
@@ -310,7 +310,7 @@ describe("one fill, however many payers priced it", () => {
   });
 
   test("an ordinary coordination is not flagged: only one row leaves a residual", () => {
-    // Rx 336765 again, which is the shape every real coordinated fill has.
+    // Rx 900000 again, which is the shape every real coordinated fill has.
     const [f] = groupIntoFills([
       claim({ bin: "019158", remitCents: 10_000, copayCents: 73_352, patientTotalCents: 73_352, acquisitionCents: 0 }),
       claim({ bin: "610011", remitCents: 46_189, copayCents: 0, patientTotalCents: 0, acquisitionCents: 130_273 }),
@@ -358,14 +358,14 @@ describe("one fill, however many payers priced it", () => {
 describe("money a plan promised and has not sent", () => {
   test("the promise is carried on the fill, and what is still owed falls as payments land", () => {
     /*
-     * Rx 332359, a real fill. The report's own column says $146.18 of facilitator money — the plan
+     * Rx 900003, a real fill. The report's own column says $146.18 of facilitator money — the plan
      * named it when it adjudicated the claim — and the pharmacy took $204.57 on a $328.23 drug.
      *
      * Read without the promise that is a $123.66 loss and looks exactly like a rate worth arguing
      * over. It is neither: it is a bill nobody has paid yet.
      */
     const row = {
-      rxNumber: "332359",
+      rxNumber: "900003",
       fillNumber: 1,
       dateFilled: "2026-09-05",
       ndc11: "00597015290",
@@ -383,7 +383,7 @@ describe("money a plan promised and has not sent", () => {
 
     const [paid] = groupIntoFills(
       [claim(row)],
-      [{ rxNumber: "332359", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "00597015290", source: "mtf", payer: "MTF", amountCents: 14_618 }],
+      [{ rxNumber: "900003", fillNumber: 1, dateFilled: "2026-09-05", ndc11: "00597015290", source: "mtf", payer: "MTF", amountCents: 14_618 }],
     );
     assert.equal(paid.facilitatorOutstandingCents, 0, "nothing outstanding once it is matched");
     assert.equal(paid.marginCents, 2_252, "and the fill made $22.52 all along");
@@ -425,10 +425,10 @@ describe("money a plan promised and has not sent", () => {
  */
 describe("on account", () => {
   test("an account sale is an ordinary dispensing, with its margin computed the usual way", () => {
-    // Rx 309233-2 off the live report: nothing from the plan, $1,492.61 on the account, cost
+    // Rx 900005-2 off the live report: nothing from the plan, $1,492.61 on the account, cost
     // $1,152.94. PioneerRx's own gross profit column says $339.67.
     const [f] = groupIntoFills([
-      claim({ rxNumber: "309233", fillNumber: 2, onAccount: true, remitCents: 0, copayCents: 149_261, patientTotalCents: 149_261, acquisitionCents: 115_294, grossProfitCents: 33_967 }),
+      claim({ rxNumber: "900005", fillNumber: 2, onAccount: true, remitCents: 0, copayCents: 149_261, patientTotalCents: 149_261, acquisitionCents: 115_294, grossProfitCents: 33_967 }),
     ]);
     assert.equal(f.marginCents, 33_967, "the margin is revenue less cost, exactly as for any other fill");
     assert.equal(f.agreesWithReport, true);
@@ -450,7 +450,7 @@ describe("on account", () => {
      * as a fill that lost its whole acquisition cost — which is what it will keep looking like.
      */
     const [f] = groupIntoFills([
-      claim({ rxNumber: "336264", fillNumber: 0, onAccount: true, remitCents: 0, copayCents: 0, patientTotalCents: 0, acquisitionCents: 98_400, grossProfitCents: -98_400 }),
+      claim({ rxNumber: "900006", fillNumber: 0, onAccount: true, remitCents: 0, copayCents: 0, patientTotalCents: 0, acquisitionCents: 98_400, grossProfitCents: -98_400 }),
     ]);
     assert.equal(f.unbilledCostCents, 98_400);
     assert.equal(f.receivableCents, 0);

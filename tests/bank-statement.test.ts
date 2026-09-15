@@ -101,7 +101,7 @@ describe("the pharmacy's own name is not a counterparty (G-BANK-1)", () => {
     assert.doesNotMatch(p.why, /Script Care/);
   });
   test("REGRESSION: a PSAO deposit is never banked from the statement", () => {
-    for (const d of ["ACCESS HEALTH/ACCESS HEA 1722734 West Wichita", "ProviderPay/EDI PYMNTS West Wichita"]) {
+    for (const d of ["ACCESS HEALTH/ACCESS HEA 7000017 West Wichita", "ProviderPay/EDI PYMNTS West Wichita"]) {
       assert.equal(placeLines([{ on: "2026-08-26", description: d, amountCents: 1_233_061, key: d }], ctx2)[0].placement.kind, "psao_deposit");
     }
   });

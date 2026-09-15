@@ -15,8 +15,8 @@ import { RebateTerms } from "../src/lib/supplier-terms";
 const REPORT = [
   "McKesson Rebate Breakdown",
   " Pharmacy:W WICHITA",
-  " Location ID:78366",
-  " Primary Account #:326136",
+  " Location ID:99001",
+  " Primary Account #:999001",
   " Start:May 01 2025End:May 31 2025",
   "Paid:Jun 17 2025",
   "Net Purchased$28,788.29",
@@ -62,7 +62,7 @@ describe("reading the statement", () => {
     assert.equal(r.statement.periodFrom, "2025-05-01");
     assert.equal(r.statement.periodTo, "2025-05-31");
     assert.equal(r.statement.paidOn, "2025-06-17");
-    assert.equal(r.statement.accountNumber, "326136");
+    assert.equal(r.statement.accountNumber, "999001");
     assert.equal(r.statement.netPurchasedCents, 2_878_829);
     assert.equal(r.statement.oneStopPurchasedCents, 287_267);
     assert.equal(r.statement.brandPurchasedCents, 1_456_642);

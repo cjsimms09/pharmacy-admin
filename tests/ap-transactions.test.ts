@@ -16,9 +16,9 @@ const HEAD =
   "Gross Amount ($),Cash Discount ($),Net Amount ($),Order Submitted By ID,Order Submitted Date,Order Received By ID,Order Received Date,Order Status,Mobile ID Received,Department Name";
 
 const OPEN =
-  '1,7657345034,2026-09-11,326136,WEST WICHITA FAM PHCY,,INV - INVOICE,0910261502      01,8165,8000,,,,,2026-09-15,,,Open - Pending Approval,2026-09-11,,,,RV - Customer Invoice,ZPF2,Invoice,"$22,569.96",$451.40,"$22,118.56",q2b5r7y5,2026-09-10,,,INVOICED,,';
+  '1,7657345034,2026-09-11,999001,WEST WICHITA FAM PHCY,,INV - INVOICE,0910261502      01,8165,8000,,,,,2026-09-15,,,Open - Pending Approval,2026-09-11,,,,RV - Customer Invoice,ZPF2,Invoice,"$22,569.96",$451.40,"$22,118.56",q2b5r7y5,2026-09-10,,,INVOICED,,';
 const CLEARED =
-  '37,7656141694,2026-09-04,326136,WEST WICHITA FAM PHCY,,INV - INVOICE,4387            00,8165,8000,,,,CKACH07227740,2026-09-08,1413871466,2026-09-07,Closed - Cleared,2026-09-04,,,,RV - Customer Invoice,ZPF2,Invoice,$65.18,$1.30,$63.88,q2b5r7y5,2026-09-03,,,INVOICED,,';
+  '37,7656141694,2026-09-04,999001,WEST WICHITA FAM PHCY,,INV - INVOICE,4387            00,8165,8000,,,,CKACH07227740,2026-09-08,1413871466,2026-09-07,Closed - Cleared,2026-09-04,,,,RV - Customer Invoice,ZPF2,Invoice,$65.18,$1.30,$63.88,q2b5r7y5,2026-09-03,,,INVOICED,,';
 const CSV = [HEAD, OPEN, CLEARED].join("\n");
 
 describe("the accounts payable report", () => {
@@ -85,7 +85,7 @@ const RET_HEAD =
   "Reference Number,Invoice/Credit Number,Gross Returns ($),Net Handling Charge Amount ($),Net Returned Price ($),Returned Quantity," +
   "Return Reason Description,Date Returned,Date Credited Back to Customer,Original Invoice Number,Street Address (History),City (History),State (History),ZIP (History)";
 const RET_ROW =
-  "WEST WICHITA FAM PHCY,326136,2880557,QUVIVIQ TB 25MG 30,80491782503,2026-08-20,7653443963,7653443963,-$491.74,$0.00,-$491.74,-1,Saleable Return,2026-08-20,2026-08-20,7646508683,8200 W CENTRAL AVE STE 5,WICHITA,KS,67212";
+  "WEST WICHITA FAM PHCY,999001,2880557,QUVIVIQ TB 25MG 30,80491782503,2026-08-20,7653443963,7653443963,-$491.74,$0.00,-$491.74,-1,Saleable Return,2026-08-20,2026-08-20,7646508683,1234 W EXAMPLE AVE STE 5,WICHITA,KS,00000";
 
 describe("the returns report", () => {
   test("it is recognised by its columns", () => {

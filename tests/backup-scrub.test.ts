@@ -40,7 +40,7 @@ async function fixture(): Promise<string> {
   await db.execute("insert into people values ('e1','Jane','Doe','jane.doe@example.com')");
   await db.execute("insert into users values ('u1','Jane Doe','jane','$2a$10$abcdefghijklmnop')");
   await db.execute("insert into cqi_incidents values ('i1','Wrong drug given to Mrs Smith, 316-555-0134','Root cause: the label','encrypted-blob','2026-08-01')");
-  await db.execute("insert into manual_sections values ('m1','Contact','Phone: 316-491-6428 DEA: FW8325498')");
+  await db.execute("insert into manual_sections values ('m1','Contact','Phone: 316-555-0199 DEA: FW1234563')");
   await db.execute("insert into settings values ('mail_password_enc','a-real-secret')");
   await db.execute("insert into settings values ('digest_last_result','sent to owner@example.com: 14 things late')");
   await db.execute("insert into suppliers values ('s1','McKesson','orders.clerk@mckesson.com')");

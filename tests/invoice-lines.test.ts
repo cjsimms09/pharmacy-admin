@@ -353,7 +353,7 @@ describe("the same item, written two ways", () => {
 
   test("a retail barcode against an NDC is not the same code, and no arithmetic joins them", () => {
     /* McKesson bills AZO Standard as 787651-30152; the counter booked 00998-0015-30. Benadryl as
-       312547-17031 against 50580-0226-24. Integra as 850976-00608 against 52747-0710-30. */
+       900000-17031 against 50580-0226-24. Integra as 850976-00608 against 52747-0710-30. */
     assert.equal(sameDrugCode("78765130152", "00998001530"), false);
     assert.equal(sameDrugCode("31254717031", "50580022624"), false);
     assert.equal(sameDrugCode("85097600608", "52747071030"), false);

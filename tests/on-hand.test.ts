@@ -109,7 +109,7 @@ describe("reading a daily on-hand export", () => {
 
   test("recognising the file, and not recognising a claims file", () => {
     assert.equal(looksLikeOnHand(tabbed), true);
-    assert.equal(looksLikeOnHand("Rx Transaction Details\nRx\tStatus\tDate\n305766\tP\t09/01/2026"), false);
+    assert.equal(looksLikeOnHand("Rx Transaction Details\nRx\tStatus\tDate\n900000\tP\t09/01/2026"), false);
   });
 });
 
@@ -173,7 +173,7 @@ describe("routing an emailed count", () => {
 const pioneer = [
   "﻿Inventory Search Results with Lot Information",
   "West Wichita Family Pharmacy",
-  '"8200 W Central Ave, Ste 5"',
+  '"1234 W Example Ave, Ste 5"',
   '"Wichita, KS 67212-3661"',
   "Inventory Group:,Rx",
   "Acamprosate Calc Dr 333 Mg Tab",
@@ -187,7 +187,7 @@ const pioneer = [
   "Printed On: 9/6/2026,Page 1 of 225",
   "Inventory Search Results with Lot Information",
   "West Wichita Family Pharmacy",
-  '"8200 W Central Ave, Ste 5"',
+  '"1234 W Example Ave, Ste 5"',
   '"Wichita, KS 67212-3661"',
   "ACCU-CHEK GUIDE TEST STRIP",
   "NDC/UPC:,65702-0712-10,On Hand:,100.00,Inventory Group Status:,Active",

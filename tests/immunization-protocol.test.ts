@@ -13,7 +13,7 @@ import { protocolGaps, PROTOCOL_VACCINES, EMERGENCY_STEPS, type ProtocolContext 
  */
 const ctx = (over: Partial<ProtocolContext["subject"]> = {}, physician: string | null = "Larry Dircksen, MD"): ProtocolContext => ({
   pharmacy: "West Wichita Family Pharmacy",
-  address: "8200 W Central Ave, Wichita, KS",
+  address: "1234 W Example Ave, Wichita, KS",
   physician,
   termYears: 2,
   subject: {

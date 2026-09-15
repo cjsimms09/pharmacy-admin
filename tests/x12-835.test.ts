@@ -18,12 +18,12 @@ const remittance = [
   "N1*PR*MEDICARE TRANSACTION FACILITATOR~",
   "N1*PE*WEST WICHITA FAMILY PHARMACY*XX*1234567893~",
   "LX*1~",
-  "CLP*332359-1*1*328.23*146.18*0*MC*2026090600001*80~",
+  "CLP*900000-1*1*328.23*146.18*0*MC*2026090600001*80~",
   "NM1*QC*1*DOE*JANE****MI*1EG4TE5MK73~",
   "SVC*N4:81968004560*328.23*146.18**30~",
   "DTM*472*20260905~",
   "CAS*PR*1*182.05~",
-  "CLP*305766-2*4*161.83*0*161.83*MC*2026090600002*80~",
+  "CLP*900002-2*4*161.83*0*161.83*MC*2026090600002*80~",
   "SVC*N4:00074433902*161.83*0**30~",
   "DTM*472*20260831~",
   "SE*16*0001~",
@@ -44,7 +44,7 @@ describe("reading an 835", () => {
   test("each claim payment names the prescription it belongs to", () => {
     assert.equal(r.payments.length, 2);
     const [paid] = r.payments;
-    assert.equal(paid.rxNumber, "332359");
+    assert.equal(paid.rxNumber, "900000");
     assert.equal(paid.fillNumber, 1, "the fill is part of the reference and part of the match");
     assert.equal(paid.paidCents, 14_618);
     assert.equal(paid.chargedCents, 32_823);
@@ -55,7 +55,7 @@ describe("reading an 835", () => {
   test("a denial is read, and then not recorded as revenue", () => {
     // Recording a zero payment would put a row against a fill saying money arrived when none did.
     const { keep, skipped } = payableOnly(r);
-    assert.deepEqual(keep.map((p) => p.reference), ["332359-1"]);
+    assert.deepEqual(keep.map((p) => p.reference), ["900000-1"]);
     assert.equal(skipped.length, 1);
     assert.match(skipped[0].why, /denied/);
   });
@@ -102,12 +102,12 @@ describe("the small readings underneath", () => {
   });
 
   test("a reference with a fill on it splits; one without does not invent a fill", () => {
-    assert.deepEqual(splitReference("332359-1"), { rxNumber: "332359", fillNumber: 1 });
-    assert.deepEqual(splitReference("332359"), { rxNumber: "332359", fillNumber: null });
+    assert.deepEqual(splitReference("900000-1"), { rxNumber: "900000", fillNumber: 1 });
+    assert.deepEqual(splitReference("900000"), { rxNumber: "900000", fillNumber: null });
     // The facilitator's spelling: padded to twelve digits, the fill spelled out.
-    assert.deepEqual(splitReference("000000318553FILL1"), { rxNumber: "318553", fillNumber: 1 });
-    assert.deepEqual(splitReference("000000285719FILL10"), { rxNumber: "285719", fillNumber: 10 });
-    assert.deepEqual(splitReference("000000332359"), { rxNumber: "332359", fillNumber: null });
+    assert.deepEqual(splitReference("000000900003FILL1"), { rxNumber: "900003", fillNumber: 1 });
+    assert.deepEqual(splitReference("000000900004FILL10"), { rxNumber: "900004", fillNumber: 10 });
+    assert.deepEqual(splitReference("000000900000"), { rxNumber: "900000", fillNumber: null });
   });
 });
 
@@ -229,9 +229,9 @@ describe("a file that holds more than one remittance", () => {
     `N1*PR*${payer}*XV*ID${n}~N1*PE*WEST WICHITA FAMILY PHARMACY*XX*1~${claim}SE*9*000${n}~`;
   const bundle =
     ISA +
-    set("1", "CVS CAREMARK", "EFT-111", "150.00", "CLP*332359-1*1*200.00*150.00*10.00*MC*C1*01~") +
-    set("2", "OPTUMRX", "EFT-222", "75.50", "CLP*332360-0*1*100.00*75.50*5.00*MC*C2*01~") +
-    set("3", "PRIME THERAPEUTICS", "EFT-333", "40.25", "CLP*332361-2*1*60.00*40.25*0.00*MC*C3*01~") +
+    set("1", "CVS CAREMARK", "EFT-111", "150.00", "CLP*900000-1*1*200.00*150.00*10.00*MC*C1*01~") +
+    set("2", "OPTUMRX", "EFT-222", "75.50", "CLP*900005-0*1*100.00*75.50*5.00*MC*C2*01~") +
+    set("3", "PRIME THERAPEUTICS", "EFT-333", "40.25", "CLP*900006-2*1*60.00*40.25*0.00*MC*C3*01~") +
     "GE*3*1~IEA*1*000000001~";
 
   test("each remittance keeps its own payer, trace and total", () => {
@@ -270,7 +270,7 @@ describe("a file that holds more than one remittance", () => {
   });
 
   test("an ordinary single-remittance file is still exactly one, and unchanged", () => {
-    const single = ISA + set("1", "HUMANA", "912585211", "150.00", "CLP*332359-1*1*200.00*150.00*10.00*MC*C1*01~") + "GE*1*1~IEA*1*000000001~";
+    const single = ISA + set("1", "HUMANA", "912585211", "150.00", "CLP*900000-1*1*200.00*150.00*10.00*MC*C1*01~") + "GE*1*1~IEA*1*000000001~";
     const sets = parse835Sets(single);
     assert.equal(sets.length, 1);
     assert.equal(sets[0].payer, "HUMANA");

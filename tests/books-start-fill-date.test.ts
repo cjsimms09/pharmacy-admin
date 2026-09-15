@@ -19,7 +19,7 @@ import { isOutOfBooks, monthIsOutOfBooks, SITE_STARTS_ON } from "../src/lib/book
  */
 describe("the day the money arrived decides", () => {
   test("REGRESSION: an August fill's refund received in September is in the books", () => {
-    // rx 313103, filled 2026-08-24, $96.89 received 2026-09-14 — real September cash.
+    // rx 900000, filled 2026-08-24, $96.89 received 2026-09-14 — real September cash.
     assert.equal(isOutOfBooks("2026-09-14"), false);
     assert.equal(isOutOfBooks("2026-09-01"), false);
   });
