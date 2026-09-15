@@ -1368,3 +1368,70 @@ unconfirmed receipt, and links them.
 - IPC's, ParMed's and Anda's bank debits against their invoices: waits for the bank reader.
 - The ladder estimate itself (`earningSoFar`): not re-derived.
 
+---
+
+## 9. Postage (Endicia / Stamps.com) — rehearsed
+
+**Checkpoint 9. Code at 7b71c14.** Samples:
+- the three real Endicia purchase confirmations on file;
+- the August bank statement's ten real Stamps.com card charges (read by eye).
+
+### 1–4 · What it is, door, where it lands
+
+Endicia emails a "Purchase Confirmation" with no attachment each time postage is bought by card. The mail sweep
+reads the body (`postage-email.ts`), only from @endicia.com or @stamps.com and only with that subject, and
+books one bill in "Postage and shipping": dated and paid on the purchase day, confirmed, keyed
+`POSTAGE|<vendor>|<order number>`.
+
+**Live:**
+
+| received | from | on arrival | bill |
+|---|---|---|---|
+| 8 Sep | @endicia.com | "not for filing — nothing on it to file" | $100.00, 8 Sep (booked afterwards) |
+| 10 Sep | @endicia.com | "not for filing — nothing on it to file" | $100.00, 10 Sep (booked afterwards) |
+| 15 Sep | @endicia.com | **read and booked by the sweep**, order …5518 | $100.00, 15 Sep |
+
+**Automatic since 15 September.** None before 8 September. A forwarded copy (from a staff address) would
+not be read: the sender must be Endicia's.
+
+### 5 · Basis
+
+An operating expense. Accrual by purchase date, cash by the same date, since the card is charged that day.
+The bank line is treated as the same money (`bank-descriptors.ts` postage rule, `alreadyCounted`).
+
+### 7 · Duplication and completeness — rehearsed
+
+The ten real August Stamps.com charges ($940.99), through the real `placeLine`:
+- **all ten are `already_counted`**, and **no postage bill exists for any of them** (August has none on file);
+- one is a **$40.99** charge from "Stamps.com El Segundo CA", a different merchant line from the $100.00
+  top-ups;
+- a September line for the 9/15 purchase (bill on file) → `already_counted`, which is right;
+- a September line with **no confirmation behind it** → `already_counted`, which is wrong.
+
+### Gaps
+
+**G-POST-1. Every Stamps.com bank charge is called "already counted", whether or not anything counted it.**
+OBSERVATION: the postage rule marks the bank line already counted unconditionally. Rehearsed with the ten
+real August charges: all $940.99 placed `already_counted` with no bill for any, and the same for a September
+charge with no confirmation email. A missed or unsent confirmation (the 8 and 10 September emails were at
+first filed as nothing to file), or a charge that is not a top-up (the $40.99 El Segundo line), is dropped
+from the books with a sentence saying it is on them.
+SHOULD BE: "already counted" is a claim about a record, and it holds only where that record exists. A card
+charge with no bill behind it is postage nobody has booked, and the line should say so.
+DIFFERENCE: yes, rehearsed. Dollars: every Stamps.com charge without its email, of which August shows the
+shape (10 charges, $940.99, a month). How many of September's charges have an email: measured-and-none so
+far, because the September bank statement is not in yet.
+Owner: `bank-descriptors.ts` / `bank-statement.ts` — not in the ownership table.
+Proposed fix: already counted only when a postage bill of the same amount exists within 3 days of the bank
+date and no bank line has claimed it (the card-fee rule's shape). Otherwise, unplaced: *"a postage charge
+with no Endicia confirmation on file"*.
+
+**Q-POST-1 (question for the owner).** What is the monthly **$40.99 "Stamps.com El Segundo CA"** charge (18
+August): the Stamps.com subscription, or postage? If it is the subscription, no confirmation email will ever
+book it, and it needs a standing cost or a vendor bill.
+
+### Not checked, said out loud
+
+- Whether Endicia sends a confirmation for every purchase: the September bank statement will show it.
+- An Endicia confirmation carrying a surcharge: none of the three does.
+
