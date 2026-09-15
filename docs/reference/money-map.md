@@ -1705,6 +1705,130 @@ Proposed meanwhile: kept as data, named on the inbox line.
 
 ---
 
+## 13. The scanned Emprise bank statement — rehearsed
+
+**Checkpoint 13. Session 1's reader at 19e3dd4.** Samples: **the real August 2026 statement** (`Image_006.pdf`,
+scanned); the real August card statement; the real August payer payment report; and the Heartland, Access Health,
+ProviderPay, HEW LLC and Stamps.com lines read by eye from the page images in section 2, used as the true figures.
+
+The fresh snapshot (18:37 UTC) was set up **as September will have it**:
+- 25 card batch receipts from the card statement's rows, plus July's last batch that reached the bank on 3 August;
+- the August payer payment report (44 receipts);
+- August's card statement booked, unpaid.
+
+Real `pdfItems`, `readRaw` and `solveStatement`. `knownAmounts`, `matchContext` and `placeStatementLines` are
+signed-in server code, reproduced from `bank.ts` at 19e3dd4.
+
+### 1 · How much the balances prove
+
+Solved: 165 lines (112 credits, 53 debits), opening $322,820.45, closing $341,931.59, 39 lines decided by the
+balances. **Unproven stretches: 5** (session 1 saw 6 with the live receipts). **Every one is explained, to the cent,
+by the figures read off the page images:**
+
+| stretch | difference | the misreads (scan → page) |
+|---|---:|---|
+| 18–19 Aug | $4.04 | RedSail $2,324.41 → **$2,324.01**; cheque 2451 $2,625.44 → **$2,625.00**; McKesson $121,664.84 → **$121,660.84** |
+| 20 Aug | $0.50 | IPC warehouse $4,487.77 → **$4,487.27** |
+| 21 Aug | −$60.10 | ProviderPay $3,774.04 → **$3,714.04**; IPC warehouse $3,383.59 → **$3,383.69** |
+| 26 Aug | $630.00 | counter deposit $1,012.87 → **$1,642.87** |
+| 28–31 Aug | −$80.00 | Prescription/TRANSFER $2,243.25 → **$2,203.25** and $847.77 → **$807.77** |
+
+### 3 · With those figures confirmed
+
+**Re-solved with the nine page figures confirmed: 0 unproven.** Every day proves; credits $681,760.07, debits
+$662,648.93.
+
+### 2 · Placement of the proved lines
+
+| lines | outcome |
+|---|---|
+| Heartland credits (26) | **all 26 confirm their card batch**; none to the wrong feed |
+| Access Health credits (20) | 19 confirm their HMA receipt; **1 banked as new money** (G-BANK-2) |
+| ProviderPay credits (15) | 8 confirm; 6 sweeps named, unplaced; **1 banked as new money: the 4-payment sweep, $12,330.61** (G-BANK-1) |
+| MTF credits (14) | 7 `already_counted` ($5,541.37), 7 `facilitator_unmatched` ($4,791.21, the days with no file) |
+| HEW LLC (3) | `rebate_part` |
+| Stamps.com (10) | unplaced (no bills in August), as G-POST-1 |
+| Heartland fee debit 3 Aug ($5,183.71) | unplaced: July's fees, no July statement |
+| McKesson ACH (4, $500,596.61) | unplaced: no August AP report |
+| $45,000 to the payroll account, Alert 360 | `already_counted` |
+| **every other credit** | **banked as third-party revenue: 22 lines, $78,726.92**, payer "005377 (10000019)- City of Wichita" or "Script Care & Tredium Solutions" |
+
+Confirmed against the wrong feed: none. **Counted twice: at least $48,889.32**: the Access Health credit and the
+ProviderPay sweep, whose money is already on file. The other 20 banked lines are RedSail copay payments,
+Prescription/TRANSFER, VERIDIKAL TECHNO, DRHOUSE. They are money on no other account, but banked under a payer
+that did not pay them.
+
+### Gaps
+
+**G-BANK-1. A credit the classifier does not recognise is banked as revenue from a payer whose name shares one word with the pharmacy's own.**
+OBSERVATION: `placeLine`'s payer test (`mentions`) accepts any word of 5+ letters from any payer name found in
+the description. The claims hold a payer label "005377 (10000019)- City of Wichita", and nearly every Emprise line
+ends with the pharmacy's own name, "WEST WICHITA FAMILY PH". So **every unrecognised credit** placed as
+`deposit/third_party` from City of Wichita and was banked. "Prescription/TRANSFER" matched "Script Care & Tredium
+Solutions" through "script". Rehearsed: 22 lines, $78,726.92. Two of them duplicate receipts already on file
+($12,330.61 ProviderPay sweep; the misread Access Health credit).
+The same fault waits for a September Heartland credit in a spelling the descriptor misses (six of August's 26:
+HRTI3ND, HRTISND, HRTT3ND, HRTTJqN D and others) whose batch report has not been forwarded:
+- it would bank as City of Wichita, not stay unplaced;
+- the batch forwarded afterwards would not see it (the gate's payer heads differ) and would bank too.
+SHOULD BE: a payer is named by what identifies it, not by a word it happens to share with the account holder.
+A credit that names no counterparty the site knows stays unplaced.
+DIFFERENCE: yes, rehearsed. $78,726.92 of August credits would be misfiled as one employer plan's revenue, and at
+least $48,889.32 counted twice. It is present in the CSV path too; the scan only made it visible, since every line
+carries the name.
+Owner: `bank-statement.ts` — not in the table.
+Proposed fix: strip the account holder's own name and address words from the description before `mentions`, and
+require a payer's distinctive word, not any 5-letter word. Better, bank from the statement only credits a
+descriptor names.
+
+**G-BANK-2. A stretch "proves" with misreads that cancel each other.**
+OBSERVATION: 11–12 August proves, and three of its lines are misread:
+- Access Health $36,568.71 read as $36,558.71 (−$10.00);
+- a counter deposit $490.10 read as $499.10 (+$9.00);
+- McKesson $129,646.33 read as $129,645.33 (+$1.00).
+
+The balance closes, so no person sees it. $36,558.71 matches no receipt; $36,568.71 is a known amount the solver
+had.
+SHOULD BE: a balance proves a day's total, not each line; a line proved only by the total is proved only as far
+as nothing else could have moved.
+DIFFERENCE: yes, rehearsed: one $36,558.71 credit banked beside its own receipt, and a McKesson debit a dollar off
+its ACH, which G-MCK-1's tie would then call a disagreement.
+Owner: `scanned-bank-solve.ts` — 1.
+Proposed fix: after solving, any line whose read value is not a known amount while one of its character options
+is, and where swapping it for that option still balances with the stretch's other options, goes to the person.
+Prefer the known reading when that is unique.
+
+**G-BANK-3. Descriptors miss the scan's spellings of known counterparties.**
+OBSERVATION: through the real `readBankDescriptor` on the solved lines:
+- Heartland credits "HRTI3ND", "HRTISND", "HRTT3ND" and "HRTTJqN D" read as unknown. Six of 26 still confirmed
+  their batch, by amount alone, against all receipts;
+- IPC "Independent PhaT/WAREHOUSE" and "P ha r/WAREHOU SE" read as unknown;
+- ParMed "ParMed/)OOOOOOOOC(" reads as unknown;
+- no descriptor exists for Prescription/TRANSFER, VERIDIKAL TECHNO, DRHOUSE, RX SYSTEMS ("nD( SYSTEMS rNc/ru(
+  STSTEMS"), RRC PHARMA SOLUTIONS, SQ *JOTFORM, CPESN or the $15,912.81 "Medications" transfer.
+
+SHOULD BE: every counterparty the pharmacy banks with regularly is named in each spelling the scan produces.
+DIFFERENCE: yes. With G-BANK-1 fixed these stay unplaced rather than misfiled; until then they are misfiled.
+Owner: `bank-descriptors.ts` — not in the table.
+Proposed fix: match Heartland on `HRT` + up to 3 scan characters + `ND PMT`; IPC on `INDEPENDENT` with letters
+squashed; add the rest with the owner naming each (see Q-BANK-1).
+
+**Q-BANK-1 (question for the owner).** What are these August credits and debits?
+- **Prescription/TRANSFER "ST-…"** credits: 13 in August, $15,554.78 as read, from $227.61 to $3,373.22;
+- **VERIDIKAL TECHNO/ACH Pmt** $7,971.34 and $3,822.46, each "VT - 07-28-2026";
+- **DRHOUSE INC/PAYMENT** $38.35;
+- the **$15,912.81 "Ref … To *6728 Medications Aug"** transfer, and the account ending 6728;
+- **RRC PHARMA SOLUTIONS** card purchases, $7,380.00 and $9,360.00.
+
+### Not checked, said out loud
+
+- `placeStatementLines` and `confirmScannedStatement` themselves: signed-in, reproduced. The panel was not opened in
+  a browser (session 1 will check it).
+- Pages 10–11 of the PDF (enclosures) were not viewed.
+- The seven counter "Deposit" credits and six cheques: unplaced, for the till and cheque checkpoints.
+
+---
+
 ## LINKS — how the records join, on what key, and how well it held on real data
 
 ```mermaid
