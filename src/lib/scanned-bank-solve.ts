@@ -134,6 +134,8 @@ export function solveStatement(
      * the line into money another document already shows is taken; a line that already equals such an amount is left alone.
      */
     known?: number[];
+    /** Figures a person read off the scan for lines the balances could not prove, by line index, in cents. Taken as fact. */
+    confirmed?: Record<number, number>;
     trace?: (message: string) => void;
   } = {},
 ): SolvedStatement {
@@ -223,6 +225,11 @@ export function solveStatement(
     });
   }
   const amountChoices = lines.map((l) => amountOptions(l.amountText));
+  for (const [i, cents] of Object.entries(options.confirmed ?? {})) {
+    if (!lines[Number(i)] || !Number.isFinite(cents) || cents <= 0) continue;
+    amountChoices[Number(i)] = [cents];
+    known.add(cents);
+  }
   const unreadable = lines.map((l, i) => ({ l, i })).filter(({ i }) => amountChoices[i].length === 0 || dayChoices[i].length === 0);
   if (unreadable.length) {
     return fail(
@@ -346,7 +353,8 @@ export function solveStatement(
          * the next block starts from, and its lines go to a person with the difference they have to explain.
          */
         let end = a;
-        while (end < m2 - 1 && !/^\d{1,3}(,\d{3})*\.\d{2}$/.test(table[end].balanceText)) end++;
+        /* To the first balance the scan leaves only one reading of ("331,226.L7" can only be 331,226.17), so the stretch a person checks stays short. */
+        while (end < m2 - 1 && printed[end].length !== 1) end++;
         const idx = lines.map((_, i) => i).filter((i) => {
           const k = kOf.get(assign[i].day)!;
           return k >= a && k <= end;
@@ -376,6 +384,20 @@ export function solveStatement(
     a = b + 1;
   }
 
+  /*
+   * Two neighbouring stretches whose differences all but cancel are one stretch: a line printed under the wrong day.
+   * August's 18th reads $1,732.75 over and the 19th $1,736.79 under — two deposits the scan dated a day early, and $4.04
+   * of misreading. Asked separately, a person cannot fix a date with an amount; asked together, only the $4.04 is left.
+   */
+  for (let k = unproven.length - 1; k > 0; k--) {
+    const a0 = unproven[k - 1];
+    const b0 = unproven[k];
+    const adjacent = balanceDays.indexOf(Number(b0.from.slice(8))) === balanceDays.indexOf(Number(a0.to.slice(8))) + 1;
+    const net = a0.differenceCents + b0.differenceCents;
+    if (adjacent && Math.abs(net) * 10 < Math.min(Math.abs(a0.differenceCents), Math.abs(b0.differenceCents))) {
+      unproven.splice(k - 1, 2, { from: a0.from, to: b0.to, differenceCents: net, lines: [...a0.lines, ...b0.lines] });
+    }
+  }
   const closingCents = before[0];
   const unexplained = unproven.reduce((n, u) => n + u.differenceCents, 0);
   const openingCents = closingCents - unexplained - lines.reduce((n, _, i) => n + sign(i) * assign[i].cents, 0);
@@ -396,7 +418,7 @@ export function solveStatement(
       description: l.description.replace(/\s+/g, " ").trim(),
       section: l.section,
       page: l.page,
-      decidedFrom: p.how === "digit" ? `the scan printed ${said}; the balances either side show a digit was misread` : clean && !p.how ? null : `the scan printed ${said}`,
+      decidedFrom: options.confirmed?.[i] !== undefined ? `the scan printed ${said}; a person read it as ${(p.cents / 100).toFixed(2)}` : p.how === "digit" ? `the scan printed ${said}; the balances either side show a digit was misread` : clean && !p.how ? null : `the scan printed ${said}`,
     };
   });
   const creditsCents = solved.filter((s) => s.amountCents > 0).reduce((n, s) => n + s.amountCents, 0);

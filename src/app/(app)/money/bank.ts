@@ -10,7 +10,10 @@ import { audit } from "@/lib/audit";
 import { newId } from "@/lib/crypto";
 import { storeFile } from "@/lib/files";
 import { parseCsv } from "@/lib/reference";
-import { parseBankStatement, placeLines, type MatchContext } from "@/lib/bank-statement";
+import { lineKey, parseBankStatement, placeLines, type BankLine, type MatchContext } from "@/lib/bank-statement";
+import type { SolvedStatement, Unproven } from "@/lib/scanned-bank-solve";
+import { readFile } from "@/lib/files";
+import { parseCents } from "@/lib/money";
 import { addCashReceipt, unpaid, vendors } from "@/lib/expenses";
 import { allSuppliers } from "@/lib/suppliers-registry";
 import { CARD_STATEMENT_BILL } from "@/lib/card-statement";
@@ -65,30 +68,130 @@ export async function readBankStatement(fd: FormData) {
   const user = await requireManager();
   const back = `/money?period=${encodeURIComponent(String(fd.get("period") ?? ""))}`;
   const file = fd.get("file");
-  if (!(file instanceof File) || file.size === 0) redirect(`${back}&error=${encodeURIComponent("Choose the bank's export.")}`);
-  const text = Buffer.from(await file.arrayBuffer()).toString("utf8");
-  const parsed = parseBankStatement(parseCsv(text));
-  if (parsed.lines.length === 0) redirect(`${back}&error=${encodeURIComponent(parsed.skipped[0]?.why ?? "Nothing in the file could be read as a bank line.")}`);
+  if (!(file instanceof File) || file.size === 0) redirect(`${back}&error=${encodeURIComponent("Choose the bank's statement.")}`);
+  const buf = Buffer.from(await file.arrayBuffer());
 
-  /* The file itself is kept, as the record the receipts and paid dates point back to. */
-  let documentId: string | null = null;
+  /*
+   * The scanned statement Emprise sends: a PDF whose figures are proved against its own daily balances before any
+   * line is used. See scanned-bank-solve.ts. Anything the balances cannot prove waits for a person on this page.
+   */
+  if (/^%PDF/.test(buf.subarray(0, 8).toString("latin1"))) {
+    const documentId = await keepStatement(file, "Scanned bank statement", user.id);
+    if (!documentId) redirect(`${back}&error=${encodeURIComponent("The statement could not be stored, so it was not read. Nothing was placed.")}`);
+    const solved = await solveScanned(buf, {});
+    if (!solved.ok) redirect(`${back}&error=${encodeURIComponent(`${solved.why} Nothing was placed.`)}`);
+    if (solved.unproven.length > 0) redirect(`${back}&scan=${documentId}`);
+    return placeStatementLines(scannedLines(solved), { documentId, fileName: file.name, skipped: 0, user, back, notes: solved.notes });
+  }
+
+  const parsed = parseBankStatement(parseCsv(buf.toString("utf8")));
+  if (parsed.lines.length === 0) redirect(`${back}&error=${encodeURIComponent(parsed.skipped[0]?.why ?? "Nothing in the file could be read as a bank line.")}`);
+  const documentId = await keepStatement(file, `Bank statement ${parsed.lines[0].on} to ${parsed.lines[parsed.lines.length - 1].on}`, user.id);
+  return placeStatementLines(parsed.lines, { documentId, fileName: file.name, skipped: parsed.skipped.length, user, back });
+}
+
+/** The file itself is kept, as the record the receipts and paid dates point back to. Null where it could not be. */
+async function keepStatement(file: File, title: string, userId: string): Promise<string | null> {
   try {
     const stored = await storeFile(file, { allowReportTypes: true });
-    documentId = newId();
+    const existing = await db.query.documents.findFirst({ where: eq(schema.documents.sha256, stored.sha256), columns: { id: true } });
+    if (existing) return existing.id;
+    const documentId = newId();
     await db.insert(schema.documents).values({
       id: documentId,
       category: "bank_statement",
-      title: `Bank statement ${parsed.lines[0].on} to ${parsed.lines[parsed.lines.length - 1].on}`,
+      title,
       fileName: file.name.slice(0, 200),
       mimeType: stored.mimeType,
       sizeBytes: stored.sizeBytes,
       sha256: stored.sha256,
       storageKey: stored.storageKey,
-      uploadedBy: user.id,
+      uploadedBy: userId,
     });
+    return documentId;
   } catch {
-    documentId = null;
+    return null;
   }
+}
+
+/**
+ * Amounts other feeds already hold, which break ties when the scan's balances say a line was misread: every receipt,
+ * every bill, each wholesaler ACH's total, and the facilitator's payments summed by day.
+ */
+async function knownAmounts(): Promise<number[]> {
+  const [receipts, bills, ledger, mtf] = await Promise.all([
+    db.query.cashReceipts.findMany({ columns: { amountCents: true } }),
+    db.query.expenses.findMany({ columns: { amountCents: true, status: true } }),
+    db.query.supplierStatementLines.findMany({ columns: { checkNumber: true, netCents: true } }),
+    db.query.claimPayments.findMany({ where: eq(schema.claimPayments.source, "mtf"), columns: { receivedOn: true, amountCents: true } }),
+  ]);
+  const byCheck = new Map<string, number>();
+  for (const l of ledger) if (l.checkNumber) byCheck.set(l.checkNumber, (byCheck.get(l.checkNumber) ?? 0) + l.netCents);
+  const byDay = new Map<string, number>();
+  for (const p of mtf) if (p.receivedOn) byDay.set(p.receivedOn, (byDay.get(p.receivedOn) ?? 0) + p.amountCents);
+  return [
+    ...receipts.map((r) => Math.abs(r.amountCents)),
+    ...bills.filter((b) => b.status !== "void").map((b) => Math.abs(b.amountCents)),
+    ...byCheck.values(),
+    ...byDay.values(),
+  ].filter((c) => c > 0);
+}
+
+async function solveScanned(buf: Buffer, confirmed: Record<number, number>) {
+  const { pdfItems } = await import("@/lib/pdf-text");
+  const { readRaw } = await import("@/lib/scanned-bank-statement");
+  const { solveStatement } = await import("@/lib/scanned-bank-solve");
+  return solveStatement(readRaw(pdfItems(buf)), { known: await knownAmounts(), confirmed });
+}
+
+function scannedLines(solved: Extract<SolvedStatement, { ok: true }>): BankLine[] {
+  return solved.lines.map((l) => ({ on: l.on, description: l.description, amountCents: l.amountCents, key: lineKey(l.on, l.amountCents, l.description) }));
+}
+
+/** What the Money page shows for a scanned statement waiting on a person: the stretches the balances could not prove. */
+export async function scannedStatementReview(documentId: string): Promise<{ fileName: string; unproven: Unproven[]; why: string | null } | null> {
+  await requireManager();
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
+  if (!doc || doc.category !== "bank_statement") return null;
+  const solved = await solveScanned(await readFile(doc.storageKey), {});
+  if (!solved.ok) return { fileName: doc.fileName, unproven: [], why: solved.why };
+  return { fileName: doc.fileName, unproven: solved.unproven, why: null };
+}
+
+/** A person's figures for the lines the balances could not prove. Re-solved with them fixed; placed only if every day then proves. */
+export async function confirmScannedStatement(fd: FormData) {
+  const user = await requireManager();
+  const period = String(fd.get("period") ?? "");
+  const back = `/money?period=${encodeURIComponent(period)}`;
+  const documentId = String(fd.get("document") ?? "");
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
+  if (!doc || doc.category !== "bank_statement") redirect(`${back}&error=${encodeURIComponent("That statement is no longer on file.")}`);
+  const confirmed: Record<number, number> = {};
+  for (const [k, v] of fd.entries()) {
+    const m = /^fix-(\d+)$/.exec(k);
+    const cents = m ? parseCents(String(v)) : null;
+    if (m && cents !== null && cents > 0) confirmed[Number(m[1])] = Math.abs(cents);
+  }
+  const solved = await solveScanned(await readFile(doc!.storageKey), confirmed);
+  if (!solved.ok) redirect(`${back}&scan=${documentId}&error=${encodeURIComponent(solved.why)}`);
+  if (solved.unproven.length > 0) {
+    const u = solved.unproven[0];
+    redirect(
+      `${back}&scan=${documentId}&error=${encodeURIComponent(
+        `With those figures, ${u.from}${u.to === u.from ? "" : ` to ${u.to}`} is still ${money(Math.abs(u.differenceCents))} ${u.differenceCents > 0 ? "short of" : "over"} the bank's balance. Nothing was placed.`,
+      )}`,
+    );
+  }
+  return placeStatementLines(scannedLines(solved), { documentId, fileName: doc!.fileName, skipped: 0, user, back, notes: solved.notes });
+}
+
+async function placeStatementLines(
+  lines: BankLine[],
+  o: { documentId: string | null; fileName: string; skipped: number; user: { id: string; name: string }; back: string; notes?: string[] },
+) {
+  const { documentId, user, back } = o;
+  const parsed = { lines };
+  const file = { name: o.fileName };
 
   const held = new Set((await db.query.bankLines.findMany({ where: inArray(schema.bankLines.key, parsed.lines.map((l) => l.key)), columns: { key: true } })).map((r) => r.key));
   const fresh = parsed.lines.filter((l) => !held.has(l.key));
@@ -228,7 +331,8 @@ export async function readBankStatement(fd: FormData) {
     (held.size ? `, ${held.size} already held` : "") +
     `: ${deposits} deposit${deposits === 1 ? "" : "s"} banked (${money(depositCents)}), ${bills} bill${bills === 1 ? "" : "s"} and ${invoices} invoice${invoices === 1 ? "" : "s"} marked paid` +
     (unplaced ? `, ${unplaced} not placed — listed below the receipts` : "") +
-    (parsed.skipped.length ? `; ${parsed.skipped.length} row${parsed.skipped.length === 1 ? "" : "s"} could not be read` : "") +
+    (o.skipped ? `; ${o.skipped} row${o.skipped === 1 ? "" : "s"} could not be read` : "") +
+    (o.notes?.length ? ` Read from the scan and proved against its daily balances.` : "") +
     ".";
   redirect(`${back}&ok=${encodeURIComponent(said)}`);
 }
