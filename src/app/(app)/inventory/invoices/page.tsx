@@ -14,6 +14,7 @@ import {
   setSchedule,
   setInvoiceDate,
   setInvoicePaidOn,
+  markInvoicesPaidTogether,
   forwardInvoices,
   recentForwards,
   parseExpected,
@@ -305,19 +306,56 @@ export default async function InvoicesPage({
   async function paidIt(fd: FormData) {
     "use server";
     const u = await requireManager();
-    const id = String(fd.get("id") ?? "");
-    const paidOn = String(fd.get("paidOn") ?? "").trim();
+    /*
+     * The row's id travels on the button pressed and its date under a name of its own. The control used to be a form of
+     * its own nested inside the table's send form, which is not valid HTML: a browser drops the inner form, so its hidden
+     * id and its date joined the send form, whose required address box stopped the press, and whose first row's id and
+     * date `fd.get` would have returned whichever row was pressed (see the delete button's note).
+     */
+    const id = String(fd.get("paidId") ?? "");
+    const paidOn = String(fd.get(`paidOn_${id}`) ?? "").trim();
     try {
       await setInvoicePaidOn(id, paidOn, u);
       await audit({ action: "invoice.paid", userId: u.id, userName: u.name, entity: "invoice", entityId: id, details: paidOn || "cleared" });
       revalidatePath("/inventory/invoices");
       revalidatePath("/money");
       revalidatePath("/money/monthly");
-      redirect("/inventory/invoices?ok=" + encodeURIComponent(paidOn ? "Payment date recorded; the cash account uses it." : "Payment date cleared."));
+      redirect(
+        "/inventory/invoices?ok=" +
+          encodeURIComponent(paidOn ? "Payment date recorded. For a supplier with no ledger feed the cash account counts the invoice in that month." : "Payment date cleared."),
+      );
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/inventory/invoices?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that date."));
     }
+  }
+
+  /**
+   * One payment marking the ticked invoices paid: a supplier paid by statement.
+   *
+   * The owner, 15 September: "believe parmed and ipd are per statement". The rules, and why the site never picks the
+   * invoices from sums, are in paid-together.ts. The ticked rows are the same "pick" boxes the send uses.
+   */
+  async function paidTogether(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const back = String(fd.get("back") ?? "/inventory/invoices");
+    const { paymentCentsFrom } = await import("@/lib/paid-together");
+    const r = await markInvoicesPaidTogether(
+      {
+        ids: fd.getAll("pick").map(String),
+        paidOn: String(fd.get("paidTogetherOn") ?? "").trim(),
+        paymentCents: paymentCentsFrom(String(fd.get("paidTogetherAmount") ?? "")),
+        acceptDifference: fd.get("paidTogetherDiffers") === "on",
+      },
+      u,
+    );
+    if (r.ok) {
+      revalidatePath("/inventory/invoices");
+      revalidatePath("/money");
+      revalidatePath("/money/monthly");
+    }
+    redirect(`${back}${back.includes("?") ? "&" : "?"}${r.ok ? "ok" : "error"}=` + encodeURIComponent(r.ok ? r.says : r.why));
   }
 
   async function amount(fd: FormData) {
@@ -1754,11 +1792,13 @@ export default async function InvoicesPage({
                         </td>
                         <td className="whitespace-nowrap align-top text-xs">
                           {canManage ? (
-                            <form action={paidIt} className="flex items-center gap-1">
-                              <input type="hidden" name="id" value={i.id} />
-                              <input type="date" name="paidOn" defaultValue={i.paidOn ?? ""} aria-label="Date paid" className="field w-auto py-0.5 text-xs" />
-                              <button className="btn btn-sm">{i.paidOn ? "Save" : "Paid"}</button>
-                            </form>
+                            /* Inside the table's one form: the id travels on the button, the date under this row's own name. */
+                            <span className="flex items-center gap-1">
+                              <input type="date" name={`paidOn_${i.id}`} defaultValue={i.paidOn ?? ""} aria-label="Date paid" className="field w-auto py-0.5 text-xs" />
+                              <button formAction={paidIt} formNoValidate name="paidId" value={i.id} className="btn btn-sm">
+                                {i.paidOn ? "Save" : "Paid"}
+                              </button>
+                            </span>
                           ) : i.paidOn ? (
                             fmt(i.paidOn)
                           ) : (
@@ -1886,6 +1926,36 @@ export default async function InvoicesPage({
                   </tfoot>
                 </table>
               </div>
+
+              {canManage && (
+                <div className="mt-4 border-t border-line pt-4">
+                  <h3 className="text-sm font-semibold">Mark the ticked invoices paid together</h3>
+                  <p className="mt-0.5 text-xs text-ink-3">
+                    For a supplier paid by statement: one payment for several invoices. Tick the invoices the statement lists,
+                    and give the day and the amount that left the bank. Nothing is recorded unless the ticked invoices come
+                    to the payment, are one supplier&rsquo;s, and none is already marked paid on another day. The cash account
+                    then counts them in the month paid. Not for an invoice the payment covers only in part, as IPD&rsquo;s
+                    offsets sometimes do: leave that one unticked until the payment that finishes it.
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                    <label className="text-xs font-medium text-ink-2">
+                      Day paid
+                      <input name="paidTogetherOn" type="date" className="field mt-1" />
+                    </label>
+                    <label className="text-xs font-medium text-ink-2">
+                      Amount paid
+                      <input name="paidTogetherAmount" inputMode="decimal" placeholder="$" className="field mt-1" />
+                    </label>
+                    <label className="flex items-end gap-1.5 pb-2 text-xs text-ink-2">
+                      <input type="checkbox" name="paidTogetherDiffers" />
+                      The payment differs from their total because of a discount or credit
+                    </label>
+                  </div>
+                  <button formAction={paidTogether} formNoValidate className="btn mt-2">
+                    Mark them paid
+                  </button>
+                </div>
+              )}
 
               {canManage && (
                 <div className="mt-4 border-t border-line pt-4">

@@ -23,8 +23,12 @@
  *      added by date, and their PioneerRx deliveries are not added either — the statement already
  *      has every one of them, including the 42 worth $142,036.21 whose invoices never arrived by
  *      email at all.
- *   2. A supplier with no statement feed is counted exactly as before, from invoice dates, and the
- *      account says so rather than implying the whole figure is a bank figure.
+ *   2. A supplier with no statement feed is counted in the month its invoice was paid, where the
+ *      invoice carries a paid date, and on its invoice date where it does not. The account says which
+ *      is which rather than implying the whole figure is a bank figure. (The owner, 15 September:
+ *      "cash would be the month that we receive it...". Before, every such invoice was counted on its
+ *      own date, so a September invoice paid in October was in no month once the books began on
+ *      1 October: cutover C-4.)
  *   3. Only transactions that have actually CLEARED count. An invoice sitting at "Open - Pending
  *      Approval" is money still in the bank, however certain its due date is.
  *
@@ -44,20 +48,40 @@ export type SettledLine = {
   checkNumber: string | null;
 };
 
-export type InvoiceLike = { supplier: string | null; invoiceNumber: string | null; invoiceDate: string | null; totalCents: number | null };
+export type InvoiceLike = {
+  supplier: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  totalCents: number | null;
+  /** The day it was paid, where the bank statement or a person recorded it. */
+  paidOn?: string | null;
+};
 export type PurchaseLike = { supplier: string | null; invoiceNumber: string | null; invoiceDate: string | null; totalCents: number | null };
+
+/**
+ * The month an invoice from a supplier with no ledger feed counts in on the cash account: the month it was paid where
+ * that is recorded, else the month on the invoice, which stands in. Null where neither is known.
+ */
+export function cashMonthOf(v: Pick<InvoiceLike, "invoiceDate" | "paidOn">): string | null {
+  const on = v.paidOn || v.invoiceDate;
+  return on ? on.slice(0, 7) : null;
+}
 
 export type CashCogs = {
   /** What the bank paid out for goods in the month. Null where nothing is known either way. */
   cents: number | null;
   /** Paid to suppliers whose own ledger the site reads. A real bank figure. */
   settledCents: number;
-  /** Estimated from invoice dates for suppliers with no such feed. */
+  /** Suppliers with no such feed, on invoices marked paid in the month. A recorded payment. */
+  fromPaidDatesCents: number;
+  /** Estimated from invoice dates for suppliers with no such feed, on invoices with no paid date. */
   fromInvoiceDatesCents: number;
   /** PioneerRx's receiving record, for uncovered suppliers whose invoice never came. */
   fromReceivingCents: number;
   /** Suppliers taken from their own ledger, and the ACHs that moved. */
   settledBy: { supplier: string; payments: { checkNumber: string | null; clearingDate: string | null; invoices: number; cents: number }[] }[];
+  /** Suppliers counted on the dates their invoices were marked paid. */
+  onPaidDates: string[];
   /** Suppliers still on invoice dates, named so the figure is not read as a bank figure. */
   onInvoiceDates: string[];
   /** What is owed to a settled supplier and has not been taken yet. Not a cost this month. */
@@ -107,9 +131,17 @@ export function cashCostOfGoods(input: {
   /* What a settled supplier is owed and has not been taken for. Real, and not this month's cost. */
   const notYetTakenCents = settled.filter((l) => !l.clearingDate).reduce((n, l) => n + l.netCents, 0);
 
-  /* ── 2. Everyone else: invoice dates, exactly as before ── */
-  const otherInvoices = invoices.filter((v) => !covered.has(fold(v.supplier)) && v.totalCents !== null && v.invoiceDate?.startsWith(month));
-  const fromInvoiceDatesCents = otherInvoices.reduce((n, v) => n + (v.totalCents ?? 0), 0);
+  /*
+   * ── 2. Everyone else: the month it was paid, or its invoice date where no payment is recorded ──
+   *
+   * One month per invoice, so an invoice is never in two: once a paid date is recorded it leaves the month of its
+   * invoice date for the month it was paid. An invoice from before the books that was paid inside them counts there.
+   */
+  const otherInvoices = invoices.filter((v) => !covered.has(fold(v.supplier)) && v.totalCents !== null && cashMonthOf(v) === month);
+  const paidInvoices = otherInvoices.filter((v) => v.paidOn);
+  const datedInvoices = otherInvoices.filter((v) => !v.paidOn);
+  const fromPaidDatesCents = paidInvoices.reduce((n, v) => n + (v.totalCents ?? 0), 0);
+  const fromInvoiceDatesCents = datedInvoices.reduce((n, v) => n + (v.totalCents ?? 0), 0);
 
   /* ── 3. And their deliveries that no invoice ever arrived for ── */
   const invoiceNumbers = new Set(invoices.map((v) => (v.invoiceNumber ?? "").trim().toUpperCase()).filter(Boolean));
@@ -124,11 +156,12 @@ export function cashCostOfGoods(input: {
   );
   const fromReceivingCents = uncovered.reduce((n, p) => n + (p.totalCents ?? 0), 0);
 
-  const onInvoiceDates = [...new Set(otherInvoices.map((v) => v.supplier ?? "an unnamed supplier"))].sort();
+  const onPaidDates = [...new Set(paidInvoices.map((v) => v.supplier ?? "an unnamed supplier"))].sort();
+  const onInvoiceDates = [...new Set(datedInvoices.map((v) => v.supplier ?? "an unnamed supplier"))].sort();
   const settledBy = [...bySupplier].map(([supplier, byCheck]) => ({ supplier, payments: [...byCheck.values()].sort((a, b) => (a.clearingDate ?? "").localeCompare(b.clearingDate ?? "")) }));
 
   const nothingKnown = movedThisMonth.length === 0 && otherInvoices.length === 0 && uncovered.length === 0;
-  const cents = nothingKnown ? null : settledCents + fromInvoiceDatesCents + fromReceivingCents;
+  const cents = nothingKnown ? null : settledCents + fromPaidDatesCents + fromInvoiceDatesCents + fromReceivingCents;
 
   const parts: string[] = [];
   for (const s of settledBy) {
@@ -137,16 +170,22 @@ export function cashCostOfGoods(input: {
         s.payments.map((p) => `${p.checkNumber ?? "an unreferenced debit"} on ${p.clearingDate} covering ${p.invoices} invoice${p.invoices === 1 ? "" : "s"}`).join(", "),
     );
   }
+  if (fromPaidDatesCents > 0)
+    parts.push(`${money(fromPaidDatesCents)} paid to ${onPaidDates.join(", ")} on ${paidInvoices.length} invoice${paidInvoices.length === 1 ? "" : "s"} marked paid this month`);
   if (fromInvoiceDatesCents > 0)
-    parts.push(`${money(fromInvoiceDatesCents)} from ${onInvoiceDates.join(", ")}, whose payments this site cannot see, so their invoice dates stand in`);
+    parts.push(
+      `${money(fromInvoiceDatesCents)} from ${onInvoiceDates.join(", ")}, whose payments this site cannot see: ${datedInvoices.length} invoice${datedInvoices.length === 1 ? "" : "s"} with no paid date recorded, so ${datedInvoices.length === 1 ? "its invoice date stands" : "their invoice dates stand"} in`,
+    );
   if (fromReceivingCents > 0) parts.push(`${money(fromReceivingCents)} from PioneerRx's receiving record where no invoice arrived`);
 
   return {
     cents,
     settledCents,
+    fromPaidDatesCents,
     fromInvoiceDatesCents,
     fromReceivingCents,
     settledBy,
+    onPaidDates,
     onInvoiceDates,
     notYetTakenCents,
     says: parts.length ? parts.join("; ") + "." : "Nothing left the bank for goods in this month that the site can see.",
@@ -192,7 +231,8 @@ export function countedTwiceInCash(input: {
   };
 
   for (const l of settled.filter((x) => x.clearingDate?.startsWith(month))) note(l.invoiceNumber, l.supplier, l.netCents, "the wholesaler's own ledger");
-  for (const v of invoices.filter((x) => !covered.has(fold(x.supplier)) && x.totalCents !== null && x.invoiceDate?.startsWith(month)))
+  // The same month rule as the figure: counting the invoice file by invoice date here would check a set the figure never used.
+  for (const v of invoices.filter((x) => !covered.has(fold(x.supplier)) && x.totalCents !== null && cashMonthOf(x) === month))
     note(v.invoiceNumber, v.supplier, v.totalCents ?? 0, "the invoice file");
   const invoiceNumbers = new Set(invoices.map((v) => key(v.invoiceNumber)).filter(Boolean));
   const statementNumbers = new Set(settled.map((l) => key(l.invoiceNumber)));

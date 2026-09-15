@@ -1009,6 +1009,14 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    * So the invoice date, plainly, which is the date the pharmacy itself means by a September bill.
    * The cost is the whole invoice where it has a total; an invoice whose total was never read
    * cannot contribute and is left out rather than counted as nought.
+   *
+   * 15 September, for the cash account (`cash-cogs.ts`): a supplier with no ledger feed now counts in
+   * the month the invoice was PAID where a paid date is recorded, and on its invoice date where not.
+   * The owner: "cash would be the month that we receive it...". The books begin on 1 October, and a
+   * September invoice paid in October counted on its own date would be in no month at all (cutover
+   * C-4). Nobody is asked to key in dates: an invoice with none still counts on its own date, as
+   * above, and dates arrive from the bank statement (one debit or card purchase for one invoice) or
+   * from one "paid together" action for a statement payment. `billedThisMonth` below is unchanged.
    */
   const billedThisMonth = invoices.filter((v) => v.totalCents !== null && v.invoiceDate?.startsWith(month));
   /*

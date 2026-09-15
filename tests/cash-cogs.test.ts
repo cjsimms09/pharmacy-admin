@@ -119,3 +119,54 @@ describe("nothing reaches the cash figure twice", () => {
     assert.deepEqual(leak, []);
   });
 });
+
+/**
+ * A supplier with no ledger feed counts in the month its invoice was paid, where that is recorded (cutover C-4).
+ *
+ * The owner, 15 September: "cash would be the month that we receive it...". The books begin on 1 October; a September
+ * invoice from a supplier paid by statement, paid in October, counted on its own date would be in no month's cash at all.
+ * Invented invoice numbers; the supplier names are the three the rule is for.
+ */
+describe("cash cost of goods by the day an invoice was paid", () => {
+  const ipcSept = { supplier: "IPC", invoiceNumber: "T-1001", invoiceDate: "2026-09-24", totalCents: 40_000, paidOn: "2026-10-03" };
+  const parmedSept = { supplier: "Parmed", invoiceNumber: "T-2001", invoiceDate: "2026-09-15", totalCents: 12_500, paidOn: null };
+  const ipdOct = { supplier: "IPD", invoiceNumber: "T-3001", invoiceDate: "2026-10-02", totalCents: 30_000, paidOn: "2026-10-02" };
+  const mckesson = { supplier: "Mckesson", invoiceNumber: "T-4001", invoiceDate: "2026-09-28", totalCents: 99_999, paidOn: "2026-10-07" };
+  const ledger: SettledLine[] = [{ supplier: "Mckesson", invoiceNumber: "T-4001", netCents: 99_999, clearingDate: "2026-10-07", checkNumber: "ACH-T1" }];
+  const all = [ipcSept, parmedSept, ipdOct, mckesson];
+  const sept = cashCostOfGoods({ month: "2026-09", settled: ledger, invoices: all, receiving: [] });
+  const oct = cashCostOfGoods({ month: "2026-10", settled: ledger, invoices: all, receiving: [] });
+
+  test("a September invoice paid in October is October's cash, and not September's", () => {
+    assert.equal(sept.fromPaidDatesCents, 0);
+    assert.equal(oct.fromPaidDatesCents, 40_000 + 30_000);
+    assert.deepEqual(oct.onPaidDates, ["IPC", "IPD"]);
+  });
+
+  test("an invoice with no paid date still counts on its own date, and is said to", () => {
+    assert.equal(sept.fromInvoiceDatesCents, 12_500);
+    assert.deepEqual(sept.onInvoiceDates, ["Parmed"]);
+    assert.match(sept.says, /Parmed, whose payments this site cannot see: 1 invoice with no paid date recorded, so its invoice date stands in/);
+    assert.equal(oct.fromInvoiceDatesCents, 0);
+  });
+
+  test("each invoice is in exactly one month, whatever its dates", () => {
+    const months = ["2026-08", "2026-09", "2026-10", "2026-11"].map((month) => cashCostOfGoods({ month, settled: [], invoices: [ipcSept, parmedSept, ipdOct], receiving: [] }));
+    const counted = months.reduce((n, m) => n + m.fromPaidDatesCents + m.fromInvoiceDatesCents, 0);
+    assert.equal(counted, 40_000 + 12_500 + 30_000);
+  });
+
+  test("a ledger-fed supplier's paid date changes nothing: its ledger stays the only authority", () => {
+    assert.equal(oct.settledCents, 99_999);
+    assert.ok(!oct.onPaidDates.includes("Mckesson"));
+    assert.equal(oct.cents, 99_999 + 40_000 + 30_000);
+  });
+
+  test("the double-count check reads the same months as the figure", () => {
+    // A receiving row for the IPC invoice, dated September: the invoice (paid October) excludes it from both months.
+    const receiving = [{ supplier: "IPC", invoiceNumber: "T-1001", invoiceDate: "2026-09-24", totalCents: 40_000 }];
+    assert.equal(cashCostOfGoods({ month: "2026-09", settled: [], invoices: [ipcSept], receiving }).cents, null);
+    assert.deepEqual(countedTwiceInCash({ month: "2026-10", settled: [], invoices: [ipcSept], receiving }), []);
+    assert.deepEqual(countedTwiceInCash({ month: "2026-09", settled: [], invoices: [ipcSept], receiving }), []);
+  });
+});
