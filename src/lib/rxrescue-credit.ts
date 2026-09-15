@@ -18,7 +18,7 @@ import { splitRow } from "./pioneer-catalog";
 export type CreditRow = {
   /** Unique per line, and the thing that stops a memo sent twice being counted twice. */
   transactionId: string;
-  /** Zero-padded in the file ("000000333801"); the pharmacy's own number is what claims hold. */
+  /** Zero-padded in the file ("000000999123"); the pharmacy's own number is what claims hold. */
   rxNumber: string;
   groupNumber: string | null;
   ndc11: string | null;
@@ -88,7 +88,7 @@ const date = (s: string | undefined): string | null => {
   return m ? `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}` : null;
 };
 
-/** "000000333801" is the pharmacy's Rx 333801. Claims hold it unpadded, so the join needs it so. */
+/** "000000999123" is the pharmacy's Rx 999123. Claims hold it unpadded, so the join needs it so. */
 export function unpadRx(s: string): string {
   const t = s.trim().replace(/^0+/, "");
   return t === "" ? s.trim() : t;

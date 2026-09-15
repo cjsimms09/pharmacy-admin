@@ -20,7 +20,7 @@
  * revenue, so taking the figure out of the remit removed $418.22 of real money from the month
  * rather than moving it somewhere better. It was put back.
  *
- * Twelve more September claims carry both a real remit and a voucher — Rx 327712 has $913.47 from
+ * Twelve more September claims carry both a real remit and a voucher — Rx 990006 has $913.47 from
  * the plan and $100.00 from a voucher — so the two are not one field wearing different hats and
  * cannot be collapsed into each other. Until the voucher has a counted home of its own,
  * `readPayerMoney` is deliberately not wired into the importer.

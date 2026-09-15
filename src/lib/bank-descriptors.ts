@@ -318,9 +318,9 @@ const RULES: Rule[] = [
     kind: "internal_transfer",
     counterparty: "another account of the pharmacy",
     /*
-     * "Ref AMEILHA To X6728 PSA" — a transfer between the pharmacy's own accounts.
+     * "Ref AMEILHA To X — a transfer between the pharmacy's own accounts.
      *
-     * Not every line of this shape is one. "Ref AMIDQSP To *6728 Medications" looks identical and is
+     * Not every line of this shape is one. "Ref AMIDQSP To *#### Medications" looks identical and is
      * a different thing entirely: drugs sold on to the practice at cost, which has a cost side
      * already in the books and a money side in none of them. So medications are excluded here and
      * matched on their own terms below; without the exclusion this rule would swallow them and call
@@ -535,7 +535,8 @@ const RULES: Rule[] = [
     feed: "RRC Pharma's invoices",
     why: "A purchase from RRC Pharma, paid by debit card.",
   },
-  { kind: "other_receipt", counterparty: "Veridian", test: /VERIDI/, side: "in", lands: "revenue", category: "other", feed: null, why: "A Veridian payment." },
+  /* The owner, 15 September: the Veridikal credits "are evouchers" — manufacturer e-voucher money, paid straight to the bank. */
+  { kind: "direct_payer", counterparty: "Veridikal (eVoucher)", test: /VERIDI/, side: "in", lands: "revenue", category: "third_party", feed: null, why: "The e-voucher programme paying the manufacturer vouchers applied at the counter." },
   { kind: "other_receipt", counterparty: "POC Network", test: /POCNETWORK/, side: "in", lands: "revenue", category: "other", feed: null, why: "A POC Network handling payment." },
   {
     kind: "counter_deposit",

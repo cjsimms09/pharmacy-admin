@@ -37,6 +37,8 @@ const shortUs = (iso: string) => iso.slice(5, 7) + "/" + iso.slice(8, 10) + "/" 
 async function main() {
   const limit = Number(process.argv[2] ?? 40);
   const { db } = await import("../src/db");
+  const { getSettings } = await import("../src/lib/settings");
+  const ncpdp = (await getSettings()).pharmacy_ncpdp ?? "";
 
   /*
    * Which claims may be appealed is decided in one place, and it is not here.
@@ -44,7 +46,7 @@ async function main() {
    * This script used to pick its own: paid, Caremark, generic per NADAC, under cost. Those are four
    * of the tests `judge` makes and it misses the two that matter most — whether a MAC priced the
    * claim at all (basis of reimbursement 06 or 07) and whether the money landed on NADAC rather
-   * than under it. Caremark rejected Rx 333968 as a "non MAC claim" for exactly the first, and this
+   * than under it. Caremark rejected Rx 990011 as a "non MAC claim" for exactly the first, and this
    * script would have offered it again.
    *
    * So the worklist decides and this only builds the form. Below-NADAC claims only: an appeal on one
@@ -157,7 +159,8 @@ async function main() {
       form: {
         RXNumber: String(x.rx_number).padStart(7, "0"),
         FillDate: us(x.date_filled),
-        NCPDP: "1722734",
+        /* The pharmacy's own NCPDP, from settings: never written into code. */
+        NCPDP: ncpdp,
         BINSelected: x.bin,
         PCNNumber: x.pcn ?? "",
         InvoiceCost: (Number(inv.unit_cost_cents) / 100).toFixed(2),

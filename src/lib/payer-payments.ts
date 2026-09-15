@@ -170,7 +170,7 @@ export function parsePayerPayments(text: string): PayerPaymentRead {
 /**
  * The date range a payment report's file name states, where it states one.
  *
- * "West_Wichita_Family_Pharmacy_1722734_20260901_20260907.csv" is the first through the seventh of
+ * "West_Wichita_Family_Pharmacy_9999999_20260901_20260907.csv" is the first through the seventh of
  * September. Worth having because a report can legitimately come back empty — a week with no
  * deposits is a fact — and without the name there would be nothing to say what was checked.
  */

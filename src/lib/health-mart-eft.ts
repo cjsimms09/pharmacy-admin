@@ -16,7 +16,7 @@
  *     The following payments were made:
  *
  *        PMT          NCPDP             Amount Store Name
- *        EFT-31460993 1722734       $20,091.28 West Wichita Family Pharmacy
+ *        EFT-31460993 9999999       $20,091.28 West Wichita Family Pharmacy
  *
  *     Deposit includes payments from the following third parties:
  *       Payers:

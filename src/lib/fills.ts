@@ -136,7 +136,7 @@ export type Fill = {
    * A coordinated fill can have one leg billed to an account and another paid by a plan. Counting
    * the whole fill's revenue as receivable put the plan's remit in this bucket as well as in the
    * remittance reconciliation, where it was already being awaited: the same dollar in two
-   * "not money yet" lists. On Rx 333932-0 that read $491.67 owed on account when the $491.67 was
+   * "not money yet" lists. On Rx 990002-0 that read $491.67 owed on account when the $491.67 was
    * the plan's, and on its way.
    */
   receivableCents: number;
@@ -424,7 +424,7 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      * This module was built on the opposite belief — that "both rows carry the same acquisition
      * cost, because it is the same bottle" — and every complication in it followed from that: taking
      * the largest cost, taking the largest quantity, and working the patient's share out backwards
-     * from a price no row states. That last one was wrong on Rx 336765, where OptumRx paid $461.89
+     * from a price no row states. That last one was wrong on Rx 990003, where OptumRx paid $461.89
      * on the dispensing row and a second plan paid $100 and left the patient $733.52. Subtracting
      * every remittance from $833.52 gave the patient $271.63 and the fill a $469.21 loss; the report
      * said $7.32, and the report was right.

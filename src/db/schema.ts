@@ -2366,7 +2366,7 @@ export const claims = sqliteTable(
      *
      * On a cash plan the whole of the payer figure is the voucher — RxLocal claims where
      * `remitCents` equals this to the penny. On a plan that pays, the two sit together and the
-     * remit is both: Rx 327712 is $913.47 in all, of which $100.00 came from a voucher.
+     * remit is both: Rx 990005 is $913.47 in all, of which $100.00 came from a voucher.
      *
      * When the voucher money actually arrives it settles what the claim already carries, so
      * `copay-remit-store.ts` records it with `revenueCents: 0`. That is what keeps it counted once.

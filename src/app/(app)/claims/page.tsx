@@ -536,7 +536,7 @@ export default async function ClaimsPage({
           </label>
           <label className="text-xs">
             <span className="block text-ink-3">Prescription</span>
-            <input name="rx" defaultValue={flags.scope.rx ?? ""} placeholder="331488" className="mt-0.5 w-32 rounded-md border border-line px-2 py-1 text-sm" />
+            <input name="rx" defaultValue={flags.scope.rx ?? ""} placeholder="990004" className="mt-0.5 w-32 rounded-md border border-line px-2 py-1 text-sm" />
           </label>
           <label className="text-xs">
             <span className="block text-ink-3">Payer or BIN</span>

@@ -1116,7 +1116,7 @@ export async function importRxRescueCredit(
         /*
          * Only the top-off is money the claim did not already carry.
          *
-         * The ACR claim adjudicates for the copay assistance — Rx 335504's claim row reads
+         * The ACR claim adjudicates for the copay assistance — Rx 990007's claim row reads
          * $1,096.91, which is exactly the assistance the memo then pays — so counting the whole
          * credit would book that money twice. The top-off is the part the claim never saw.
          *

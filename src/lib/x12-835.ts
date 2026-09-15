@@ -222,7 +222,7 @@ export function providerAdjustmentsFrom(fields: string[], component: string, raw
 /**
  * The pharmacy's own reference, back to the prescription and its fill.
  *
- * Two spellings arrive. A plan's 835 carries what was submitted, "332359-1" or "332359". The
+ * Two spellings arrive. A plan's 835 carries what was submitted, "990001-1" or "990001". The
  * Medicare Transaction Facilitator carries the number padded to twelve digits with the fill
  * spelled out, "000000332359FILL1" — and every one of its payments sat unmatched for three weeks
  * because that string was filed whole, so no claim could ever equal it. Leading zeros are dropped:

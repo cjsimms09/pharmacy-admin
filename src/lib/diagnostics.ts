@@ -22,7 +22,7 @@ import { createHash } from "node:crypto";
  * anything outside the file. A per-export salt makes them meaningless outside it, and makes two
  * exports of the same day disagree on purpose, so nothing can be joined across files later.
  *
- * The pharmacist can turn that off, because sometimes the question *is* about Rx 331488 by name.
+ * The pharmacist can turn that off, because sometimes the question *is* about Rx 990008 by name.
  * It is off by default, it is stated in the file, and it is stated on the button.
  *
  * ── And what it will not do ──

@@ -746,7 +746,7 @@ function readRow(parts: string[], POS: Layout, roles: ExtraRoles, section: Retur
    *
    * "AR" was one of those until the pharmacy said what it is: accounts receivable. It is not a
    * claim state — it is the leg of a dispensing that carries the *cost* while the money arrives on
-   * a different row, usually a different BIN entirely. Rx 333932-0 in the live file is the shape:
+   * a different row, usually a different BIN entirely. Rx 990010-0 in the live file is the shape:
    * rejected on one plan, an AR row carrying $484.03 of acquisition cost and no revenue, and a paid
    * row on another plan bringing in $491.67 against no cost. One bottle, $7.64 made.
    *

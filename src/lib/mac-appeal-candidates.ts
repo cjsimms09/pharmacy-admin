@@ -72,7 +72,7 @@ export type Candidate = {
  * ── Why this gate exists ──
  *
  * Caremark rejected the first appeal this pharmacy filed as a "non MAC claim", and it was right to.
- * Rx 333968, amphetamine ER 12.5mg ODT, came back with basis **03** — ingredient cost reduced to
+ * Rx 990009, amphetamine ER 12.5mg ODT, came back with basis **03** — ingredient cost reduced to
  * AWP less a percentage. No MAC list priced it, so there was no MAC to appeal and nothing the form
  * could have said would have changed that.
  *

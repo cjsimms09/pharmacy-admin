@@ -590,7 +590,7 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
  * it can be matched, or an import that failed halfway. The claim then stands as live revenue for
  * ever, and nothing about it looks wrong.
  *
- * Rx 331488 is what this is for. It ran for sixty tablets at $1,204.25, was reversed, and re-ran for
+ * Rx 900101 is what this is for. It ran for sixty tablets at $1,204.25, was reversed, and re-ran for
  * thirty at $607.38 — a $30.62 fill. With the reversal stranded, both runs counted: $1,811.63 of
  * revenue against one bottle, and a $658.11 profit on a script that made thirty dollars.
  *
@@ -657,9 +657,9 @@ export function claimCancelledBy(rev: Pairable, live: Pairable[]): { hit: Pairab
  * one day is two fills, not a duplicate. But when a listing is repeated and only one reversal
  * arrives, the reversal cancels occurrence #1 and occurrence #2 stands as live revenue for ever:
  *
- *   337352|0|P|2026-09-10|610279|45802006535|900|1000|45000#1  paid      the fill that happened
- *   337352|0|P|2026-09-10|610279|67877031815|900|1000|45000#2  paid      never dispensed
- *   337352|0|P|2026-09-10|610279|67877031815|900|1000|45000#1  reversed  cancelled
+ *   900102|0|P|2026-09-10|610279|45802006535|900|1000|45000#1  paid      the fill that happened
+ *   900102|0|P|2026-09-10|610279|67877031815|900|1000|45000#2  paid      never dispensed
+ *   900102|0|P|2026-09-10|610279|67877031815|900|1000|45000#1  reversed  cancelled
  *
  * `repairReversals` cannot see this: there is no stranded reversal to pair, and `claimCancelledBy`
  * would refuse anyway — two live claims a reversal could equally cancel is not an answer.

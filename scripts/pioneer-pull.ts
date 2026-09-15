@@ -795,7 +795,7 @@ async function pullInvoices(): Promise<string> {
  * The owner: "can you use info you have to create suppliers we dont have in site and put in
  * everything we need". The site had five. PioneerRx carries eighteen with a catalogue or an invoice
  * behind them, including the one whose account number is on the payer payment report the pharmacy
- * receives every day — Buyline, 1722734, which is where that file's name comes from.
+ * receives every day — Buyline, <NCPDP>, which is where that file's name comes from.
  *
  * Only suppliers with something behind them are created: a catalogue the pharmacy loads or an
  * invoice it has received this year. A wholesaler set up years ago and never used is a row nobody
