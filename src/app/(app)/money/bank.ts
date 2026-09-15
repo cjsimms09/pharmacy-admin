@@ -94,7 +94,7 @@ export async function readBankStatement(fd: FormData) {
     ? (
         await db.query.cashReceipts.findMany({
           where: and(gte(schema.cashReceipts.receivedOn, shiftDays(days[0], -DEPOSIT_WINDOW_DAYS)), lte(schema.cashReceipts.receivedOn, shiftDays(days[days.length - 1], DEPOSIT_WINDOW_DAYS))),
-          columns: { id: true, amountCents: true, receivedOn: true, payer: true, reference: true },
+          columns: { id: true, amountCents: true, receivedOn: true, payer: true, reference: true, sourceKey: true },
         })
       ).filter((r) => !confirmedAlready.has(r.id))
     : [];
@@ -127,7 +127,12 @@ export async function readBankStatement(fd: FormData) {
      */
     const isCredit = placement.kind === "deposit" || placement.kind === "card_deposit" || (placement.kind === "unplaced" && line.amountCents > 0);
     const match = isCredit
-      ? matchHeldDeposit(heldForBank, { amountCents: line.amountCents, on: line.on, payer: placement.kind === "deposit" ? placement.payer : placement.kind === "card_deposit" ? "Card batch" : null }, claimed)
+      ? matchHeldDeposit(
+          /* A card deposit confirms only a card batch, never another payer's receipt of the same amount (G-CARD-11). */
+          placement.kind === "card_deposit" ? heldForBank.filter((h) => h.sourceKey?.startsWith("card-batch|")) : heldForBank,
+          { amountCents: line.amountCents, on: line.on, payer: placement.kind === "deposit" ? placement.payer : placement.kind === "card_deposit" ? "Card batch" : null },
+          claimed,
+        )
       : { kind: "none" as const };
     if (match.kind === "confirms") {
       claimed.add(match.receipt.id);

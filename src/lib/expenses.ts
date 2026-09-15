@@ -1,8 +1,8 @@
-import { DEPOSIT_WINDOW_DAYS, gateDeposit, shiftDays } from "./deposit-gate";
+import { DEPOSIT_WINDOW_DAYS, gateDeposit, monthsAround, receiptsSummingTo, shiftDays } from "./deposit-gate";
 import { isOutOfBooks, monthIsOutOfBooks } from "./books-start";
 import "server-only";
 import { db, schema } from "@/db";
-import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import { newId } from "./crypto";
 import { SEED_CATEGORIES } from "./expense-categories";
 import { todayIso } from "./dates";
@@ -198,11 +198,19 @@ export async function automaticReceiptsLike(month: string, amountCents: number):
   const end = new Date(Date.parse(`${month}-01T00:00:00Z`));
   end.setUTCMonth(end.getUTCMonth() + 1);
   const to = shiftDays(end.toISOString().slice(0, 10), DEPOSIT_WINDOW_DAYS - 1);
-  const rows = await db.query.cashReceipts.findMany({
-    where: and(eq(schema.cashReceipts.amountCents, Math.round(amountCents)), gte(schema.cashReceipts.receivedOn, from), lte(schema.cashReceipts.receivedOn, to)),
-    columns: { payer: true, receivedOn: true, reference: true, sourceKey: true },
-  });
-  return rows.filter((r) => r.sourceKey).map(({ payer, receivedOn, reference }) => ({ payer, receivedOn, reference }));
+  const rows = (
+    await db.query.cashReceipts.findMany({
+      where: and(gte(schema.cashReceipts.receivedOn, from), lte(schema.cashReceipts.receivedOn, to)),
+      columns: { payer: true, receivedOn: true, reference: true, sourceKey: true, amountCents: true },
+    })
+  ).filter((r) => r.sourceKey);
+  const cents = Math.round(amountCents);
+  const pick = ({ payer, receivedOn, reference }: (typeof rows)[number]) => ({ payer, receivedOn, reference });
+  const exact = rows.filter((r) => r.amountCents === cents);
+  if (exact.length) return exact.map(pick);
+  /* Or two or three of them together — a deposit of two batches, typed as one (G-CARD-10). */
+  const combo = receiptsSummingTo(rows, cents)[0];
+  return combo ? combo.map(pick) : [];
 }
 
 export async function unpaid(): Promise<Expense[]> {
@@ -299,7 +307,7 @@ export async function addCashReceipt(input: {
   /* Typed by hand in this month: no date, so the window above cannot see them. See `gateDeposit`. */
   const typed =
     input.sourceKey && input.receivedOn
-      ? await db.query.cashReceipts.findMany({ where: and(eq(schema.cashReceipts.month, input.month), isNull(schema.cashReceipts.receivedOn), isNull(schema.cashReceipts.sourceKey), eq(schema.cashReceipts.amountCents, amountCents)) })
+      ? await db.query.cashReceipts.findMany({ where: and(inArray(schema.cashReceipts.month, monthsAround(input.month)), isNull(schema.cashReceipts.receivedOn), isNull(schema.cashReceipts.sourceKey), eq(schema.cashReceipts.amountCents, amountCents)) })
       : [];
   const verdict = gateDeposit([...sameKey, ...near, ...typed], { ...input, amountCents });
   if (!verdict.bank) return { id: null, duplicate: true, why: verdict.why };

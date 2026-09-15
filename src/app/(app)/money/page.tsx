@@ -107,10 +107,10 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
     if (fd.get("different") !== "yes") {
       const already = await automaticReceiptsLike(month, amountCents!);
       if (already.length > 0) {
-        const a = already[0];
+        const said = already.map((a) => `${a.payer ? `from ${a.payer}` : "a receipt"}${a.receivedOn ? ` on ${a.receivedOn}` : ""}${a.reference ? ` (${a.reference})` : ""}`).join(" + ");
         redirect(
           `${back}&error=${encodeURIComponent(
-            `${formatCents(amountCents!)} is already banked automatically${a.payer ? ` from ${a.payer}` : ""}${a.receivedOn ? ` on ${a.receivedOn}` : ""}${a.reference ? ` (${a.reference})` : ""}. Nothing was banked. If this really is different money, tick "This is different money" and bank it again.`,
+            `${formatCents(amountCents!)} is already banked automatically${already.length > 1 ? `, as ${already.length} receipts together: ${said}` : ` ${said}`}. Nothing was banked. If this really is different money, tick "This is different money" and bank it again.`,
           )}`,
         );
       }
