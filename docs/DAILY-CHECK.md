@@ -34,6 +34,8 @@ trust every figure behind it without checking it himself.
 | 835 remittances | SFTP mailbox | what payers actually sent. **None has ever arrived — see below.** |
 | Payer payment reports | email | deposits, by payment number |
 | Copay card / facilitator remittances | email | voucher and MTF money |
+| **Health Mart Atlas "EFT completed"** | email, daily, from `operations.hmatlas@mckesson.com` (or forwarded) | one ProviderPay deposit: EFT number, amount, date, the plans inside it. Read by `health-mart-eft.ts`, banked under the portal report's own key. Routed `payer_payments`. **Check one arrived for each business day** — a missing notice is a deposit the cash account does not yet know. |
+| **AccessHealth Payment Data** | email, weekly, one PDF per EFT | claim-level detail per EFT per plan, plus 835-style adjustments (AH origination fee, E3 withholding, WU recovery, B2 rebate). **Not yet read** — filed as unrecognised documents. |
 
 PioneerRx is a **day-old copy** — current to about 6pm the previous day. Read-only. Never select
 patient name, date of birth, address, phone, SSN, or anything in the `Person.` schema;
