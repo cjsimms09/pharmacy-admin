@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { classify, headersOf, parseSupplierRules, supplierFor, acceptableAttachment } from "../src/lib/autoroute";
+import { classify, headersOf, parseSupplierRules, supplierFor, acceptableAttachment, isX12Remittance } from "../src/lib/autoroute";
+import { looksLikeX12Remittance } from "../src/lib/business-docs";
 
 /**
  * This runs unattended, overnight, with nobody watching. A file loaded as the wrong kind of
@@ -143,5 +144,172 @@ describe("the daily transaction report", () => {
     const buf = Buffer.from("Rx Transaction Details By Submission Type (BETA)\r\nWest Wichita Family Pharmacy\r\n", "utf8");
     assert.equal(classify("Daily (9_5_2026).txt", buf).kind, "rx_transactions");
     assert.equal(classify("Daily (9_5_2026)", buf).kind, "rx_transactions");
+  });
+});
+
+/**
+ * A remittance advice arriving by email, named whatever the payer felt like naming it.
+ *
+ * BACKLOG item 27. The money in an 835 is money the pharmacy has already been paid, so a file
+ * refused at the door is a deposit that never reaches the books. The envelope decides, because the
+ * name is written by whoever sent it.
+ */
+describe("an 835 emailed in, under any name", () => {
+  const era = Buffer.from(
+    "ISA*00*          *00*          *ZZ*PAYER          *ZZ*PHARMACY       *260908*1200*^*00501*000000001*0*P*:~" +
+      "GS*HP*PAYER*PHARM*20260908*1200*1*X*005010X221A1~ST*835*0001~" +
+      "BPR*I*102.50*C*ACH*CCP*01*999*DA*111*1234567890**01*999*DA*222*20260908~" +
+      "TRN*1*TRACE001*1999999999~N1*PR*BIG PBM*XV*PBM123~" +
+      "CLP*332359-1*1*100.00*60.00*10.00*07*CTRL9*~SE*8*0001~GE*1*1~IEA*1*000000001~",
+    "latin1",
+  );
+
+  test("whatever it is called, and called nothing at all", () => {
+    for (const [filename, contentType] of [
+      ["REMIT_20260908.835", "application/octet-stream"],
+      ["remit.edi", "application/octet-stream"],
+      ["835output.dat", "application/edi-x12"],
+      ["remittance", "application/octet-stream"],
+      ["", "application/octet-stream"],
+    ] as const) {
+      const v = acceptableAttachment({ filename, contentType, content: era });
+      assert.ok(v.ok, `${filename || "(no name)"} as ${contentType} should be accepted: ${v.ok ? "" : v.why}`);
+    }
+  });
+
+  /*
+   * The envelope's own contribution, now that the name rules have caught up with it.
+   *
+   * `45dba2b` added `.835`, `.edi`, `.x12`, `.dat` and `.xml` to `REPORT_EXT`, so those names are
+   * admitted at the door on their name, the way a `.csv` is — and the door only decides what the
+   * site will look at, never what a document is. What the envelope still adds, and what these two
+   * cases hold, is the file whose name is no help at all.
+   */
+  test("the envelope carries a name no rule would admit", () => {
+    const v = acceptableAttachment({ filename: "PAYER_REMIT_0908.rmt", contentType: "application/octet-stream", content: era });
+    assert.ok(v.ok, `an 835 named .rmt should be accepted: ${v.ok ? "" : v.why}`);
+  });
+
+  test("and a name no rule would admit is not opened by looking like a remittance", () => {
+    // The words say a covering note. The name says remittance. Neither the envelope nor the
+    // extension list is satisfied, so it is refused — the name on its own never opens the door.
+    const v = acceptableAttachment({ filename: "remittance.rmt", contentType: "application/octet-stream", content: Buffer.from("Dear pharmacy, your remittance is attached.\n") });
+    assert.equal(v.ok, false);
+  });
+});
+
+/**
+ * A zip holding a remittance, which is how a clearinghouse sends a day of them at once.
+ *
+ * ASSIGNMENTS, "Two recognisers, both by content": *"recognise an ISA envelope with ST*835 (and a
+ * zip holding one)"*. The archives here are built by hand in the stored (uncompressed) method, so
+ * the test depends on no library and the bytes are the ones a reader will actually walk.
+ */
+describe("a zip holding an 835", () => {
+  const era = Buffer.from(
+    "ISA*00*          *00*          *ZZ*PAYER          *ZZ*PHARMACY       *260908*1200*^*00501*000000001*0*P*:~" +
+      "GS*HP*PAYER*PHARM*20260908*1200*1*X*005010X221A1~ST*835*0001~BPR*I*102.50*C*ACH~" +
+      "TRN*1*TRACE001*1999999999~CLP*332359-1*1*100.00*60.00*10.00*07*CTRL9*~SE*6*0001~IEA*1*000000001~",
+    "latin1",
+  );
+
+  /** One stored entry, written the way the format specifies, so nothing here is mocked. */
+  function zipOf(entries: { name: string; data: Buffer }[]): Buffer {
+    const locals: Buffer[] = [];
+    const centrals: Buffer[] = [];
+    let offset = 0;
+    for (const e of entries) {
+      const name = Buffer.from(e.name, "utf8");
+      const lh = Buffer.alloc(30);
+      lh.writeUInt32LE(0x04034b50, 0);
+      lh.writeUInt16LE(20, 4);
+      lh.writeUInt16LE(0, 8); // stored
+      lh.writeUInt32LE(0, 14); // crc, unchecked by these readers
+      lh.writeUInt32LE(e.data.length, 18);
+      lh.writeUInt32LE(e.data.length, 22);
+      lh.writeUInt16LE(name.length, 26);
+      const local = Buffer.concat([lh, name, e.data]);
+      const ch = Buffer.alloc(46);
+      ch.writeUInt32LE(0x02014b50, 0);
+      ch.writeUInt16LE(20, 6);
+      ch.writeUInt16LE(0, 10); // stored
+      ch.writeUInt32LE(e.data.length, 20);
+      ch.writeUInt32LE(e.data.length, 24);
+      ch.writeUInt16LE(name.length, 28);
+      ch.writeUInt32LE(offset, 42);
+      centrals.push(Buffer.concat([ch, name]));
+      locals.push(local);
+      offset += local.length;
+    }
+    const central = Buffer.concat(centrals);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(entries.length, 8);
+    eocd.writeUInt16LE(entries.length, 10);
+    eocd.writeUInt32LE(central.length, 12);
+    eocd.writeUInt32LE(offset, 16);
+    return Buffer.concat([...locals, central, eocd]);
+  }
+
+  test("is accepted, and so is one sitting beside other files", () => {
+    const one = zipOf([{ name: "REMIT_20260908.835", data: era }]);
+    assert.ok(acceptableAttachment({ filename: "remits.zip", contentType: "application/zip", content: one }).ok);
+
+    const many = zipOf([
+      { name: "readme.txt", data: Buffer.from("Your remittances for 8 September.\n") },
+      { name: "0908/PAYER_A.835", data: era },
+    ]);
+    assert.ok(acceptableAttachment({ filename: "remits.zip", contentType: "application/zip", content: many }).ok);
+  });
+
+  test("a zip of anything else is refused exactly as it was", () => {
+    // The existing rule stands: zips are not a type this site reads. Only a remittance inside one
+    // opens the door, because only that has an envelope that cannot be anything else.
+    const plain = zipOf([{ name: "catalogue.csv", data: Buffer.from("ndc,price\n00093721410,1.23\n") }]);
+    const v = acceptableAttachment({ filename: "catalogues.zip", contentType: "application/zip", content: plain });
+    assert.equal(v.ok, false);
+  });
+
+  test("a damaged archive is not an archive holding a remittance", () => {
+    const truncated = zipOf([{ name: "x.835", data: era }]).subarray(0, 40);
+    assert.equal(acceptableAttachment({ filename: "remits.zip", contentType: "application/zip", content: truncated }).ok, false);
+  });
+});
+
+/**
+ * The strict X12 test, and why it is not the loose one.
+ *
+ * `business-docs.looksLikeX12Remittance` also answers true for a `.835` file name or a bare `BPR`
+ * segment. That is right at the Add tool's door, where a person confirms what a document is. It is
+ * wrong anywhere a document gets *named* without being asked — and for a while the recogniser used
+ * it, so an 820 payment order came back "a remittance from a plan, certain" while `classify()`
+ * correctly refused it. Both now ask `isX12Remittance`.
+ */
+describe("an X12 envelope that is not a remittance", () => {
+  const isa = "ISA*00*          *00*          *ZZ*PAYER          *ZZ*PHARMACY       *260909*1200*^*00501*000000001*0*P*:~";
+
+  test("an 820 payment order carries a BPR and is still not an 835", () => {
+    const p820 = Buffer.from(
+      isa + "GS*RA*PAYER*PHARM*20260909*1200*1*X*005010X218~ST*820*0001~" +
+        "BPR*C*5000.00*C*ACH*CCP*01*999*DA*111*1234567890**01*999*DA*222*20260909~TRN*1*PAY123~SE*4*0001~IEA*1*000000001~",
+      "latin1",
+    );
+    assert.equal(isX12Remittance(p820), false);
+    assert.equal(classify("payment.edi", p820).kind, "unrecognised");
+    // The loose test disagrees, which is the whole reason this one exists.
+    assert.equal(looksLikeX12Remittance(p820, "payment.edi"), true);
+  });
+
+  test("and a 999 acknowledgement saved as REMIT.835 is not one either", () => {
+    const ack = Buffer.from(isa + "GS*FA*PAYER*PHARM*20260909*1200*1*X*005010X231~ST*999*0001~SE*2*0001~IEA*1*000000001~", "latin1");
+    assert.equal(isX12Remittance(ack), false);
+    assert.equal(classify("REMIT.835", ack).kind, "unrecognised");
+    assert.equal(looksLikeX12Remittance(ack, "REMIT.835"), true);
+  });
+
+  test("a real 835 still passes both", () => {
+    const era = Buffer.from(isa + "GS*HP*PAYER*PHARM*20260909*1200*1*X*005010X221A1~ST*835*0001~BPR*I*102.50*C*ACH~SE*3*0001~IEA*1*000000001~", "latin1");
+    assert.equal(isX12Remittance(era), true);
+    assert.equal(classify("anything.txt", era).kind, "remittance_835");
   });
 });

@@ -19,6 +19,13 @@ jobs:
       - run: npm ci --no-audit --no-fund
       # Typecheck and tests run before the build: they fail faster and say more.
       - run: npm run typecheck
+      # Tests read the tables. Without this the schema does not exist and every test that takes a
+      # fingerprint of the database fails with "no such table: claims" — four of them did, on
+      # df666bd and on every commit after it, while `npm run check` passed on a developer machine
+      # where a migrated database was already sitting in ./data. CLAUDE.md already states the rule
+      # ("Tests that touch the database need a migrated one: npm run db:migrate first"); this is
+      # the CI half of it. No env: migrate and test both default to ./data/pharmacy-admin.db.
+      - run: npm run db:migrate
       - run: npm run test
       # A build needs the same env vars the app needs at runtime; these are throwaway.
       - run: npm run build
