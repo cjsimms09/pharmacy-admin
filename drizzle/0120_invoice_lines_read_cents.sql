@@ -1,0 +1,16 @@
+-- What the recognised item lines on an invoice came to, when they did not add up to its total.
+--
+-- McKesson invoice 7657944598, 15 September, $10,044.80. The line reader recognised 56 lines and
+-- one — a FreeStyle Libre sensor printed with a GTIN — it did not. The 56 came to $9,880.92, the
+-- all-or-nothing rule rightly refused them, and the site had nothing to say but "usually a scan":
+-- lines_read and lines_unread were stored, the money was not.
+--
+-- The reader already knows the answer at the moment it refuses. Total less what it recognised is
+-- the value of every line it could not read, whatever the reason, and on that invoice it was
+-- $163.88 — two sensors at $81.94, which locates the line without anybody opening the PDF. It
+-- needs no pattern, so it cannot mistake a header for an item, and McKesson's 0*EA not-shipped rows
+-- carry nothing and add nothing to it.
+--
+-- Null until the reader stores it: an invoice read before this column existed has not been
+-- measured, which is not the same as having recognised lines worth nothing.
+ALTER TABLE supplier_invoices ADD COLUMN lines_read_cents integer;
