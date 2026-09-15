@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getCurrentUser, login } from "@/lib/auth";
+import { SubmitButton } from "@/components/submit-button";
 
 export const metadata = { title: "Sign in" };
 
@@ -35,7 +36,21 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <label className="label" htmlFor="password">Password</label>
             <input id="password" name="password" type="password" className="field" autoComplete="current-password" required />
           </div>
-          <button className="btn btn-primary w-full justify-center" type="submit">Sign in</button>
+          {/*
+            A button that admits it is working, and cannot be pressed twice.
+
+            It was a plain submit, so a sign-in that took twenty seconds looked identical to one
+            that did nothing — and he pressed again. Every press had logged him in; each new one
+            cancelled the page the last one was opening. Thirteen successful sign-ins in two
+            minutes on 15 September, and the report was "I hit sign in and nothing happens".
+          */}
+          <SubmitButton
+            className="btn btn-primary w-full justify-center"
+            pendingLabel="Signing in…"
+            hint="This can take up to half a minute when the site has just restarted. It is working — there is no need to press again."
+          >
+            Sign in
+          </SubmitButton>
         </form>
       </div>
       <p className="mt-4 text-center text-xs text-ink-3">No patient information is stored in this system.</p>
