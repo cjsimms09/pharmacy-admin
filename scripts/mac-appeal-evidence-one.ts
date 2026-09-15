@@ -1,0 +1,91 @@
+/**
+ * One acquisition-cost evidence page, for a claim not yet recorded as appealed.
+ *
+ * The batch script works from filed appeals; this one works from a claim, so evidence can be
+ * attached at the moment of filing rather than afterwards. Same builder, same arithmetic.
+ *
+ * Run: tsx --tsconfig tsconfig.test.json scripts/mac-appeal-evidence-one.ts <rx> <dateFilled> <pbm> <outDir>
+ */
+import "dotenv/config";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+
+const FEE_CENTS = 1050;
+
+async function main() {
+  const [rx, dos, pbm, outDir] = process.argv.slice(2);
+  if (!rx || !dos || !pbm || !outDir) throw new Error("give rx, dateFilled, pbm, outDir");
+  mkdirSync(outDir, { recursive: true });
+
+  const { db } = await import("../src/db");
+  const { buildEvidence } = await import("../src/lib/mac-appeal-evidence");
+  const { packForClaim } = await import("../src/lib/pack-size");
+  const { textPdf } = await import("../src/lib/pdf");
+  const { getSettings } = await import("../src/lib/settings");
+  const s = await getSettings();
+
+  const c = (await db.$client.execute({
+    sql: `SELECT c.*, (SELECT dd.package_description FROM drug_directory dd WHERE dd.ndc11 = c.ndc11 LIMIT 1) AS pkg,
+                 (SELECT dd.form FROM drug_directory dd WHERE dd.ndc11 = c.ndc11 LIMIT 1) AS form
+            FROM claims c WHERE c.rx_number = ? AND c.date_filled = ? LIMIT 1`,
+    args: [rx, dos],
+  })).rows[0] as any;
+  if (!c) throw new Error("claim not found");
+
+  const il = (await db.$client.execute({
+    sql: `SELECT il.unit_cost_cents, il.description, il.invoice_date, si.invoice_number, si.supplier
+            FROM invoice_lines il JOIN supplier_invoices si ON si.id = il.invoice_id
+           WHERE il.ndc11 = ? AND il.unit_cost_cents > 0
+        ORDER BY ABS(julianday(il.invoice_date) - julianday(?)) ASC LIMIT 1`,
+    args: [c.ndc11, dos],
+  })).rows[0] as any;
+  if (!il) throw new Error("no invoice line for that NDC");
+
+  /*
+   * The pack, and whether this claim's quantity is in its unit, from the one function that knows.
+   *
+   * Refusing stops the page being built at all, which is the right outcome: this document goes to a
+   * PBM under the pharmacy's NPI with a division printed on it as proof, and a divisor nobody can
+   * stand behind is worse than no document. The reason is printed so it can be fixed or accepted.
+   */
+  const read = packForClaim({ packageDescription: c.pkg, form: c.form }, Number(c.quantity_thousandths));
+  if (!read.ok) throw new Error(`cannot state a pack size for ${c.ndc11}: ${read.why}`);
+
+  const built = buildEvidence({
+    pharmacy: {
+      name: s.pharmacy_name || "",
+      ncpdp: s.pharmacy_ncpdp || "",
+      npi: s.pharmacy_npi || "",
+      address: [s.pharmacy_address, s.pharmacy_city, s.pharmacy_state, s.pharmacy_zip].filter(Boolean).join(", "),
+      phone: s.pharmacy_phone || "",
+      email: s.pharmacy_email || "",
+    },
+    appealRef: null,
+    pbmName: pbm,
+    claim: {
+      rxNumber: String(c.rx_number),
+      dateFilled: c.date_filled,
+      ndc11: c.ndc11,
+      drugName: c.item_name,
+      quantity: Number(c.quantity_thousandths) / 1000,
+      planPaidCents: Number(c.remit_cents),
+      copayCents: Number(c.copay_cents ?? 0),
+    },
+    invoice: {
+      supplier: il.supplier,
+      number: String(il.invoice_number),
+      date: il.invoice_date,
+      description: il.description,
+      packPriceCents: Number(il.unit_cost_cents),
+    },
+    pack: read.pack,
+    dispensingFeeCents: FEE_CENTS,
+  });
+
+  const path = join(outDir, built.fileName);
+  writeFileSync(path, textPdf("Acquisition Cost Evidence", built.lines));
+  console.log(path);
+  console.log("shortfall $" + (built.shortfallCents / 100).toFixed(2));
+}
+
+main().catch((e) => { console.error(String(e).slice(0, 400)); process.exit(1); });
