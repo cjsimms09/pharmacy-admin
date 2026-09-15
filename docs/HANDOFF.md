@@ -8,6 +8,13 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts`, `bank-descriptors.ts` — a postage debit is already counted only with its confirmation
+
+**Written before touching bank.ts.** Session 2's G-POST-1: every Stamps.com/Endicia debit was `already_counted`
+unconditionally; August's 10 real charges ($940.99) had no postage bill behind any of them. `MatchContext.postageBills`
+(bills keyed `POSTAGE|…`, loaded in `matchContext()`): a debit with an unclaimed bill of the same amount within 3 days
+is `already_counted`; otherwise unplaced, saying no Endicia confirmation is on file.
+
 ### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts` — the McKesson ACH tie runs, and an unmatched MTF credit confirms nothing
 
 **Written before touching the files.** Session 2's money map:
