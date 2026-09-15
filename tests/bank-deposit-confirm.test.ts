@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { matchHeldDeposit, type HeldForBank } from "../src/lib/deposit-gate";
+import { gateDeposit, matchHeldDeposit, type HeldForBank } from "../src/lib/deposit-gate";
 
 /**
  * A bank statement deposit, and the receipt already banked for the same money.
@@ -97,5 +97,41 @@ describe("the statement reader asks before it banks", () => {
   test("a receipt an earlier statement already confirmed is not offered again", async () => {
     const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
     assert.match(text, /confirmedAlready/);
+  });
+});
+
+describe("money the statement banked first, and the feed that arrives after it", () => {
+  test("REGRESSION: bank.ts gives a deposit it banks the statement's date", async () => {
+    /*
+     * Session 2, money map checkpoint 1, case C, proven on a snapshot: a deposit banked from the statement
+     * with no date is invisible to the gate's window, so a card batch forwarded afterwards banked again.
+     */
+    const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
+    const call = text.slice(text.indexOf("receiptId = (await addCashReceipt("), text.indexOf("receiptId = (await addCashReceipt(") + 400);
+    assert.match(call, /receivedOn: line\.on/);
+  });
+
+  test("a card batch forwarded after the statement banked its deposit is refused, not banked twice", () => {
+    const fromStatement = { amountCents: 422_927, receivedOn: "2026-09-09", payer: null, sourceKey: null, reference: null, month: "2026-09", createdBy: "u" };
+    const v = gateDeposit([fromStatement], { amountCents: 422_927, receivedOn: "2026-09-08", payer: "Card batch", sourceKey: "card-batch|780961413", reference: "780961413" });
+    assert.equal(v.bank, false);
+  });
+
+  test("REGRESSION: two batches paid in as one deposit are named for a person, not banked as new money", () => {
+    /* Case D. */
+    const held: HeldForBank[] = [
+      { id: "a", amountCents: 221_744, receivedOn: "2026-09-05", payer: "Card batch", reference: "1" },
+      { id: "b", amountCents: 50_000, receivedOn: "2026-09-06", payer: "Card batch", reference: "2" },
+      { id: "c", amountCents: 461_473, receivedOn: "2026-09-04", payer: "Card batch", reference: "3" },
+    ];
+    const m = matchHeldDeposit(held, { amountCents: 271_744, on: "2026-09-07", payer: null }, new Set());
+    assert.equal(m.kind, "ambiguous");
+    assert.deepEqual(m.kind === "ambiguous" ? m.candidates.map((c) => c.id) : [], ["a", "b"]);
+    assert.match(m.kind === "ambiguous" ? m.why : "", /Nothing is banked/);
+  });
+
+  test("a deposit no combination explains is still new money", () => {
+    const held: HeldForBank[] = [{ id: "a", amountCents: 100, receivedOn: "2026-09-05", payer: null }];
+    assert.equal(matchHeldDeposit(held, { amountCents: 250, on: "2026-09-06", payer: null }, new Set()).kind, "none");
   });
 });
