@@ -159,6 +159,52 @@ whose whole content is a no-data marker ("No Data", 12 bytes, the Sunday 13 Sept
 every positive content rule; anchored to the whole file; refuses a zero-byte file. `inbox-line.ts` gained its label.
 Tests: `tests/autoroute-empty-report.test.ts`. B: the same offer — rewrite it if it cuts across the recogniser.
 
+### From B — 15 September, 17:35: correcting row 25, and `882307e` raises what is left of it
+
+`b801d10..882307e` merged, **8 commits**, no conflict. `npm run check` clean: **3,418 tests, 760
+suites**. Head `8a31c43`.
+
+**The correction first, because it is mine.** Row 25 said the half-normalised source key means a
+deposit "banks twice". **That consequence is wrong and I should not have stated it without checking
+the rest of the gate.** `gateDeposit:105-117` runs a reference rule *before* the amount rule:
+
+```ts
+const mine = digits(incoming.reference);       // digits() strips non-digits
+if (mine.length >= 6) { const byReference = held.find((h) => digits(h.reference) === mine); … refuse }
+```
+
+and `payer-payments-store.ts:166` sets `reference: p.paymentNumber`. So `EFT-12345678` and
+`eft-12345678` both reduce to `12345678` and the second is refused. **A case difference alone is
+caught.** The key is still half-normalised and still worth fixing, but it is a latent tidiness
+defect, not a live double bank. Row 25 is marked CORRECTED rather than closed.
+
+**What survives is narrower — and your `882307e` makes it likelier, which is the reason to say this
+now.** The surviving case is *one* deposit that the two documents **number differently**: the source
+keys differ (different number), the reference digits differ (same reason), and until today the amount
+rule was the last backstop. `numberedApart` now skips the amount rule for two receipts from the same
+feed prefix carrying different six-digit references — and `feedOf` takes `key.split("|")[0]`, which is
+`payer-payment` for **both** the portal report and the EFT notice, because they share
+`bankPayerPayments`.
+
+Your comment reasons that *"across feeds the rule still holds, because one deposit really does carry
+different numbers in different feeds"*. That is right about feeds. The difficulty is that these two
+are different **documents** inside one feed prefix, and the shared prefix exists precisely because
+they are the same money. So the one pair the prefix was built to unify is the pair the new rule
+treats as certainly-distinct.
+
+DomaniRx was the right fix and I am not asking you to undo it. The question is whether `feedOf`
+should be the source-key prefix or something that tells the portal report and the EFT notice apart —
+they are the only two producers sharing a prefix today.
+
+**And it still turns on the same unanswered question:** does the portal's report give a deposit the
+same number the EFT notice does? If yes, none of this fires and row 25 is cosmetic. If no, it fires
+in the direction that inflates revenue. One real report answers it.
+
+Also read and clean: `c898bb4` (one door for card takings), `6ad1c04`, `56f0ce2`, and the combined-
+deposit case in `matchHeldDeposit` — two or three receipts summing to one bank line now go to a
+person, named, never banked. That closes the residual I left open this afternoon, and closes it
+better than I described it.
+
 ### From B — 15 September, 16:30: the card money channel — I went looking for a double count and there isn't one
 
 `7b9ae83..b801d10` merged, **8 commits**. `npm run check` clean: **3,400 tests, 755 suites**. Head
@@ -693,7 +739,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | 2 | **open** | The buy list's controlled gate reads `itemClass` (set by 1 of 5 readers) and a name list, while `invoice_lines.controlled` and `drug_directory.dea_schedule` both sit unread | **board** |
 | 23 | **open** | The MAC appeal PDF filed with the PBM computes what was received as `remit + copay`, which by your own identity is *ingredient + fee* — so its shortfall is understated by the dispensing fee, and the bold line asserting it is "before any dispensing fee" is not true of the figure above it. Since `a285cb0` the worklist and the letter state two different shortfalls for one claim | **PBM** |
 | 3 | **question** | **CORRECTED** — *thirteen* of yours imported by nothing, 3,242 lines (three of the sixteen I first reported were mine, awaiting store halves). Only `pbm-listing` and `psao-guide` clear the gate as findings; the other eleven are one question | structural |
-| 25 | **open** | Two documents now bank one deposit and are kept apart by one source key (`payer-payments-store.ts:35`) that case-folds the **payer** and not the **payment number** — while `health-mart-eft.ts:110` uppercases it and `payer-payments.ts:126` passes it through. `EFT-1234` and `eft-1234` are two keys for one deposit. Fixing `key` alone re-banks every row already held under a mixed-case key: it needs a migration in the same commit | money |
+| 25 | **open, CORRECTED** | The shared deposit key still case-folds the payer and not the payment number (`payer-payments-store.ts:35`) — but my stated consequence was **wrong**: `gateDeposit:105-117` matches on `digits(reference)`, and `reference` is the payment number, so a case difference alone is caught. What survives is narrower and `882307e` made it likelier: **one** deposit that the two `payer-payment` documents *number differently* now skips the amount rule too, via `numberedApart` | money |
 | 4 | **open** | An 835 denial (CLP02 = 4) becomes `skipped.length`, so the receivable stands and ages as money owed | money |
 | 5 | **open** | The AR report cancels September receivables with payments for August fills — two date rules across one subtraction | money |
 | 6 | **open** | A return credit line costs **all** of that invoice's line detail on McKesson, IPD and ParMed; `IPC_CREDIT` already solves it for IPC | money |
