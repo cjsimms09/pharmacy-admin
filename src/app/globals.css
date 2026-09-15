@@ -183,8 +183,11 @@ body { @apply bg-ground text-ink antialiased; font-size: 0.9375rem; line-height:
 
   /* ── the head of the site: one bar, six words ───────────────── */
   .site-head { @apply sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur; }
-  .site-row { @apply mx-auto flex max-w-[1280px] items-center gap-6 px-6; }
-  .nav-group { @apply relative flex h-14 items-center whitespace-nowrap px-1 text-sm font-medium text-ink-2 transition-colors hover:text-ink; }
+  .site-row { @apply mx-auto flex max-w-[1280px] items-center gap-3 px-4 sm:gap-6 sm:px-6; }
+  /* A phone: the mark and the buttons on one row, the six words on a second that scrolls. From lg, one row as before. */
+  .site-row-head { @apply flex-wrap pt-2 lg:flex-nowrap lg:pt-0; }
+  .nav-scroll { @apply order-last -mx-4 w-[calc(100%+2rem)] overflow-x-auto px-4 lg:order-none lg:mx-0 lg:w-auto lg:overflow-visible lg:px-0; }
+  .nav-group { @apply relative flex h-11 items-center lg:h-14 whitespace-nowrap px-1 text-sm font-medium text-ink-2 transition-colors hover:text-ink; }
   .nav-group.on { @apply text-ink; }
   .nav-group.on::after { content: ""; @apply absolute inset-x-1 bottom-0 h-0.5 rounded-t; background: var(--color-accent); }
   .nav-sub { @apply border-t border-line bg-ground/70; }
@@ -210,7 +213,7 @@ body { @apply bg-ground text-ink antialiased; font-size: 0.9375rem; line-height:
   .nav-more > div a.on { @apply font-semibold text-ink; }
 
   /* ── the page ───────────────────────────────────────────────── */
-  .page { @apply mx-auto w-full max-w-[1280px] px-6 py-8; }
+  .page { @apply mx-auto w-full max-w-[1280px] px-4 py-5 sm:px-6 sm:py-8; }
   .crumb { @apply flex min-w-0 items-center gap-1.5 text-sm; }
   .crumb a { @apply text-ink-2 hover:text-ink; }
   .crumb-sep { @apply text-ink-3; }

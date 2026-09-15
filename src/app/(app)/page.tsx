@@ -298,10 +298,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <Link href="/money/found" className="btn btn-primary">Where the money is</Link>
             {/* Entered every day, so it is one press from the page the day starts on. */}
             <Link href={`/deliveries?month=${today.slice(0, 7)}`} className="btn">Today&rsquo;s deliveries</Link>
-            <Link href="/inbox" className="btn">Inbox</Link>
-            <Link href="/settings/setup" className="btn">Finish setting up</Link>
-            <Link href="/compliance" className="btn">Compliance</Link>
-            <Link href="/compliance/training" className="btn">Training</Link>
+            {/*
+              Not on a phone: Inbox is already in the bar above, and Compliance is one of the six words. Seven buttons
+              wrapped to three rows there and pushed the scoreboard below the fold before a single figure showed.
+            */}
+            <Link href="/inbox" className="btn hidden sm:inline-flex">Inbox</Link>
+            <Link href="/settings/setup" className="btn hidden sm:inline-flex">Finish setting up</Link>
+            <Link href="/compliance" className="btn hidden sm:inline-flex">Compliance</Link>
+            <Link href="/compliance/training" className="btn hidden sm:inline-flex">Training</Link>
             {lateCount > 0 && <Link href="#now" className="btn btn-primary">Work through {lateCount}</Link>}
           </>
         }
