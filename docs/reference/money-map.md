@@ -1196,3 +1196,68 @@ saleable-return credits have been issued since 19 August.
 - The weekly transition from open to cleared on a second real report: only one AP report exists.
 - Cash cost of goods for September as a total was not recomputed this checkpoint.
 
+---
+
+## 7. PioneerRx "System Sales Totals By Payment Type" — rehearsed
+
+**Checkpoint 7. Code at 8394955 (reader and store).** Sample: **the owner's real report for 30–31 August 2026**,
+printed 15 September. Rehearsed on a fresh snapshot.
+
+### 1–2 · What it is, door, recognition
+
+The till's own split of a period's takings by how they were paid (cash, cheque, card, account, coupons, and a
+returns column for each), by section: front shop, prescription customer payments, plan remit, and adjustments.
+Sent daily by the owner. Door: mailbox → `classify` → `sales_by_payment` → `fileSalesByPayment`.
+**Rehearsed: the real file classifies `sales_by_payment`.** Recognition is by its title in the first 2,000
+characters. A report missing any of the nine payment columns, Totals or Tax Collected is refused, naming the
+column.
+
+### 3 · Read correctly? Could the checks pass for the wrong reason?
+
+| figure (30–31 Aug) | read |
+|---|---|
+| cards | $3,768.82 less $181.23 refunded = **$3,587.59** |
+| cash / cheques / accounts / coupons | $56.46 / $34.39 / $0.00 / $0.00 |
+| prescriptions | patients $3,426.89, plans $43,919.34 |
+| front shop | $234.00 plus $17.55 sales tax |
+| total | $47,580.23 |
+
+- Every row's payments equal its total plus tax.
+- Every section's rows equal its printed totals row.
+- **All payment columns ($3,678.44) = total − plan remit + tax, to the cent.**
+- **A copy with one figure raised by $1.00 is refused**, naming the row and the two totals it breaks.
+
+The checks compare the report with its own printed totals, and those come from PioneerRx, not the rows; so a
+misread cannot agree with itself.
+
+### 4–5 · Where it lands; basis
+
+One row per period in `sales_by_payment`. **It books nothing on either basis**: it is a check.
+- Rehearsed as it is: before the books, kept, nothing recorded.
+- A year on: stored.
+- The same period again: *"replaces that one"*.
+
+### 6 · What it matches, and what could not be rehearsed
+
+Its two checks are the till's card figure against the card batches for the same days, and prescription money
+against the claims sold those days. **Neither could be exercised on this sample.** No card batch and no claim
+for 30–31 August is on the site (the books start 1 September), and the batch closed 31 August is on the
+September card statement, which does not exist yet. A year on, the checks correctly say *"no card batch report
+is on file … cannot be checked yet"* and *"0 claims … against PioneerRx's $43,919.34"*.
+
+**To rehearse them, one more sample is needed and PioneerRx can produce it today:** the same report run for
+**3–14 September**. The site holds all 8 card batches for those days ($34,112.41) and the claims sold on them.
+That single run would test both checks, including the two joins section 1 left unverified: batch close day
+against sale day, and how reversals net.
+
+### Gaps for this feed
+
+None that the sample can show. One observation for the owner's run: the sample's file name begins
+"Accrual_", which suggests PioneerRx offers this report on more than one basis. Which basis the daily reports
+should use belongs with Q-CARD-2 (whether account payments appear).
+
+### Not checked, said out loud
+
+- The card and prescription checks (above).
+- A report covering a single day, which is how the owner sends them: the sample covers two.
+
