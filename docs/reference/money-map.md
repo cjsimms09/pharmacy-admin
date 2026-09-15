@@ -2251,6 +2251,91 @@ It banks nothing. Undo removes its rows by document.
 - Rx-level joins on the samples: impossible, since their fills predate the books. Measured instead with synthetic
   Veridikal rows on September's voucher claims.
 
+### Part 2: built and rehearsed (work/veridikal, f7c9ebc), then HELD
+
+**Rehearsed on a fresh snapshot** (feature/compliance merged, including session 1's matcher fix ec3d22d).
+
+| rehearsal | result |
+|---|---|
+| the two real samples | classified `veridikal_report`; 22 and 82 rows posted, 0 matched, all out of books; read again, 0 posted; nothing banked |
+| the same, before ec3d22d | **6 June eVoucher rows attached to September refills of the same prescriptions**: the fault ec3d22d fixed, confirmed on real data |
+| synthetic eVoucher rows for September's 47 paid voucher claims, 3 made to disagree | 47 matched; 44 agree; the 3 named with both figures |
+| the plans' received money | **$0.00** change |
+| the voucher lines | Veridikal $7,385.43 and RedSail $347.42 settle; the injected $1.00 shows as overpaid |
+| billed total | unchanged, $253,985.34 |
+| read again | 0 posted |
+| revenue | $118.50: $117.50 of fees plus the $1.00 the claim did not carry |
+| undo | removes the 47; receivables return to before |
+
+**The cross-check (the owner's point):** each eVoucher row is checked against its claim:
+- Total Due From Third Party = remit − voucher;
+- Patient Out Of Pocket = the claim's patient total;
+- Voucher Amount = the claim's voucher.
+
+A disagreement is named, never refused.
+- Not compared: Original 3rd Party Copay. PioneerRx's copay column equals its patient total on 46 of September's 47
+  paid voucher claims, so it is not "the copay before the voucher". The reader already holds the report's copay to
+  voucher + patient.
+- Denial Conversion: remit = manufacturer's payment, and the patient's share.
+
+**HELD by session 1: the voucher's payer is named wrongly.** The rule "RedSail on BIN 028249, Veridikal otherwise"
+was inferred from the July sample, and PioneerRx contradicts it (session 1, read-only, 73f7e12):
+- RedSail's switch vouchers sit on the plan's own claim: `EvoucherAmountPaid`, message "X HAS PROVIDED A $ VOUCHER".
+  They are on CVS, ESI and OptumRx BINs, never on 028249, which is RxLocal's cash discount card.
+- Veridikal's vouchers also sit on the primary claim, but only in its message. Of the sample's 67 rows with a message,
+  the message amount (`EvoucherAmountFromMessage`) equals Veridikal's report on 67, while `EvoucherAmountPaid` is
+  nought on 66. They are not secondary transmissions.
+- Denial conversion's ingredient amount did not equal the message amount on the 10 samples with a message: unresolved.
+- Claims now carry `evoucher_programme` (RedSail | Veridikal) and `evoucher_message_cents` (migration 0122), filled by
+  the next pull.
+
+**The owner's model, adopted:** *"the evoucher is a secondary."* Every voucher is a secondary payer on the fill with its
+own receivable, however PioneerRx stores it:
+- a COB transmission brings its own claim row;
+- a voucher on the primary is normalised into a secondary share, owed by the programme `evoucher_programme` names;
+- the primary's share is remit − voucher;
+- one settlement rule: a programme's payment settles only the secondary, a plan's only the primary.
+
+The rework waits on the pull.
+- **Still unmeasured:** whether the plan's remit includes a Veridikal voucher, measured as it was for RedSail (a plan
+  payment = remit − voucher?). It needs `evoucher_message_cents` filled on live.
+
+---
+
+## 16. Receivables claim by claim, and a negative remit as a fee owed (work/ar-claims, b88f7e4)
+
+**The owner:** aged receivables by payer, printable and emailed monthly. `/payers/ar` existed, but it could age only
+payers that had never remitted: received money was summed per payer.
+
+**G-AR-1. A part-paid payer's balance could not be aged, and an overpaid claim hid another's shortfall.**
+OBSERVATION: September as at 30 September: $70,034.62 of 4 payers' balances sat in "Cannot be aged". The bands plus
+the unaged column missed the outstanding total by $29.65.
+SHOULD BE: accounts receivable are aged invoice by invoice; a payment is applied to the claim it names. Claim-level
+matching has been trustworthy since ec3d22d.
+DIFFERENCE: yes. **FIXED on work/ar-claims b88f7e4, not yet merged** (it branches from the held work/veridikal).
+- Each share carries its claim and portion, is settled only by payments on the same claim and portion, and is aged
+  by its own fill date. Rehearsed: Cannot be aged **$0.00**; bands = outstanding exactly, **$247,582.01**.
+- Prime 610455's outstanding rises $19.34: an overpaid claim no longer offsets the others.
+- Payments matched to a claim outside the period (2, net −$8.00) are counted apart; unattached unchanged.
+
+**G-AR-2. A negative remit was billed as a negative receivable.**
+OBSERVATION: 18 paid September claims have negative remits, −$108.65, from discount networks (ScriptSave, Hippo,
+OptumRx and Capital Rx discount BINs). They netted into their payers' billed totals, so some AR lines read negative.
+SHOULD BE: a network's charge for a claim is a payable of the pharmacy, not a receivable, and is not netted against
+what another claim is owed.
+DIFFERENCE: yes. **FIXED on work/ar-claims**: listed as fees owed by the pharmacy (18 claims, $108.65) in the report
+text, the spreadsheet and the page, and in no receivable figure.
+
+**AccessHealth inbox line (session 1 asked; the owner read "80 matched" as 2,055 failures).** Reworded on
+work/ah-wording, 752516e. It now says what an EFT's payments are:
+- settle a claim here;
+- filled before the books start ("nothing to match, nothing owed");
+- paid and taken back on a claim the pharmacy reversed;
+- waiting.
+
+Rehearsed on the 9: settle 80 ($4,141.31); before the books 2,055 ($160,258.70, including …5975's 10 earlier 835 rows);
+reversed 10 (net −$7.35); waiting 0.
+
 ---
 
 ## LINKS — how the records join, on what key, and how well it held on real data
@@ -2284,6 +2369,9 @@ flowchart LR
 | 835 claim payments ↔ deposit | trace → deposit | $14,506.16 net across 20 HMA remittances (G-835-2); on EFT …5975 fully explained by a dropped repeat (G-835-3) | cause fixed (9588193); the April and August 835s stay short, their files were not kept and they are before the books |
 | AccessHealth report ↔ deposit | EFT number | 8/9 totals equal their deposit to the cent; 1 deposit not yet on file | holds (403985f) |
 | AccessHealth report ↔ 835 claim payments | `EFT-…/<rx>` counted by rx and amount (the rx on 8,162/8,162 HMA rows) | …5975, both orders: 11 rows, $378.15 = the report | holds (403985f, 9588193); undo across the two is G-UNDO-1 |
+| Veridikal report ↔ bank credit | Total Due per batch date = the Veridikal credit; the batch date is printed in the bank line ("VT - 07-28-2026") | July samples: $7,971.34 and $3,822.46 = the 3 and 11 August credits, to the cent | holds (on the samples); the store says whether the credit is on file |
+| Veridikal row ↔ claim ↔ plan share | Rx + fill date + NDC (+ BIN hint) to the claim; the transaction number keys a re-read | real samples: 0 joinable (June fills). Synthetic September rows: 47/47 matched, 44 agree, 3 injected disagreements named | **unmeasured on real data**; the voucher's payer is being reworked to `evoucher_programme` (section 15, held) |
+| Payment ↔ claim share (AR) | the claim id and portion the matcher chose | September: 80 payments on claims, 2 on claims outside the period, 2,070 on no claim | holds on work/ar-claims (section 16) |
 | Copay voucher ↔ its own re-read | `copay|<check/ACH number>|<date>` and check number + rx + amount | the real scan read twice: banked once, posted once (after the check-number repair) | holds (8b14cc1, branch) |
 | Copay voucher ↔ bank credit | exact cents ±7 days, as any held receipt | not rehearsed: the voucher is dated 1 Sep, no September statement on file; August's 6 RedSail credits stay unplaced | expected-not-yet |
 | MTF 835 ↔ bank credit | MTF payments summed per day = the credit | 7/7 August, same day (section 5) | holds (d477ee4) |
@@ -2332,6 +2420,10 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 | G-BANK-2 | a scanned day "proves" with misreads that cancel | $36,558.71 banked beside its receipt; McKesson $1.00 off | 1 | **FIXED** de67a77 (held; two corrections leave 0 unproven) |
 | G-BANK-3 | descriptors miss the scan's spellings | 6 Heartland credits, 7 IPC debits, the ParMed spelling | 1 | **FIXED** de67a77; the 7 IPC lines with a damaged account number stay unplaced by design |
 | G-UNDO-1 | undoing the first of 835/AccessHealth for one EFT leaves the other's claims on no row | **$378.15** on …5975 | B / 2 | OPEN (warned in words, 54f699b) |
+| G-AR-1 | a part-paid payer's balance could not be aged; an overpaid claim hid another's shortfall | **$70,034.62** unaged (September) | 2 | FIXED on work/ar-claims b88f7e4, merges after the Veridikal rework |
+| G-AR-2 | a negative remit (network fee) billed as a negative receivable | **$108.65**, 18 claims | 2 | FIXED on work/ar-claims b88f7e4 |
+| G-VER-2 | the voucher's payer named by BIN, which PioneerRx contradicts | 47 September voucher claims | 2 / 1 | OPEN: rework to `evoucher_programme` after the next pull |
+| O-VER-1 | a claim with remit = voucher on which a plan paid $86.92 | $101.18 | — | OPEN, unexplained |
 | G-COPAY-1 | the copay-voucher fixture carries the real check/ACH number and NPI | 2 identifiers in git | 1 / 2 | **FIXED** 8430873; earlier commits still hold them (no force push) |
 | G-POST-2 | a re-scan of the same statement booked the El Segundo postage bill again | $40.99 per re-scan per charge | 1 | **FIXED** d46aaa5 (165 new keys, nothing new) |
 | G-BANK-4 | two identical lines on one day stopped the statement read | a statement cut off at the second line | 1 | **FIXED** 742c3b1 (both place; read again, both held) |
@@ -2361,7 +2453,7 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 | Q-AH-1 | what the "CS — Adjustment" rows on the AccessHealth reports represent ($4.51 across two EFTs) | **answered**: a payer's recoupment. Booked under Chargebacks and audit recoveries, 377709c |
 | Q-BANK-1 | what August's Prescription/TRANSFER, VERIDIKAL, DRHOUSE credits, the $15,912.81 transfer to the practice's account and the RRC PHARMA purchases are (section 13) | **answered** except Veridikal (Q-VER-1) and the Medications transfer (Q-WWFP-1); placed in d46aaa5 and 742c3b1 |
 | Q-WWFP-1 | how a purchase of drugs from WWFP reaches cost of goods, and which way the $15,912.81 "Medications" drugs moved | open (section 13) |
-| Q-VER-1 | what the Veridikal credits are ($11,793.80 in August); eVoucher is inferred, not measured | open; eVoucher amounts on the claims to be measured when convenient |
+| Q-VER-1 | what the Veridikal credits are ($11,793.80 in August); eVoucher is inferred, not measured | **answered** by the samples: the eVoucher ($7,971.34) and Denial Conversion ($3,822.46) summaries equal the two credits to the cent (section 15) |
 | Q-WWFP-2 | a sample of the monthly WWFP sales report, for accrual | expected-not-yet: asked for when it arrives |
 
 **Notes for A:**
