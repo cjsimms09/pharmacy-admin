@@ -1814,7 +1814,8 @@ Proposed fix: match Heartland on `HRT` + up to 3 scan characters + `ND PMT`; IPC
 squashed; add the rest with the owner naming each (see Q-BANK-1).
 
 **Q-BANK-1 (question for the owner).** What are these August credits and debits?
-- **Prescription/TRANSFER "ST-…"** credits: 13 in August, $15,554.78 as read, from $227.61 to $3,373.22;
+- **Prescription/TRANSFER "ST-…"** credits: 15 in August by the page images, $18,028.74, from $227.61 to
+  $3,373.22;
 - **VERIDIKAL TECHNO/ACH Pmt** $7,971.34 and $3,822.46, each "VT - 07-28-2026";
 - **DRHOUSE INC/PAYMENT** $38.35;
 - the **$15,912.81 "Ref … To *6728 Medications Aug"** transfer, and the account ending 6728;
