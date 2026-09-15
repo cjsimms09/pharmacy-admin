@@ -937,7 +937,7 @@ export async function importRecognised(
       imported = !r.refused && r.posted > 0;
     } else if (cls.kind === "veridikal_report") {
       /*
-       * Veridikal's itemised ACH: a claim payment per row, the fee as revenue, never banked (the bank statement banks the
+       * Veridikal's itemised ACH: a claim payment per row, revenue only beyond what the claim carries, never banked (the bank statement banks the
        * Veridikal credit). Before the vendor-bill rule, as the other forwarded payment reports are.
        */
       const { fileVeridikalReport } = await import("./veridikal-report-store");

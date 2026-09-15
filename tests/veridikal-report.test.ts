@@ -117,21 +117,22 @@ describe("Veridikal's eVoucher client summary", () => {
 });
 
 describe("Veridikal's Denial Conversion client summary", () => {
-  const ROWS = [dn("800201", "990201", 150, 5), dn("800202", "990202", 60.25, 5), dn("800203", "990201", -150, -5)];
+  // The Denial Conversion Fee is $2.00 on every row of the sample (P-5).
+  const ROWS = [dn("800201", "990201", 150, 2), dn("800202", "990202", 60.25, 2), dn("800203", "990201", -150, -2)];
 
   test("reads the manufacturer's payment and the fee paid to the pharmacy, with the transaction number from the unnamed column", () => {
     const r = readVeridikalReport(monthAndTotal(denialRows(ROWS)), NABP);
     assert.ok(r.ok, r.ok ? "" : r.why);
     assert.equal(r.report.program, "denial_conversion");
     assert.equal(r.report.paymentCents, 6025);
-    assert.equal(r.report.feeCents, 500);
-    assert.equal(r.report.totalDueCents, 6525);
+    assert.equal(r.report.feeCents, 200);
+    assert.equal(r.report.totalDueCents, 6225);
     assert.equal(r.report.rows[1].transaction, "800202");
     assert.equal(r.report.rows[1].ndc11, "99999999902");
   });
 
   test("a Fax Admin Fee is held for a person: no report has shown whether it is added or taken away", () => {
-    const rows = [dn("800201", "990201", 150, 5, 3, 158), ...ROWS.slice(1)];
+    const rows = [dn("800201", "990201", 150, 2, 3, 155), ...ROWS.slice(1)];
     const r = readVeridikalReport([{ name: "2026 Jul", rows: denialRows(rows) }], NABP);
     assert.equal(r.ok, false);
     assert.match(r.ok ? "" : r.why, /Fax Admin Fee/);
@@ -141,33 +142,54 @@ describe("Veridikal's Denial Conversion client summary", () => {
 describe("a Veridikal row against the claim it settles", () => {
   const read = readVeridikalReport(monthAndTotal(evoucherRows(EV_ROWS)), NABP);
   assert.ok(read.ok);
-  const row = read.report.rows[0]; // voucher $100.00, plan $120.00 expected, copay $110.00, patient $10.00
+  const row = read.report.rows[0]; // voucher $100.00 + $2.50 fee, plan $120.00 expected, patient $10.00
+  /*
+   * The claim's net carries the plan's share, the voucher, and $2.50 for the programme (P-2): $120.00 + $100.00 + $2.50.
+   * PioneerRx puts Veridikal's voucher in the message amount, not EvoucherAmountPaid.
+   */
+  const claim = { remitCents: 22250, evoucherCents: 0, evoucherMessageCents: 10000, copayCents: 1000, patientTotalCents: 1000 };
 
-  test("an eVoucher row agrees where the plan's share is the remit less the voucher, and copay, patient and voucher match", () => {
-    const c = checkRowAgainstClaim("evoucher", row, { remitCents: 22000, evoucherCents: 10000, copayCents: 11000, patientTotalCents: 1000 });
-    assert.deepEqual(c, { compared: true, agrees: true, differences: [] });
+  test("an eVoucher row agrees where the plan's share is the net less the voucher and the $2.50, and voucher, fee and patient match", () => {
+    assert.deepEqual(checkRowAgainstClaim("evoucher", row, claim), { compared: true, agrees: true, differences: [] });
+  });
+
+  test("a claim holding the voucher in EvoucherAmountPaid instead is read the same", () => {
+    assert.equal(checkRowAgainstClaim("evoucher", row, { ...claim, evoucherCents: 10000, evoucherMessageCents: null }).agrees, true);
+  });
+
+  test("the old reading, a net without the $2.50, is a disagreement: the plan's expected payment is $2.50 out", () => {
+    const c = checkRowAgainstClaim("evoucher", row, { ...claim, remitCents: 22000 });
+    assert.deepEqual(c.differences, [{ what: "the plan's expected payment", reportCents: 12000, claimCents: 11750 }]);
   });
 
   test("each field that differs is named with both figures, and the row is still not refused", () => {
-    const c = checkRowAgainstClaim("evoucher", row, { remitCents: 20000, evoucherCents: 9000, copayCents: 11000, patientTotalCents: 2000 });
+    const c = checkRowAgainstClaim("evoucher", row, { remitCents: 20000, evoucherCents: 0, evoucherMessageCents: 9000, copayCents: 2000, patientTotalCents: 2000 });
     assert.equal(c.agrees, false);
     assert.deepEqual(c.differences, [
-      { what: "the plan's expected payment", reportCents: 12000, claimCents: 11000 },
-      { what: "what the patient paid", reportCents: 1000, claimCents: 2000 },
+      { what: "the plan's expected payment", reportCents: 12000, claimCents: 10750 },
       { what: "the voucher", reportCents: 10000, claimCents: 9000 },
+      { what: "what the patient paid", reportCents: 1000, claimCents: 2000 },
     ]);
+  });
+
+  test("an eVoucher fee other than $2.50 is named", () => {
+    const r = readVeridikalReport([{ name: "2026 Jul", rows: evoucherRows([ev("900101", "990101", 100, 3, 110, 10)]) }], NABP);
+    assert.ok(r.ok, r.ok ? "" : r.why);
+    assert.deepEqual(checkRowAgainstClaim("evoucher", r.report.rows[0], claim).differences, [{ what: "the eVoucher fee", reportCents: 300, claimCents: 250 }]);
   });
 
   test("a reversal row is not compared", () => {
     assert.equal(checkRowAgainstClaim("evoucher", read.report.rows[2], { remitCents: 0, evoucherCents: 0, copayCents: 0, patientTotalCents: 0 }).compared, false);
   });
 
-  test("a denial conversion agrees where the remit is the manufacturer's payment and the patient's share matches", () => {
-    const d = readVeridikalReport(monthAndTotal(denialRows([dn("800201", "990201", 150, 5)])), NABP);
+  test("a denial conversion agrees where the claim's net is the manufacturer's payment and $2.50, the fee is $2.00, and the patient's share matches", () => {
+    // P-5: NetAmountPaid $671.36 = ingredient $668.86 + $2.50; Veridikal pays $668.86 + $2.00.
+    const d = readVeridikalReport(monthAndTotal(denialRows([dn("800201", "990201", 150, 2)])), NABP);
     assert.ok(d.ok);
-    assert.equal(checkRowAgainstClaim("denial_conversion", d.report.rows[0], { remitCents: 15000, evoucherCents: 0, copayCents: 0, patientTotalCents: 3500 }).agrees, true);
-    assert.deepEqual(checkRowAgainstClaim("denial_conversion", d.report.rows[0], { remitCents: 0, evoucherCents: 0, copayCents: 0, patientTotalCents: 3500 }).differences, [
-      { what: "the manufacturer's payment against the remit", reportCents: 15000, claimCents: 0 },
+    const conversion = { remitCents: 15250, evoucherCents: 0, evoucherMessageCents: 15250, copayCents: 3500, patientTotalCents: 3500 };
+    assert.equal(checkRowAgainstClaim("denial_conversion", d.report.rows[0], conversion).agrees, true);
+    assert.deepEqual(checkRowAgainstClaim("denial_conversion", d.report.rows[0], { ...conversion, remitCents: 15000 }).differences, [
+      { what: "the manufacturer's payment, against the claim's net less its $2.50", reportCents: 15000, claimCents: 14750 },
     ]);
   });
 });

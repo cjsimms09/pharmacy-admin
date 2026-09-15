@@ -12,7 +12,9 @@
  *   Total Due to Pharmacy is, on every row,
  *     eVoucher:          Voucher Amount + eVoucher Fee            (and Voucher Amount = Original 3rd Party Copay − Patient Out Of Pocket)
  *     Denial Conversion: Ing Cost Pd by Manufacturer + Denial Conversion Fee
- *   so the fees are paid **to** the pharmacy;
+ *   so the fees are paid **to** the pharmacy — but they are not new money. The claim's net already carries $2.50 for
+ *   the programme: the eVoucher Fee ($2.50) returns it, and the Denial Conversion Fee ($2.00) returns all but $0.50
+ *   (VERIDIKAL_CLAIM_FEE_CENTS, measured on PioneerRx 15 September);
  *   the report's Total Due equals its Veridikal bank credit to the cent;
  *   the Deposit Date (an Excel date number) is Veridikal's batch date, printed in the bank line, not the bank's date;
  *   a month tab and a "Total" tab carry the same rows;
@@ -28,6 +30,22 @@
 import { excelSerialToIso } from "./xlsx";
 
 export type VeridikalProgram = "evoucher" | "denial_conversion";
+
+/** Who a Veridikal payment is from, by programme: the payer name its claim payments carry and its receivables are owed by. */
+export const VERIDIKAL_PAYER: Record<VeridikalProgram, string> = { evoucher: "Veridikal (eVoucher)", denial_conversion: "Veridikal (Denial Conversion)" };
+
+/*
+ * The fees, measured, not read from a contract (none is on file).
+ *   On the claim: a Veridikal claim's net carries $2.50 beyond the voucher or the manufacturer's ingredient payment. On an
+ *     eVoucher the plan pays net − message − $2.50 (P-2); on a conversion NetAmountPaid = ingredient + $2.50 and
+ *     DispensingFeePaid is $2.50 on every sample row (P-5).
+ *   Paid by Veridikal: the eVoucher Fee is $2.50 on all 74 paid and 8 reversed rows of the eVoucher report; the Denial
+ *     Conversion Fee is $2.00 on every row of that sample.
+ * A row whose fee is not these is still posted, as Veridikal's statement of what it paid, and said as a difference.
+ */
+export const VERIDIKAL_CLAIM_FEE_CENTS = 250;
+export const VERIDIKAL_EVOUCHER_FEE_CENTS = 250;
+export const VERIDIKAL_CONVERSION_FEE_CENTS = 200;
 
 export type VeridikalRow = {
   /** Veridikal's own number for the row: the re-read key. */
@@ -55,7 +73,13 @@ export type VeridikalRow = {
 };
 
 /** The claim fields a row is checked against. */
-export type ClaimForCheck = { remitCents: number | null; evoucherCents: number | null; copayCents: number | null; patientTotalCents: number | null };
+export type ClaimForCheck = {
+  remitCents: number | null;
+  evoucherCents: number | null;
+  evoucherMessageCents?: number | null;
+  copayCents: number | null;
+  patientTotalCents: number | null;
+};
 
 export type RowCheck = { compared: boolean; agrees: boolean; differences: { what: string; reportCents: number; claimCents: number }[] };
 
@@ -63,15 +87,20 @@ export type RowCheck = { compared: boolean; agrees: boolean; differences: { what
  * One row against the claim it settles, which is the owner's check: *"the veridikal report shows how much we should be
  * expecting from the primary payor as well, this should match what we show from claims."*
  *
- *   eVoucher           Total Due From Third Party = the plan's share (remit less voucher, money map section 15)
- *                      Patient Out Of Pocket      = what the claim says the patient was left owing
+ * The claim's voucher is its message amount, where PioneerRx put Veridikal's, or else EvoucherAmountPaid. Its net carries
+ * $2.50 beyond the voucher or the ingredient payment (VERIDIKAL_CLAIM_FEE_CENTS).
+ *
+ *   eVoucher           Total Due From Third Party = the plan's share: net − voucher − $2.50
  *                      Voucher Amount             = the claim's voucher
+ *                      eVoucher Fee               = $2.50
+ *                      Patient Out Of Pocket      = what the claim says the patient was left owing
  *                      (Original 3rd Party Copay is not compared on its own. The reader already holds it to voucher plus
  *                      patient, so it agrees whenever those two do; and PioneerRx's copay column equals its patient total
  *                      on 46 of September's 47 paid voucher claims, so it is not the copay before the voucher and would
  *                      call every voucher row a disagreement.)
- *   Denial Conversion  the plan's share is nought, and the remit is the manufacturer's ingredient payment
- *                      Patient Out Of Pocket      = what the claim says the patient was left owing
+ *   Denial Conversion  Ing Cost Pd by Manufacturer = net − $2.50: the plan's share is nought
+ *                      Denial Conversion Fee       = $2.00
+ *                      Patient Out Of Pocket       = what the claim says the patient was left owing
  *
  * A reversal row (negative) is not compared: it takes back an earlier row, and the claim it reverses may already be
  * reversed on the site. A disagreement never refuses the report — it is still Veridikal's statement of what it paid —
@@ -80,19 +109,20 @@ export type RowCheck = { compared: boolean; agrees: boolean; differences: { what
 export function checkRowAgainstClaim(program: VeridikalProgram, row: VeridikalRow, claim: ClaimForCheck): RowCheck {
   if (row.paymentCents < 0 || row.totalDueCents < 0) return { compared: false, agrees: true, differences: [] };
   const remit = claim.remitCents ?? 0;
-  const voucher = claim.evoucherCents ?? 0;
+  const voucher = (claim.evoucherMessageCents ?? 0) || (claim.evoucherCents ?? 0);
   const differences: RowCheck["differences"] = [];
   const check = (what: string, reportCents: number | null, claimCents: number) => {
     if (reportCents !== null && reportCents !== claimCents) differences.push({ what, reportCents, claimCents });
   };
   if (program === "evoucher") {
-    check("the plan's expected payment", row.thirdPartyDueCents, remit - voucher);
-    check("what the patient paid", row.patientOutOfPocketCents, claim.patientTotalCents ?? 0);
+    check("the plan's expected payment", row.thirdPartyDueCents, remit - voucher - VERIDIKAL_CLAIM_FEE_CENTS);
     check("the voucher", row.paymentCents, voucher);
+    check("the eVoucher fee", row.feeCents, VERIDIKAL_EVOUCHER_FEE_CENTS);
   } else {
-    check("the manufacturer's payment against the remit", row.paymentCents, remit);
-    check("what the patient paid", row.patientOutOfPocketCents, claim.patientTotalCents ?? 0);
+    check("the manufacturer's payment, against the claim's net less its $2.50", row.paymentCents, remit - VERIDIKAL_CLAIM_FEE_CENTS);
+    check("the conversion fee", row.feeCents, VERIDIKAL_CONVERSION_FEE_CENTS);
   }
+  check("what the patient paid", row.patientOutOfPocketCents, claim.patientTotalCents ?? 0);
   return { compared: true, agrees: differences.length === 0, differences };
 }
 
