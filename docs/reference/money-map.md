@@ -289,6 +289,20 @@ K is $0.00 here only because the Access Health spelling on record names no payer
 stays unplaced. By the code, a PSAO line that did name a payer would be placed as a deposit and banked
 beside the HMA receipt, because `gateDeposit` never compares a receipt with no source key. That variant is the HMA/835 class session 1 has put in the 835 checkpoint, and it was not run here.
 
+**Fourth run (code at 56f0ce2 + 882307e, fresh snapshot 17:30 UTC)**, after session 1's fixes for G-CARD-9, -10
+and -11. The reproductions follow the new code: a card deposit matched against `card-batch|…` receipts only,
+and the form's check reporting combinations.
+- A–E, all three spellings: **$0.00 over**.
+- H1 refused. H1b refused. **H2b refused** by the gate: *"535.35 was already typed in by hand for 2026-10"*.
+  **H1c refused** by the form: *"already banked automatically as 2 receipts together"*. Hand path: added
+  $2,069.33, genuinely in $2,069.33.
+- **K**: the card line stays unplaced (no batch), the Access Health line confirms the HMA receipt, and the
+  batch forwarded afterwards banks. $0.00 over, **and each line linked to its own receipt.**
+- One new behaviour, loud: in H2 the form refused a genuinely new $424.24. Two unrelated receipts already on
+  the copy summed to it exactly ($313.13 from H1 and $111.11 from D). The person can tick "This is different
+  money". The batch forwarded afterwards banked once. So H2's original order was not exercised this run; its
+  gate path is the one H2b proves. How often real receipts produce such a coincidence: not measured.
+
 ### Gaps for this feed
 
 **G-CARD-1. A bank statement read before a batch is forwarded counted that money twice. — FIXED, 6ad1c04.**
@@ -327,7 +341,7 @@ FIXED:
 - the ambiguous message no longer says "confirm it by hand".
 Third run: H1 refused by the form (proved at `automaticReceiptsLike`), H2 refused by the gate.
 
-**G-CARD-9. A card deposit typed under the bank's month, for a batch that closed the month before, still counts twice.**
+**G-CARD-9. A card deposit typed under the bank's month, for a batch that closed the month before, still counts twice. — FIXED, 56f0ce2 (fourth run, H2b refused).**
 OBSERVATION: third run, H2b. A deposit of $535.35 was typed for October (the day it reached the bank, 1
 October). The batch that closed 30 September was then forwarded, and both banked. The gate's new check
 compares typed receipts **within the same month only** (`addCashReceipt` queries `month = input.month`). The
@@ -341,7 +355,7 @@ Owner: `expenses.ts` `addCashReceipt` and `deposit-gate.ts` — **1**.
 Proposed fix: query typed receipts for the batch's month **and the month after** (the same widening
 `automaticReceiptsLike` already uses), and compare across both.
 
-**G-CARD-10. A combined deposit typed with the form, beside the two batches it covers, still counts twice.**
+**G-CARD-10. A combined deposit typed with the form, beside the two batches it covers, still counts twice. — FIXED, 56f0ce2 (fourth run, H1c refused).**
 OBSERVATION: third run, H1c. Batches of $70.07 on 9/24 and $80.08 on 9/25 were banked, then their combined
 $150.15 was typed for September, and both banked. `automaticReceiptsLike` looks for one receipt of the exact
 amount. The ambiguous bank line now says *"banking it with the form would count it twice"*, but the form
@@ -352,7 +366,7 @@ Owner: `money/page.tsx` — **A**; `expenses.ts` — **1**.
 Proposed fix: `automaticReceiptsLike` also looks for 2–3 automatic receipts summing exactly, the same search
 `matchHeldDeposit` does, and names them.
 
-**G-CARD-11. A card deposit can confirm a receipt that is not a card batch.**
+**G-CARD-11. A card deposit can confirm a receipt that is not a card batch. — FIXED, 56f0ce2 (fourth run, K).**
 OBSERVATION: third run, K. With no batch on file, a Heartland credit of $987.65 confirmed a Health Mart
 Atlas receipt of $987.65 banked the day before. `matchHeldDeposit` confirms a single candidate whatever its
 payer; the payer is only used to choose between several. In the same statement the Access Health line of
@@ -778,7 +792,11 @@ already on file.
 
 ### Gaps for this feed
 
-**G-PP-1. A payer's second payment of the same amount within seven days is refused as a duplicate, so real money is not counted.**
+**G-PP-1. A payer's second payment of the same amount within seven days is refused as a duplicate, so real money is not counted. — FIXED, 882307e (pushed, not deployed at the re-run).**
+Re-run on a fresh snapshot (17:29 UTC): August report **44 banked, $510,990.21, 0 refused**; again, 44 already
+held. On the August bank lines, the 8/28 $904.00 line now names both $904 receipts rather than confirming
+the wrong one. Nothing banked. **The live database still holds 5 DomaniRx August receipts.** August is out of
+books, so no account is affected; re-reading the report after the deploy would bank the sixth.
 OBSERVATION: rehearsal 1. The real August report holds two DomaniRx payments of **$904.00**: payment …4538
 deposited 8/26 and payment …2227 deposited 8/28, with different payment numbers. The second was refused:
 *"904.00 from DOMANIRX on 2026-08-28 is already banked as …4538 under 2026-08-26"*. **The live database shows
