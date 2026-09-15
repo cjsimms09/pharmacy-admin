@@ -80,6 +80,8 @@ const KIND_WORDS: Record<string, string> = {
   card_batch: "Credit card batch",
   /* The month's card fees, booked as a bill; its deposits only checked against the batches. See card-statement.ts. */
   card_statement: "Card processing statement",
+  /* One Health Mart Atlas EFT itemised: claim payments posted, nothing banked. See accesshealth-payment-store.ts. */
+  accesshealth_payment: "Health Mart Atlas payment detail",
   /* How the till was paid. Checks the card batch and the claims; books nothing. See sales-by-payment.ts. */
   sales_by_payment: "Sales by payment type",
   /* It ran, and there was nothing in it. A closed Sunday, not a reader that failed. */

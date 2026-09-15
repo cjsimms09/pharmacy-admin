@@ -915,6 +915,17 @@ export async function importRecognised(
       const r = await bookCardStatement({ text: pdfText(buf), documentId: filed?.documentId ?? null }, { userName: ctx.userName ?? "mailbox-sweep" });
       routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
       imported = !r.refused;
+    } else if (cls.kind === "accesshealth_payment") {
+      /*
+       * Health Mart Atlas's itemised EFT. Claim payments only, revenue nought, never banked: the payer payment report
+       * and the EFT notice bank the deposit. Before the vendor-bill rule for the same reason as the card statement —
+       * it is forwarded by staff, and a vendor claiming that address must not turn it into a draft bill.
+       */
+      const { fileAccessHealthPayment } = await import("./accesshealth-payment-store");
+      const { pdfText } = await import("./pdf-text");
+      const r = await fileAccessHealthPayment({ text: pdfText(buf), documentId: filed?.documentId ?? null, fileName }, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined });
+      routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
+      imported = !r.refused && r.posted > 0;
     } else if (await vendorBill(from)) {
       /*
        * A bill from somebody the pharmacy has told us about.

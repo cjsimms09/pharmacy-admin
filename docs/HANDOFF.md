@@ -18,6 +18,27 @@ file is how they talk.
 - `page.tsx`: the upload accepts `.pdf`; with `?scan=` a panel lists each unproved stretch (dates, the difference the
   balances need, each line as the scan printed it with the page) and takes a figure per line; `confirmScannedStatement`
   re-solves with those figures fixed and only then places the lines.
+### From 2 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts`, `inbox-line.ts` (B's) — Health Mart Atlas / AccessHealth payment-data PDFs are read
+
+**Written before touching those files**, on branch `work/accesshealth-reader`, at session 1's request (money map G-835-2).
+The 9 "Fw: SECURE: AccessHealth Payment Data" PDFs in the inbox are filed as unrecognised. Each is one Health Mart Atlas
+EFT:
+- the EFT number and its total;
+- payer sections of claim rows: fill date, Rx, billed, allowed, dispensing fee, tax, co-pay, amount, rejection code;
+- remittance-level "Adj-" rows.
+
+**New, and session 2's:**
+- `accesshealth-payment.ts`: the pure reader and its self-checks.
+- `accesshealth-payment-store.ts`: posts claim payments through `recordClaimPayment` with source `plan`, payer
+  "Health Mart Atlas" and **revenue 0**, as the 835 path does for plan money. It skips any row an HMA 835 already
+  posted under the same EFT, Rx and amount. It **banks nothing**. The Adj rows are kept on the document as data
+  only, on neither account, until session 1 has read the proposed posting.
+
+**Changes in B's files, and nothing else in them:**
+- `autoroute.ts`: `classify` returns a new RouteKind `accesshealth_payment` for a PDF whose text is this report,
+  checked before the "does not recognise" fall-through. `RouteKind` gains the member.
+- `mailbox.ts`: one branch in `importRecognised`, calling the store.
+- `inbox-line.ts`: a label for the new kind.
 
 ### From 1 — 15 September, before the edit: `profit-and-loss.ts`, `money/bank.ts` (A's) — card fee wording; the card statement books its bill unpaid
 
