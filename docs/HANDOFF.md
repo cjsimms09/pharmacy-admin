@@ -8,6 +8,14 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `expense-categories.ts`, `profit-and-loss.ts` (A's) — a "PSAO fees" offset, and DIR "missing" asks about DIR only
+
+**Written before touching A's files.** Session 2's AccessHealth origination fees (approved as a revenue offset like DIR)
+would, filed under "DIR fees and price concessions", stop the monthly account saying DIR is missing on a month with a
+$1.16 fee and no DIR entered. Changes: a seeded category "PSAO fees" (`revenue_offset`, sortOrder 42) for fees the PSAO
+takes out of plan payments; `profit-and-loss.ts` lists DIR as missing unless an expense in the DIR category itself is on
+file, rather than any revenue offset. Session 2's branch posts the fee under "PSAO fees".
+
 ### From 1 — 15 September, before the edit: `money/bank.ts`, `money/page.tsx` (A's), `bank-statement.ts`, `bank-descriptors.ts` — a bank credit no feed names is never banked from the statement
 
 **Written before touching A's files.** Session 2's scanned-bank rehearsal (G-BANK-1..3): every unrecognised credit banked as
