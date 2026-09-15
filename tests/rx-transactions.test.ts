@@ -35,28 +35,28 @@ const file = (...body: string[]) => [...HEAD, ...body, ...FOOT].join("\r\n");
 const SAMPLE = file(
   "Third Party:,003858(A4) - 003858",
   // paid, sold
-  "336853-0,P,$13.62,2ELA,CNCKSNPN,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,003858,20.0000,$2.53,A4,57237002901,$11.31",
+  "900000-0,P,$13.62,2ELA,CNCKSNPN,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,003858,20.0000,$2.53,A4,57237002901,$11.31",
   // paid, not yet sold
-  "321666-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,,09/05/26,003858,30.0000,$0.71,A4,68094090460,$11.15",
+  "900001-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,,09/05/26,003858,30.0000,$0.71,A4,68094090460,$11.15",
   // rejected
-  "336856-0,R,$0.00,DAVITRX,,$0.00,$0.00,$0.00,9/5/2026 11:19:08 AM,09/05/26,003858,0.0000,$0.00,A4,11534016003,$0.00",
+  "900002-0,R,$0.00,DAVITRX,,$0.00,$0.00,$0.00,9/5/2026 11:19:08 AM,09/05/26,003858,0.0000,$0.00,A4,11534016003,$0.00",
   "003858(A4) - 003858 Totals:",
   "$44.60,$0.00,$44.60,$3.00,$0.00,$3.00,$0.00,$47.60,$0.00,$0.00,$7.18,($1.92),$0.00,$0.00,$42.34",
   "Third Party:,004336 (ADV) - 004336",
   // paid, reversed, resubmitted with a different NDC — all sold
-  "336860-0,P,$8.81,RX1600,CNTRCT1010,$2.20,$10.50,$2.20,9/5/2026 11:32:08 AM,09/05/26,004336,15.0000,$0.39,ADV,10702001101,$11.11",
-  "336860-0,A,($8.81),RX1600,,($2.20),$0.00,($2.20),9/5/2026 11:32:08 AM,09/05/26,004336,-15.0000,($0.39),ADV,10702001101,($11.11)",
-  "336860-0,P,$8.81,RX1600,CNTRCT1010,$2.20,$10.50,$2.20,9/5/2026 11:32:08 AM,09/05/26,004336,15.0000,$1.22,ADV,16714008210,$10.28",
+  "900003-0,P,$8.81,RX1600,CNTRCT1010,$2.20,$10.50,$2.20,9/5/2026 11:32:08 AM,09/05/26,004336,15.0000,$0.39,ADV,10702001101,$11.11",
+  "900003-0,A,($8.81),RX1600,,($2.20),$0.00,($2.20),9/5/2026 11:32:08 AM,09/05/26,004336,-15.0000,($0.39),ADV,10702001101,($11.11)",
+  "900003-0,P,$8.81,RX1600,CNTRCT1010,$2.20,$10.50,$2.20,9/5/2026 11:32:08 AM,09/05/26,004336,15.0000,$1.22,ADV,16714008210,$10.28",
   // a reversal of a claim paid on an earlier day
-  '331488-1,A,"($1,204.25)",RX1606,,$0.00,$0.00,$0.00,9/5/2026 10:52:28 AM,09/04/26,004336,-60.0000,"($1,153.52)",ADV,81968004560,($50.73)',
+  '900004-1,A,"($1,204.25)",RX1606,,$0.00,$0.00,$0.00,9/5/2026 10:52:28 AM,09/04/26,004336,-60.0000,"($1,153.52)",ADV,81968004560,($50.73)',
   "20",
   // Not a value of any kind: still page furniture, and still skipped.
   "~ ~",
   "Third Party:,610455 (BCBSKS) - 610455",
   // group formatted as money by PioneerRx
-  '319184-3,P,$12.56,"$714,553,005.00",BIDBRODCBR,$0.00,$10.50,$0.00,9/5/2026 9:00:00 AM,09/05/26,610455,30.0000,$1.91,BCBSKS,42806008805,$12.29',
+  '900005-3,P,$12.56,"$714,553,005.00",BIDBRODCBR,$0.00,$10.50,$0.00,9/5/2026 9:00:00 AM,09/05/26,610455,30.0000,$1.91,BCBSKS,42806008805,$12.29',
   "Third Party:,PharmD Loyalty Plan - 028249",
-  "324333-3,P,$0.00,,,$7.00,$0.00,$7.00,9/5/2026 10:59:12 AM,09/05/26,028249,30.0000,$3.07,RXLOCAL,16714025802,$5.16",
+  "900006-3,P,$0.00,,,$7.00,$0.00,$7.00,9/5/2026 10:59:12 AM,09/05/26,028249,30.0000,$3.07,RXLOCAL,16714025802,$5.16",
 );
 
 describe("reading the report", () => {
@@ -78,13 +78,13 @@ describe("reading the report", () => {
   test("a bare number standing alone is a wrapped days supply, not furniture", () => {
     // The report is wider than its page, so a cell that will not fit prints on a line of its own.
     // Discarding those is what left days supply at 0 of 1,590 and every contract rate uncomputable.
-    const t = r.rows.find((x) => x.rxNumber === "331488");
+    const t = r.rows.find((x) => x.rxNumber === "900004");
     assert.equal(t?.daysSupply, 20);
   });
 
   test("the fields land where they belong", () => {
     const t = r.rows[0];
-    assert.equal(t.rxNumber, "336853");
+    assert.equal(t.rxNumber, "900000");
     assert.equal(t.fillNumber, 0);
     assert.equal(t.status, "P");
     assert.equal(t.bin, "003858");
@@ -104,12 +104,12 @@ describe("reading the report", () => {
   test("ingredient cost paid is plan paid plus copay less the dispensing fee", () => {
     const t = r.rows[0];
     assert.equal(t.ingredientPaidCents, 1362 + 0 - 1050);
-    const withCopay = r.rows.find((x) => x.rxNumber === "336860" && x.status === "P")!;
+    const withCopay = r.rows.find((x) => x.rxNumber === "900003" && x.status === "P")!;
     assert.equal(withCopay.ingredientPaidCents, 881 + 220 - 1050);
   });
 
   test("a reversal carries negated figures and a negative quantity", () => {
-    const a = r.rows.find((x) => x.rxNumber === "336860" && x.status === "A")!;
+    const a = r.rows.find((x) => x.rxNumber === "900003" && x.status === "A")!;
     assert.equal(a.remitCents, -881);
     assert.equal(a.quantityThousandths, -15_000);
   });
@@ -118,7 +118,7 @@ describe("reading the report", () => {
     assert.equal(repairNumericId("$714,553,005.00"), "714553005");
     assert.equal(repairNumericId("$2.00"), "2");
     assert.equal(repairNumericId("2ELA"), "2ELA");
-    assert.equal(r.rows.find((x) => x.rxNumber === "319184")!.groupNumber, "714553005");
+    assert.equal(r.rows.find((x) => x.rxNumber === "900005")!.groupNumber, "714553005");
   });
 
   test("the section line gives the payer label, its BIN and a PCN hint", () => {
@@ -130,8 +130,8 @@ describe("reading the report", () => {
   test("two identical rows on one day are two transactions with distinct keys", () => {
     const twice = file(
       "Third Party:,028250 - 028250",
-      "327714-2,P,$0.00,G,,$15.00,$0.00,$15.00,9/5/2026 1:00:00 PM,09/05/26,028250,28.0000,$5.70,X,68462072029,$9.30",
-      "327714-2,P,$0.00,G,,$15.00,$0.00,$15.00,9/5/2026 1:00:00 PM,09/05/26,028250,28.0000,$5.70,X,68462072029,$9.30",
+      "900007-2,P,$0.00,G,,$15.00,$0.00,$15.00,9/5/2026 1:00:00 PM,09/05/26,028250,28.0000,$5.70,X,68462072029,$9.30",
+      "900007-2,P,$0.00,G,,$15.00,$0.00,$15.00,9/5/2026 1:00:00 PM,09/05/26,028250,28.0000,$5.70,X,68462072029,$9.30",
     );
     const keys = parseRxTransactions(twice).rows.map((t) => t.transactionKey);
     assert.equal(new Set(keys).size, 2);
@@ -150,7 +150,7 @@ describe("reading the report", () => {
   });
 
   test("a row whose cells do not have the expected shapes is counted, not read wrong", () => {
-    const odd = file("Third Party:,003858(A4) - 003858", "336853-0,P,$13.62,2ELA,CNCKSNPN,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,NOTABIN,20.0000,$2.53,A4,57237002901,$11.31");
+    const odd = file("Third Party:,003858(A4) - 003858", "900000-0,P,$13.62,2ELA,CNCKSNPN,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,NOTABIN,20.0000,$2.53,A4,57237002901,$11.31");
     const r2 = parseRxTransactions(odd);
     assert.equal(r2.rows.length, 0);
     assert.equal(r2.reasons["a row whose BIN cell is not a six-digit BIN"], 1);
@@ -162,36 +162,36 @@ describe("deciding what each transaction does", () => {
   const plan = planTransactions(rows, { keys: new Set(), paid: [] }, { ignoreBins: ["028249"] });
 
   test("a paid, sold row becomes a claim", () => {
-    assert.ok(plan.insertPaid.some((t) => t.rxNumber === "336853"));
+    assert.ok(plan.insertPaid.some((t) => t.rxNumber === "900000"));
   });
 
   test("a paid row with no completed date is stored too, with the sale date blank: the report is drawn by transmission day and it will not come round again", () => {
-    const t = plan.insertPaid.find((x) => x.rxNumber === "321666");
+    const t = plan.insertPaid.find((x) => x.rxNumber === "900001");
     assert.ok(t);
     assert.equal(t.completedAt, null);
-    assert.ok(!plan.skipped.some((s) => s.txn.rxNumber === "321666"));
+    assert.ok(!plan.skipped.some((s) => s.txn.rxNumber === "900001"));
   });
 
   test("a reversal with no completed date still takes back the claim it names — that is how a return to stock arrives", () => {
     const unsoldThenReturned = file(
       "Third Party:,610455 (KSPDP) - 610455",
-      "334136-0,A,$0.00,10198268F,,($0.62),$0.00,($0.62),,09/02/26,610455,-5.0000,($0.68),KSPDP,72603070102,($0.42)",
+      "900008-0,A,$0.00,10198268F,,($0.62),$0.00,($0.62),,09/02/26,610455,-5.0000,($0.68),KSPDP,72603070102,($0.42)",
     );
-    const earlier = { id: "c9", rxNumber: "334136", fillNumber: 0, bin: "610455", ndc11: "72603070102", remitCents: 0, copayCents: 62 };
+    const earlier = { id: "c9", rxNumber: "900008", fillNumber: 0, bin: "610455", ndc11: "72603070102", remitCents: 0, copayCents: 62 };
     const p = planTransactions(parseRxTransactions(unsoldThenReturned).rows, { keys: new Set(), paid: [earlier] });
     assert.deepEqual(p.reverseExisting.map((r) => r.claimId), ["c9"]);
   });
 
   test("a re-sent row that now carries a completed date fills the sale date in, and nothing else changes", () => {
-    const unsoldKey = rows.find((x) => x.rxNumber === "321666")!.transactionKey;
+    const unsoldKey = rows.find((x) => x.rxNumber === "900001")!.transactionKey;
     const later = SAMPLE.replace(
-      "321666-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,,09/05/26",
-      "321666-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,9/7/2026 4:10:00 PM,09/05/26",
+      "900001-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,,09/05/26",
+      "900001-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,9/7/2026 4:10:00 PM,09/05/26",
     );
     const p = planTransactions(parseRxTransactions(later).rows, { keys: new Set([unsoldKey]), paid: [], unsold: new Map([[unsoldKey, "c7"]]) }, { ignoreBins: ["028249"] });
     assert.deepEqual(p.markSold, [{ claimId: "c7", completedAt: "9/7/2026 4:10:00 PM" }]);
     assert.equal(p.duplicates, 1);
-    assert.ok(!p.insertPaid.some((t) => t.rxNumber === "321666"));
+    assert.ok(!p.insertPaid.some((t) => t.rxNumber === "900001"));
   });
 
   test("the PCN is read in one case however the plan was typed", () => {
@@ -200,7 +200,7 @@ describe("deciding what each transaction does", () => {
   });
 
   test("a rejected row is set aside with a reason", () => {
-    assert.ok(plan.skipped.some((s) => s.txn.rxNumber === "336856" && /rejected/.test(s.why)));
+    assert.ok(plan.skipped.some((s) => s.txn.rxNumber === "900002" && /rejected/.test(s.why)));
   });
 
   test("the cash plan is kept and marked, not thrown away", () => {
@@ -214,24 +214,24 @@ describe("deciding what each transaction does", () => {
      * for the state to enforce on a price the pharmacy set, no contract to appeal under, and a
      * number below NADAC is what it charged rather than a shortfall to claim.
      */
-    assert.ok(!plan.skipped.some((s) => s.txn.rxNumber === "324333"), "no longer set aside");
-    const kept = plan.insertPaid.find((t) => t.rxNumber === "324333");
+    assert.ok(!plan.skipped.some((s) => s.txn.rxNumber === "900006"), "no longer set aside");
+    const kept = plan.insertPaid.find((t) => t.rxNumber === "900006");
     assert.ok(kept, "and it is stored");
     assert.equal(kept!.cashPlan, true, "flagged as the pharmacy's own price, not an insurer's");
   });
 
   test("paid, reversed and resubmitted in one file: the first is stored reversed, the second stands", () => {
-    const reversed = plan.insertReversedPaid.filter((x) => x.paid.rxNumber === "336860");
+    const reversed = plan.insertReversedPaid.filter((x) => x.paid.rxNumber === "900003");
     assert.equal(reversed.length, 1);
     assert.equal(reversed[0].paid.ndc11, "10702001101");
-    const standing = plan.insertPaid.filter((t) => t.rxNumber === "336860");
+    const standing = plan.insertPaid.filter((t) => t.rxNumber === "900003");
     assert.equal(standing.length, 1);
     assert.equal(standing[0].ndc11, "16714008210");
   });
 
   test("a reversal of a claim paid on an earlier day marks that claim reversed", () => {
     const earlier = {
-      id: "c1", rxNumber: "331488", fillNumber: 1, bin: "004336", ndc11: "81968004560", remitCents: 120_425, copayCents: 0,
+      id: "c1", rxNumber: "900004", fillNumber: 1, bin: "004336", ndc11: "81968004560", remitCents: 120_425, copayCents: 0,
     };
     const p2 = planTransactions(rows, { keys: new Set(), paid: [earlier] }, { ignoreBins: ["028249"] });
     assert.deepEqual(p2.reverseExisting.map((r) => r.claimId), ["c1"]);
@@ -240,11 +240,11 @@ describe("deciding what each transaction does", () => {
 
   test("a reversal that matches nothing we hold is kept as a reversed row, never dropped", () => {
     assert.equal(plan.insertUnmatchedReversal.length, 1);
-    assert.equal(plan.insertUnmatchedReversal[0].rxNumber, "331488");
+    assert.equal(plan.insertUnmatchedReversal[0].rxNumber, "900004");
   });
 
   test("a reversal never cancels a claim whose figures differ", () => {
-    const wrongAmount = { id: "c2", rxNumber: "331488", fillNumber: 1, bin: "004336", ndc11: "81968004560", remitCents: 120_000, copayCents: 0 };
+    const wrongAmount = { id: "c2", rxNumber: "900004", fillNumber: 1, bin: "004336", ndc11: "81968004560", remitCents: 120_000, copayCents: 0 };
     const p3 = planTransactions(rows, { keys: new Set(), paid: [wrongAmount] }, { ignoreBins: ["028249"] });
     assert.equal(p3.reverseExisting.length, 0);
     assert.equal(p3.insertUnmatchedReversal.length, 1);
@@ -265,8 +265,8 @@ describe("deciding what each transaction does", () => {
 
   test("with the completed-date rule switched on, unsold rows wait instead", () => {
     const sold = planTransactions(rows, { keys: new Set(), paid: [] }, { ignoreBins: ["028249"], requireCompleted: true });
-    assert.ok(!sold.insertPaid.some((t: Transaction) => t.rxNumber === "321666"));
-    assert.ok(sold.skipped.some((s) => s.txn.rxNumber === "321666" && /not yet sold/.test(s.why)));
+    assert.ok(!sold.insertPaid.some((t: Transaction) => t.rxNumber === "900001"));
+    assert.ok(sold.skipped.some((s) => s.txn.rxNumber === "900001" && /not yet sold/.test(s.why)));
   });
 });
 
@@ -323,9 +323,9 @@ describe("a column added to the report", () => {
   const rows17 = [
     "Third Party:,610097(A4) - 610097",
     // $204.57 in on a $328.23 drug: a real loss on the day, with $146.18 of facilitator money promised.
-    "332359-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,30.0000,$328.23,A4,00597015230,($123.66),$146.18",
+    "900009-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,30.0000,$328.23,A4,00597015230,($123.66),$146.18",
     // An ordinary generic, nothing promised.
-    "321666-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,9/5/2026 9:24:00 AM,09/05/26,610097,30.0000,$0.71,A4,68094090460,$10.65,$0.00",
+    "900001-4,P,$11.36,2CYA,EN45,$0.00,$10.50,$0.00,9/5/2026 9:24:00 AM,09/05/26,610097,30.0000,$0.71,A4,68094090460,$10.65,$0.00",
   ];
 
   const parsed = parseRxTransactions([...HEAD17, ...rows17, ...FOOT17].join("\r\n"));
@@ -341,7 +341,7 @@ describe("a column added to the report", () => {
      * reasonable — so these are checked against the row by hand, not against each other.
      */
     const [jardiance] = parsed.rows;
-    assert.equal(jardiance.rxNumber, "332359");
+    assert.equal(jardiance.rxNumber, "900009");
     assert.equal(jardiance.fillNumber, 1);
     assert.equal(jardiance.bin, "610097");
     assert.equal(jardiance.ndc11, "00597015230");
@@ -376,7 +376,7 @@ describe("a column added to the report", () => {
      * is a report that has been rebuilt, and the figures it would yield are not worth having.
      */
     const twoMore = [...HEAD17, "Third Party:,610097(A4) - 610097",
-      "332359-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,30.0000,$328.23,A4,00597015230,($123.66),$146.18,$1.00",
+      "900009-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,30.0000,$328.23,A4,00597015230,($123.66),$146.18,$1.00",
       ...FOOT17].join("\r\n");
     const bad = parseRxTransactions(twoMore);
     assert.equal(bad.rows.length, 0);
@@ -401,7 +401,7 @@ describe("re-sending a corrected report", () => {
     file(
       "Third Party:,610097(A4) - 610097",
       // Gross profit $22.52: the acquisition arithmetic plus an estimated rebate nobody asked for.
-      "332359-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,30.0000,$328.23,A4,00597015290,$22.52",
+      "900009-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,30.0000,$328.23,A4,00597015290,$22.52",
     ),
   );
 
@@ -416,9 +416,9 @@ describe("re-sending a corrected report", () => {
       "Transmitted",
       "Third Party:,610097(A4) - 610097",
       // The same row, restated: the rebate taken back out, the promised facilitator payment named.
-      "332359-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,$146.18,30.0000,$328.23,A4,00597015290,($123.66)",
+      "900009-1,P,$204.57,KS20B2,IRX9TP,$0.00,$10.50,$0.00,9/5/2026 9:23:51 AM,09/05/26,610097,$146.18,30.0000,$328.23,A4,00597015290,($123.66)",
       // And a day the pharmacy had never sent before.
-      "331220-1,P,$0.00,,,$27.47,$10.00,$27.47,9/1/2026 5:04:04 PM,09/01/26,610097,$0.00,30.0000,$1.26,A4,72603066402,$26.21",
+      "900010-1,P,$0.00,,,$27.47,$10.00,$27.47,9/1/2026 5:04:04 PM,09/01/26,610097,$0.00,30.0000,$1.26,A4,72603066402,$26.21",
       "9/5/2026 1:51 PM,Page 1 of 1",
     ].join("\r\n"),
   );
@@ -441,7 +441,7 @@ describe("re-sending a corrected report", () => {
 
     assert.equal(plan.duplicates, 1, "counted once, not added again");
     assert.equal(plan.insertPaid.length, 1, "and only the genuinely new day is inserted");
-    assert.equal(plan.insertPaid[0].rxNumber, "331220");
+    assert.equal(plan.insertPaid[0].rxNumber, "900010");
 
     assert.equal(plan.refresh.length, 1, "the row already held is re-read");
     assert.equal(plan.refresh[0].claimId, "claim-1", "against the claim it belongs to");
@@ -521,17 +521,17 @@ describe("account sales", () => {
   ];
   // Real neighbours, so the layout is settled by the file rather than by one unusual row.
   const NEIGHBOURS = [
-    "327578-2,P,$0.00,ABSR,,$6.73,$0.75,$6.73,9/1/2026 4:03:40 PM,09/01/26,005377,$0.00,30.0000,$4.26,10000019,16714025902,$2.47",
-    "330753-1,P,$0.00,ASCSH,,$6.80,$0.75,$6.80,9/1/2026 4:03:40 PM,09/01/26,005377,$0.00,24.0000,$3.13,10000019,00555057202,$3.67",
-    "336334-0,P,$0.00,TCG1009,,$6.58,$0.95,$6.58,9/5/2026 9:37:53 AM,09/01/26,005377,$0.00,30.0000,$2.02,10000019,23155050210,$4.56",
+    "900011-2,P,$0.00,ABSR,,$6.73,$0.75,$6.73,9/1/2026 4:03:40 PM,09/01/26,005377,$0.00,30.0000,$4.26,10000019,16714025902,$2.47",
+    "900012-1,P,$0.00,ASCSH,,$6.80,$0.75,$6.80,9/1/2026 4:03:40 PM,09/01/26,005377,$0.00,24.0000,$3.13,10000019,00555057202,$3.67",
+    "900013-0,P,$0.00,TCG1009,,$6.58,$0.95,$6.58,9/5/2026 9:37:53 AM,09/01/26,005377,$0.00,30.0000,$2.02,10000019,23155050210,$4.56",
   ];
   const ar = (...rows: string[]) => parseRxTransactions([...HEAD_EST, ...NEIGHBOURS, ...rows, ...FOOT].join("\r\n"));
   const EMPTY = { keys: new Set<string>(), paid: [] };
 
   const OWED =
-    '309233-2,AR,$0.00,"$23,869.00",COMMERCIAL,"$1,492.61",$0.00,"$1,492.61",,09/01/26,024368,$0.00,60.0000,"$1,152.94",3207,81968004560,$339.67';
+    '900014-2,AR,$0.00,"$23,869.00",COMMERCIAL,"$1,492.61",$0.00,"$1,492.61",,09/01/26,024368,$0.00,60.0000,"$1,152.94",3207,81968004560,$339.67';
   const NOTHING_BILLED =
-    "336264-0,AR,$0.00,KS2336,BIDBRODCBR,$0.00,$0.00,$0.00,9/1/2026 4:25:12 PM,09/01/26,610455,$0.00,60.0000,$984.00,KSPDP,00480331965,($984.00)";
+    "900015-0,AR,$0.00,KS2336,BIDBRODCBR,$0.00,$0.00,$0.00,9/1/2026 4:25:12 PM,09/01/26,610455,$0.00,60.0000,$984.00,KSPDP,00480331965,($984.00)";
 
   test("an AR row is read, not set aside as a status nobody knows", () => {
     const p = ar(OWED);
@@ -561,19 +561,19 @@ describe("account sales", () => {
     const plan = planTransactions(ar(OWED).rows, EMPTY);
     const on = plan.insertPaid.filter((t) => t.onAccount === true);
     assert.equal(on.length, 1);
-    assert.equal(on[0].rxNumber, "309233");
+    assert.equal(on[0].rxNumber, "900014");
     assert.equal(plan.skipped.filter((s) => s.txn.status === "AR").length, 0, "it is a sale that happened");
   });
 
   test("a rejection and an account sale on the same prescription stay apart", () => {
     /*
-     * Rx 333932-0 in the live file: billed, rejected by the plan, then put on the account. The
+     * Rx 900016-0 in the live file: billed, rejected by the plan, then put on the account. The
      * rejection is nothing and the account sale is $484.03 of stock out of the door, and reading
      * either as the other loses the money.
      */
     const p = ar(
-      "333932-0,R,$0.00,\"$28,558.00\",,$0.00,$0.00,$0.00,9/1/2026 1:36:19 PM,09/01/26,005377,$0.00,0.0000,$0.00,10000019,00002355511,$0.00",
-      "333932-0,AR,$0.00,\"$28,558.00\",,$0.00,$0.00,$0.00,9/1/2026 1:36:19 PM,09/01/26,005377,$0.00,2.4000,$484.03,10000019,00002355511,($484.03)",
+      "900016-0,R,$0.00,\"$28,558.00\",,$0.00,$0.00,$0.00,9/1/2026 1:36:19 PM,09/01/26,005377,$0.00,0.0000,$0.00,10000019,00002355511,$0.00",
+      "900016-0,AR,$0.00,\"$28,558.00\",,$0.00,$0.00,$0.00,9/1/2026 1:36:19 PM,09/01/26,005377,$0.00,2.4000,$484.03,10000019,00002355511,($484.03)",
     );
     const plan = planTransactions(p.rows, EMPTY);
     assert.equal(plan.skipped.filter((s) => s.txn.status === "R").length, 1, "the rejection is nothing");
@@ -584,9 +584,9 @@ describe("account sales", () => {
 
   test("a status still nobody knows is set aside by name rather than guessed at", () => {
     const p = ar(
-      '309233-2,ZZ,$0.00,"$23,869.00",COMMERCIAL,"$1,492.61",$0.00,"$1,492.61",,09/01/26,024368,$0.00,60.0000,"$1,152.94",3207,81968004560,$339.67',
+      '900014-2,ZZ,$0.00,"$23,869.00",COMMERCIAL,"$1,492.61",$0.00,"$1,492.61",,09/01/26,024368,$0.00,60.0000,"$1,152.94",3207,81968004560,$339.67',
     );
-    assert.equal(p.rows.filter((r) => r.rxNumber === "309233").length, 0);
+    assert.equal(p.rows.filter((r) => r.rxNumber === "900014").length, 0);
     assert.ok(
       Object.keys(p.reasons ?? {}).some((k) => k.includes("ZZ")),
       `reasons: ${JSON.stringify(p.reasons)}`,
