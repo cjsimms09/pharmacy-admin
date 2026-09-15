@@ -9,6 +9,15 @@ everything is, how to apply it, how to match it, are we setup to receive it prop
 errors … we need to understand how everything links together between claims, credit card fees, 835s,
 expenses, bank statements, invoices, cogs, etc"*.
 
+**Scope, the owner, later the same day:** *"we are just doing test run this month, it is fine if you dont have
+everything, everything just needs to work and real record keeping happens 10/01."* So September proves each
+feed works; a figure missing in September is not a gap. Two sample requests are **declined** (Q-SBP-1, Q-835-1).
+Whether the books' start date moves to 1 October 2026 is a decision for him before then, raised by session 1.
+
+**No real value is written in this map.** On 15 September the repository was found public with real prescription
+records and the pharmacy's own identifiers in its tests (section 14). Identifiers below are shapes, counts or
+last-four references to payer transactions only.
+
 ---
 
 ## How this was measured, so it can be re-run and disagreed with
@@ -1791,6 +1800,31 @@ SHOULD BE: **cannot be written from domain knowledge.** "Adjustment" can be a re
 overpayment (a revenue offset), a correction of a fee, or a balance carried between EFTs. **Question for the
 owner, or Health Mart Atlas:** what do the CS adjustments on the AccessHealth reports represent?
 Proposed meanwhile: kept as data, named on the inbox line.
+**Answered (Q-AH-1), the owner and session 1:** CS is the X12 PLB adjustment a payer uses to take back an earlier
+overpayment. The live rows are MedImpact (5 rows, $3.35, on …4994) and OptumRx ($1.16, on …0121), with seven-digit
+references, most likely the claims recouped.
+SHOULD BE, now written: money a payer took back out of plan revenue. A revenue offset on accrual in the EFT's month,
+because the recouped claim's month is not on the report; nothing on cash, because the deposit is already net.
+**Built and rehearsed, 377709c, merged 8ff753a.** A CS that takes money away is a confirmed bill keyed
+`AHADJ|<EFT>|CS|<ref>`, dated the EFT, no paid date, under **"Chargebacks and audit recoveries"**. A CS that adds money
+is not a recoupment and is held, as every other code is (tested, with FB).
+The document's note: the live documents said "kept as data and on neither account", written before AH was booked.
+A re-read now replaces only its own paragraph and keeps the mailbox's "Received by email from …" and anything a person
+wrote.
+
+Rehearsed on a fresh snapshot of live at 19:27 UTC, which already carried the owner's first re-route of the 9:
+
+| measure | result |
+|---|---|
+| on live before (read-only, via the snapshot) | 2,145 plan rows under the 9 EFTs, $164,392.66: the owner's re-route posted 2,135 ($164,026.13); the other 10 are …5975's earlier 835 rows. Each EFT's rows exceed its total by exactly its AH and CS |
+| the 9 read with 377709c | 0 posted, 2,145 held; AH 8 bills $142.20 under PSAO fees; CS 6 bills $4.51 under Chargebacks and audit recoveries |
+| September | accrual offsets $145.97; cash unchanged; receipts 115 → 115; DIR still listed missing |
+| read again | nothing posted or booked |
+| notes | the 7 old paragraphs replaced; a seeded mailbox line and a person's note both kept through two reads |
+| undo of …4994 | "387 payments … and 1 origination fee ($1.16) and 5 recoupments ($3.35) removed" |
+
+**Live, not yet measured:** the owner re-routing the 9 again with 377709c deployed, which should book the AH and
+CS bills and post nothing. Session 2 measures it read-only once he has; nobody runs it for him.
 
 **The rest, if they appear** (proposed, none seen):
 - 50 late charge and 51 interest penalty: money the payer pays the pharmacy for paying late, so other income.
@@ -1926,7 +1960,7 @@ that back.
   $3,373.22;
 - **VERIDIKAL TECHNO/ACH Pmt** $7,971.34 and $3,822.46, each "VT - 07-28-2026";
 - **DRHOUSE INC/PAYMENT** $38.35;
-- the **$15,912.81 "Ref … To *6728 Medications Aug"** transfer, and the account ending 6728;
+- the **$15,912.81 "Ref … To *<account> Medications Aug"** transfer, and the account it went to;
 - **RRC PHARMA SOLUTIONS** card purchases, $7,380.00 and $9,360.00.
 
 ### Re-rehearsed against session 1's fixes (de67a77)
@@ -1966,10 +2000,112 @@ differ between live then and this snapshot with August's feeds.
 - Heartland: **26 of 26** credits read as `card_settlement` (HRTI3ND, HRTTJqN D and the rest), all 26 confirm a card
   batch, $98,224.46, and the fee debit reads `card_fees`;
 - ParMed: 2 of 2 read as `wholesaler_payment`;
-- IPC: 11 of 18 read. The other 7 are the lines whose account number the scan damaged ("#8", "10689tr8").
+- IPC: 11 of 18 read. The other 7 are the lines whose account number the scan damaged (read as "#8" and similar).
   They stay unplaced **by design**, as above;
 - Prescription/TRANSFER, VERIDIKAL, DRHOUSE and the rest: no descriptor, pending Q-BANK-1;
 - cheques read as unknown: for the cheque checkpoint.
+
+### The owner's answers placed, and the statement read for real (d46aaa5, 742c3b1)
+
+**Q-BANK-1, answered by the owner** (via session 1):
+- **Prescription/TRANSFER** credits are West Wichita Family Physicians (WWFP), the practice, paying for drugs sold to
+  it at cost. A monthly WWFP sales report will come by email for accrual. No reader yet; the sample is asked for when
+  it arrives.
+- **DRHOUSE** is a telehealth company paying for the scripts it sends.
+- **RRC Pharma** is a supplier, paid by debit card.
+- The **practice's account** (the "To *…" transfers) is WWFP's. The $45,000 "PSA" transfer is payroll paid through
+  WWFP. The $15,912.81 "Medications Aug" transfer, in his words, *"must be meds we bought from them"*.
+- **Veridikal**: he does not know; he guessed a PBM or MTF. It is not the MTF, which prints as "MTF PM NGS". Public
+  sources say Veridikal Technologies runs eVoucher and denial-conversion programmes; so most likely eVoucher or
+  copay-programme payments. **That is inference, not measured.**
+
+**How it is rehearsed now.** The real `placeStatementLines` is run, not a reproduction. The probe copies `bank.ts` with
+only mechanical changes (no "use server", exports added, Next's redirect and the sign-in stubbed), each asserted to
+apply once. Fresh snapshot, August's feeds set up, the real August scan with the confirmed figures (165 lines, 0
+unproven).
+
+| rehearsal | d46aaa5 | 742c3b1 |
+|---|---|---|
+| first read | 2 deposits banked ($3,411.57), 1 bill ($40.99) | **16 deposits banked ($18,067.09)**, 1 bill ($40.99) |
+| Prescription/TRANSFER, 15 lines $18,028.74 | **1 banked**, 14 ($14,655.52) unplaced: G-BANK-5 | **15 banked**, $18,028.74 |
+| DrHouse $38.35 | deposit, third party | same |
+| RRC Pharma, 2 lines $16,740.00 | unplaced, asking for the invoice (none on file) | same |
+| RRC with an invented unpaid $7,380.00 invoice | `pays_invoice`, invoice marked paid | not re-run |
+| Veridikal, 2 lines $11,793.80 | unplaced | same |
+| El Segundo $40.99 | `books_bill`, postage | same |
+| the same scan read again | 165 held; nothing new | same |
+| a re-scan, every description one character different (165 new keys) | **165 held; nothing new**: G-POST-2 fixed | same |
+| two genuine lines, same date and amount, different descriptions | both place (2 bills, 2 deposits) | same |
+| two lines identical in date, amount and description | **the read aborts** at the second line's key; 2 receipts, 1 line: G-BANK-4 | **both place**; read again, both held; identical twin bills: 2 bills, read again 0 |
+
+**G-POST-2. A second scan of the same statement booked the El Segundo postage bill again.**
+OBSERVATION: 32d7efd keyed the bill on the line's key, which includes the scan's reading of the description. A
+re-scan one character different booked a second $40.99; August postage read $81.98.
+SHOULD BE: one charge is one cost, however many copies of its statement are read.
+DIFFERENCE: yes, rehearsed, $40.99 per re-scan per charge; and any deposit banked from a line had the same exposure.
+**FIXED d46aaa5**: a line is on file by its key or by its date and amount, counted line for line.
+
+**G-BANK-4. Two identical lines on one day stopped the statement read.**
+OBSERVATION: the same date, amount and description give the same key, and the key is unique: the second line's insert
+failed, the read stopped there, and the second line's receipt was banked with no line behind it.
+SHOULD BE: two equal counter deposits on one day are two deposits.
+DIFFERENCE: yes, rehearsed (August itself has none). **FIXED 742c3b1**: repeats of a key in one statement are numbered.
+
+**G-BANK-5. Fourteen of fifteen Prescription/TRANSFER credits were not recognised.**
+OBSERVATION: the scan's spellings ("…ptionfl-RAN S FE R…", "…pticnffRAN…", "Preseri ption…") have no "TRAN".
+SHOULD BE: every spelling of a counterparty the owner has named is read.
+DIFFERENCE: yes, $14,655.52 of August credits unplaced. **FIXED 742c3b1** with the pattern tried on all 165 real
+lines: 15 of 15, no other line, no debit.
+
+**DrHouse, counted once on each basis: verified.** In code, accrual revenue is the System Sales Summary or the claims
+plus later claim payments, and never reads cash receipts; cash revenue is the receipts. On the snapshot the 3
+September DrHouse claims (paid and reversed) carry remit $0.00 and patient $35.66, and no claim payment stands against
+them. So accrual counts them once through the claims, under "Patient payments" because that is where PioneerRx put
+the money, and cash counts the deposit line once.
+
+**W-DRH-1 (watch). DrHouse's claims adjudicate on the copay-voucher BIN.**
+OBSERVATION: the 3 DrHouse claims are on BIN 028249 with PCN ENROLL; the other 659 claims on that BIN are PCN RXLOCAL.
+The RedSail voucher reader (section 10) matches claims on that BIN and banks the voucher's payment.
+SHOULD BE: a fill paid by DrHouse directly is not also banked from a RedSail voucher.
+DIFFERENCE: not measurable yet. If a voucher ever carries an ENROLL row, the voucher and the DRHOUSE line would bank the
+same fill twice. **OPEN**, measured when a September RedSail voucher arrives.
+
+**The $45,000 PSA transfer, confirmed in code:** `wages_funding`, already counted by "Wages and salaries, which the
+payroll standing cost already carries by the day". Not checked: whether the standing cost's amount is $45,000 a month.
+Wording for session 1: the descriptor calls the destination "the payroll account" and a pharmacy account; the owner
+says it is WWFP's.
+
+**Q-WWFP-1 (open). How should a purchase from WWFP reach cost of goods?**
+OBSERVATION: the $15,912.81 "Medications Aug" transfer is, the owner says, drugs bought from WWFP, with no invoice.
+The descriptor reads it as `practice_medications`, "drugs sold on to the practice at cost". Cash cost of goods
+(`cash-cogs.ts`) reads invoices, the wholesaler ledger and receiving, never expenses.
+SHOULD BE: cannot be written until it is settled which way the drugs moved (bought from WWFP, as he says now, or sold to
+it, as the descriptor says) and what document, if any, shows them. **Question for the owner:** is there anything WWFP
+sends that lists what was bought, and do those drugs go on the shelf in PioneerRx?
+
+**Q-VER-1 (open). What is Veridikal?** Inference above. When convenient, the September claims' eVoucher amounts by
+payer, BIN or programme are to be measured as a possible join for the Veridikal credits. Nothing is built.
+
+**G-BANK-6. Nothing undoes a statement read.**
+OBSERVATION: no code deletes `bank_lines`, and a bank statement is not an inbox item, so there is no undo. What a read
+wrote (receipts banked from lines, bills booked from lines, invoices marked paid) stays, and every line stays held, so a
+corrected read cannot place it again.
+SHOULD BE: rule 4. Nothing ships without the means to correct it.
+DIFFERENCE: yes. **OPEN, owner 1**: session 1 is putting it into the matching-engine work, where every link row can be
+reversed.
+Interim, read in code and measured on the snapshot (nothing changed):
+
+| what a read wrote | can a person remove it, one at a time? |
+|---|---|
+| a receipt banked from a line, in the books (from 1 September) | **yes**: Money lists in-books receipts with a Remove button |
+| the same, before the books start | not listed; it counts on no account anyway |
+| a bill booked from a line (`BANK\|…`) | **yes, while it is among the 100 most recent bills** by invoice date: Spending lists `recentExpenses(100)` with Void and Edit (4 bills on live today) |
+| an invoice marked paid by a line | **no**: nothing in `src` sets a paid date back to empty |
+| the bank line itself | **no**: it stays, held, with its placement and the id of what was removed |
+
+Two consequences. After a receipt or bill is removed, re-reading the statement does not place that line again; the money
+can only be typed. And Remove on a receipt that a line *confirmed* deletes the feed's own receipt: the Money page does
+not show which receipts a statement line points at.
 
 ### Not checked, said out loud
 
@@ -1977,6 +2113,53 @@ differ between live then and this snapshot with August's feeds.
   a browser (session 1 will check it).
 - Pages 10–11 of the PDF (enclosures) were not viewed.
 - The seven counter "Deposit" credits and six cheques: unplaced, for the till and cheque checkpoints.
+
+---
+
+## 14. Real data in the repository — found, proven, removed from the working tree
+
+**Found 15 September 2026, while replacing the copay fixture's identifiers (G-COPAY-1). Session 1 then found the GitHub
+repository is public.** Every "real" below is proven by equality against a scratch copy of live or the owner's
+samples; no value was printed in any probe, commit, message or this map.
+
+**G-DATA-1. Tests carried real prescription records.**
+OBSERVATION: in `tests/rx-transactions.test.ts`, 25 rows where a number, one of that prescription's real fill dates and
+that claim's real NDC all equal a live claim (17 prescriptions); in `tests/fills.test.ts` 5 (2); in `src/lib/claims.ts` 3
+(1). The chance baseline (each number moved by ±3, 5, 7, 9) matched 0. No patient names or birth dates were with them.
+They came in with the first real daily reports (commits of 5, 6 and 12 September) and are on every branch since.
+SHOULD BE: CLAUDE.md, *"No patient information anywhere."* A prescription number with its drug and date identifies a
+patient's prescription.
+DIFFERENCE: yes, in a public repository.
+Removed from the working tree (branch `work/phi-rx`, 4e2ee40 and 153409d):
+- the two proven test files;
+- then every token in tests, docs and fixtures equal to any real prescription number, with or without a date beside
+  it: 18 more files, 41 numbers, 86 occurrences. Real prescription numbers fill about a quarter of their range, so a
+  number alone matches by chance often, and the instruction was to err on replacing;
+- all replaced by invented same-length numbers, padding kept, from a range no real prescription occupies;
+- after: 0 such tokens under tests, docs or fixtures. The touched suites pass.
+
+Session 1 takes the 12 `src` files and 2 scripts still holding such tokens (only `claims.ts` is proven real).
+**History, GitHub's cached views, the remote branches and the repository's visibility are the owner's decision;**
+force pushes are refused.
+
+**G-DATA-2. Tests, fixtures and docs carried the pharmacy's own identifiers.**
+OBSERVATION: equal to the live settings or the owner's own documents:
+- the NCPDP (20 lines);
+- the NPI (5 files, G-COPAY-1);
+- the DEA number and the telephone (tests);
+- the street address and ZIP (6);
+- the McKesson customer account and location ID;
+- the debit card's last four and the practice account's (tests);
+- staff e-mail addresses on the pharmacy's domain;
+- a supplier's DEA-shaped number in a fixture.
+Clean: the TIN and the pharmacy e-mail setting are in no file; the card-statement test's merchant number is invented.
+SHOULD BE: CLAUDE.md, a feed's shape goes in `fixtures/` "with every identifier changed"; the same holds for tests.
+DIFFERENCE: yes. **Replaced in tests, fixtures and docs**: 8430873 (NPI, check number), 75f1e83, and the location ID in
+153409d. Not replaced, session 1's: the IPC customer account hard-coded in `bank-descriptors.ts` (its tests depend on
+it), NCPDP and account references in `src` and script comments, a staff e-mail in a `src` comment and a placeholder.
+Two commit messages carry the NCPDP and one the pharmacy e-mail; those cannot be changed without a force push.
+Also real, and not yet replaced: McKesson invoice and ACH numbers in 15 test files. They are business identifiers, not
+patient information, and the change is session 1's call.
 
 ---
 
@@ -2060,6 +2243,13 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 | G-BANK-3 | descriptors miss the scan's spellings | 6 Heartland credits, 7 IPC debits, the ParMed spelling | 1 | **FIXED** de67a77; the 7 IPC lines with a damaged account number stay unplaced by design |
 | G-UNDO-1 | undoing the first of 835/AccessHealth for one EFT leaves the other's claims on no row | **$378.15** on …5975 | B / 2 | OPEN (warned in words, 54f699b) |
 | G-COPAY-1 | the copay-voucher fixture carries the real check/ACH number and NPI | 2 identifiers in git | 1 / 2 | **FIXED** 8430873; earlier commits still hold them (no force push) |
+| G-POST-2 | a re-scan of the same statement booked the El Segundo postage bill again | $40.99 per re-scan per charge | 1 | **FIXED** d46aaa5 (165 new keys, nothing new) |
+| G-BANK-4 | two identical lines on one day stopped the statement read | a statement cut off at the second line | 1 | **FIXED** 742c3b1 (both place; read again, both held) |
+| G-BANK-5 | 14 of 15 Prescription/TRANSFER scan spellings not recognised | **$14,655.52** of August credits unplaced | 1 | **FIXED** 742c3b1 (15 of 15) |
+| G-BANK-6 | nothing undoes a statement read; invoices it marks paid cannot be unmarked | every line-written receipt, bill and paid date | 1 | OPEN (matching engine); interim per-item removal measured, section 13 |
+| W-DRH-1 | DrHouse's claims are on the copay-voucher BIN (PCN ENROLL): a voucher row and the DRHOUSE line could bank one fill twice | not measurable until a September voucher | 1 / 2 | OPEN (watch) |
+| G-DATA-1 | real prescription records (number + fill date + NDC) in tests and one `src` file, repository public | 33 proven rows, 20 prescriptions; 41 more numbers replaced by caution | 2 / 1 / owner | **REMOVED from the working tree** 4e2ee40, 153409d (tests, docs); `src` session 1's; history the owner's |
+| G-DATA-2 | the pharmacy's own identifiers in tests, fixtures and docs | NCPDP, NPI, DEA, phone, address, accounts, e-mails | 2 / 1 | **REPLACED** in tests, fixtures, docs (8430873, 75f1e83, 153409d); `src` and history as G-DATA-1 |
 | G-MTF-1 (a) | the facilitator stand-in is all-or-nothing | only a typed receipt triggers it now | **A** | OPEN |
 | G-MCK-2 | McKesson return credits reach no account | **$10,411.15** | — | QUESTION Q-MCK-1 |
 | G-MCK-3 | a moved due date leaves a paid invoice owed | $22,118.56 test | — | OPEN |
@@ -2075,11 +2265,14 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 | Q-CARD-1 | which day card money counts on | **DECIDED**: batch close date |
 | Q-CARD-2 | whether account payments appear in the payment-type report | open |
 | Q-MCK-1 | how McKesson applies return credits | **answered in part** (owner, via session 1: *"mckesson returns are credits I believe"*). Proposed, not built: accrual reduces cost of goods on the credit date; cash when the credit is taken off an ACH. **OPEN** until the next AP report shows a credit row or an ACH short of its invoices |
-| Q-POST-1 | what the $40.99 "Stamps.com El Segundo CA" charge on 18 August is | **answered**: mailing, meaning postage. No confirmation email comes for it, so the bank line is its only door; session 1 is making that merchant line book a postage expense from the bank |
-| Q-835-1 | a sample request: one real ProviderPay 835 file (for G-835-2 and the 835 reader) | open. The owner says one exists; session 1 has explained the April and August files were not kept and asked for another |
-| Q-SBP-1 | a sample request: PioneerRx's payment-type report run for 3–14 September (for G-CARD-5) | open. The owner re-sent 30–31 August; 3–14 September asked for again |
-| Q-AH-1 | what the "CS — Adjustment" rows on the AccessHealth reports represent ($4.51 across two EFTs) | open |
-| Q-BANK-1 | what August's Prescription/TRANSFER, VERIDIKAL, DRHOUSE credits, the $15,912.81 transfer to *6728 and the RRC PHARMA purchases are (section 13) | open; unplaced meanwhile, never banked (de67a77) |
+| Q-POST-1 | what the $40.99 "Stamps.com El Segundo CA" charge on 18 August is | **answered**: mailing, meaning postage. No confirmation email comes for it, so the bank line is its only door. **Built** 32d7efd (`books_bill`, postage, dated and paid on the bank date); rehearsed, section 13; a re-scan's second booking fixed in d46aaa5 (G-POST-2) |
+| Q-835-1 | a sample request: one real ProviderPay 835 file (for G-835-2 and the 835 reader) | **DECLINED** by the owner (September is a test run) |
+| Q-SBP-1 | a sample request: PioneerRx's payment-type report run for 3–14 September (for G-CARD-5) | **DECLINED** by the owner (September is a test run) |
+| Q-AH-1 | what the "CS — Adjustment" rows on the AccessHealth reports represent ($4.51 across two EFTs) | **answered**: a payer's recoupment. Booked under Chargebacks and audit recoveries, 377709c |
+| Q-BANK-1 | what August's Prescription/TRANSFER, VERIDIKAL, DRHOUSE credits, the $15,912.81 transfer to the practice's account and the RRC PHARMA purchases are (section 13) | **answered** except Veridikal (Q-VER-1) and the Medications transfer (Q-WWFP-1); placed in d46aaa5 and 742c3b1 |
+| Q-WWFP-1 | how a purchase of drugs from WWFP reaches cost of goods, and which way the $15,912.81 "Medications" drugs moved | open (section 13) |
+| Q-VER-1 | what the Veridikal credits are ($11,793.80 in August); eVoucher is inferred, not measured | open; eVoucher amounts on the claims to be measured when convenient |
+| Q-WWFP-2 | a sample of the monthly WWFP sales report, for accrual | expected-not-yet: asked for when it arrives |
 
 **Notes for A:**
 - **Blame on `profit-and-loss.ts` across 54bee8c:** use `git blame -w`. That commit normalised the file's line
