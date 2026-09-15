@@ -21,11 +21,11 @@ const isDelivered = (info: Info) => {
 
 describe("deciding whether a message actually went", () => {
   test("accepted for the recipient counts as sent", () => {
-    assert.equal(isDelivered({ accepted: ["kim@wwfppa.com"], rejected: [], response: "250 2.0.0 OK" }), true);
+    assert.equal(isDelivered({ accepted: ["staff@example.com"], rejected: [], response: "250 2.0.0 OK" }), true);
   });
 
   test("a refused recipient is not a successful send, however calm the promise was", () => {
-    assert.equal(isDelivered({ accepted: [], rejected: ["kim@wwfppa.com"], response: "550 5.1.1 unknown" }), false);
+    assert.equal(isDelivered({ accepted: [], rejected: ["staff@example.com"], response: "550 5.1.1 unknown" }), false);
   });
 
   test("a partial refusal is a failure, not a partial success", () => {

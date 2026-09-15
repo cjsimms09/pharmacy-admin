@@ -5,10 +5,10 @@ import { readAccountHistory, whatMadeUpTransfer, payerFrom, looksLikeAccountHist
 /** The shape ProviderPay actually exports, taken from a real August download. */
 const FILE = [
   '"Date","Location","Payment number","Description","Amount"',
-  '"2026-08-31","1722734 - West Wichita Family Pharmacy","101000017856767","ARGUS HEALTH SYS  101000017856767  20260831",1250.36',
+  '"2026-08-31","7000017 - West Wichita Family Pharmacy","101000017856767","ARGUS HEALTH SYS  101000017856767  20260831",1250.36',
   '"2026-08-31","","","ProviderPay Transfer",-1250.36',
-  '"2026-08-28","1722734 - West Wichita Family Pharmacy","101000017072227","DOMANIRX  101000017072227  20260817",904',
-  '"2026-08-28","1722734 - West Wichita Family Pharmacy","242071753425157","EXPRESS SCRIPTS  242071753425157  20260828",8008.09',
+  '"2026-08-28","7000017 - West Wichita Family Pharmacy","101000017072227","DOMANIRX  101000017072227  20260817",904',
+  '"2026-08-28","7000017 - West Wichita Family Pharmacy","242071753425157","EXPRESS SCRIPTS  242071753425157  20260828",8008.09',
   '"2026-08-28","","","ProviderPay Transfer",-8912.09',
 ].join("\n");
 
@@ -102,7 +102,7 @@ describe("the ProviderPay sweep account", () => {
      */
     const tricky = [
       '"Date","Location","Payment number","Description","Amount"',
-      '"2026-08-05","1722734 - WWFP","999","SMITH, JONES & CO  999  20260805",1500.25',
+      '"2026-08-05","7000017 - WWFP","999","SMITH, JONES & CO  999  20260805",1500.25',
     ].join("\n");
     const m = readAccountHistory(tricky);
     assert.equal(m.problems.length, 0);

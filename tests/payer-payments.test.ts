@@ -94,7 +94,7 @@ describe("reading the report", () => {
 
 describe("the range the file name states", () => {
   test("a report that came back empty can still say what was checked", () => {
-    assert.deepEqual(rangeFromFileName("West_Wichita_Family_Pharmacy_1722734_20260901_20260907.csv"), {
+    assert.deepEqual(rangeFromFileName("West_Wichita_Family_Pharmacy_7000017_20260901_20260907.csv"), {
       from: "2026-09-01",
       to: "2026-09-07",
     });

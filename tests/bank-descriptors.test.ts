@@ -59,12 +59,12 @@ describe("what each line on the bank statement is", () => {
   });
 
   test("a transfer to the pharmacy's own account is neither a cost nor revenue", () => {
-    const m = readBankDescriptor("Ref AMEILHA To X6728 PSA", -4_500_000);
+    const m = readBankDescriptor("Ref AMEILHA To X0000 PSA", -4_500_000);
     /* Named as wages now the owner has confirmed it; still a transfer, and still books nothing. */
     assert.equal(m.kind, "wages_funding");
     assert.equal(m.lands, "transfer");
     /* $45,000.00 is exactly the monthly payroll. Counting it here AND as payroll would be it twice. */
-    assert.equal(wouldDoubleCount("Ref AMEILHA To X6728 PSA", -4_500_000), true);
+    assert.equal(wouldDoubleCount("Ref AMEILHA To X0000 PSA", -4_500_000), true);
   });
 
   test("a loan payment is below the line, not a cost", () => {
@@ -193,8 +193,8 @@ describe("the PSAO, and the drugs sold to the practice", () => {
 
   test("drugs sold to the practice are not mistaken for a transfer between our own accounts", () => {
     /* The two lines are the same shape. Only the word "Medications" separates them. */
-    const meds = readBankDescriptor("Ref AMIDQSP To *6728 Medications Aug 202", -1_591_281);
-    const own = readBankDescriptor("Ref AMEILHA To X6728 PSA", -4_500_000);
+    const meds = readBankDescriptor("Ref AMIDQSP To *0000 Medications Aug 202", -1_591_281);
+    const own = readBankDescriptor("Ref AMEILHA To X0000 PSA", -4_500_000);
     assert.equal(meds.kind, "practice_medications");
     assert.equal(own.kind, "wages_funding");
     /* Their cost is real and already in the books, so this is never "neither a cost nor revenue". */
@@ -293,20 +293,20 @@ describe("naming a cheque by what it is for", () => {
  */
 describe("wages, funded by transfer", () => {
   test("it is named as wages rather than as an anonymous transfer", () => {
-    const m = readBankDescriptor("Ref AMEILHA To X6728 PSA", -4_500_000);
+    const m = readBankDescriptor("Ref AMEILHA To X0000 PSA", -4_500_000);
     assert.equal(m.kind, "wages_funding");
     assert.equal(m.counterparty, "the payroll account");
   });
 
   test("it books nothing, because the payroll standing cost already carries it", () => {
-    assert.equal(wouldDoubleCount("Ref AMEILHA To X6728 PSA", -4_500_000), true);
-    assert.match(readBankDescriptor("Ref AMEILHA To X6728 PSA", -4_500_000).alreadyCounted ?? "", /Wages and salaries/);
+    assert.equal(wouldDoubleCount("Ref AMEILHA To X0000 PSA", -4_500_000), true);
+    assert.match(readBankDescriptor("Ref AMEILHA To X0000 PSA", -4_500_000).alreadyCounted ?? "", /Wages and salaries/);
   });
 
   test("a transfer that is not the payroll one stays an ordinary transfer", () => {
-    assert.equal(readBankDescriptor("Ref AMZZZZZZ To X6728 SAVINGS", -100_000).kind, "internal_transfer");
+    assert.equal(readBankDescriptor("Ref AMZZZZZZ To X0000 SAVINGS", -100_000).kind, "internal_transfer");
     /* And the medications one is still its own thing. */
-    assert.equal(readBankDescriptor("Ref AMIDQSP To *6728 Medications Aug 202", -1_591_281).kind, "practice_medications");
+    assert.equal(readBankDescriptor("Ref AMIDQSP To *0000 Medications Aug 202", -1_591_281).kind, "practice_medications");
   });
 });
 
@@ -394,7 +394,7 @@ test("REGRESSION: a postage confirmation accounts for one charge - September's t
 
 test("the Stamps.com charge from El Segundo is mailing with no confirmation: the bank line books it as postage", async () => {
   const { placeLines } = await import("../src/lib/bank-statement");
-  const [p] = placeLines([{ on: "2026-08-18", description: "Purch Stamps.com El Segundo CA **x**5921", amountCents: -4_099, key: "s" }], {
+  const [p] = placeLines([{ on: "2026-08-18", description: "Purch Stamps.com El Segundo CA **x**0000", amountCents: -4_099, key: "s" }], {
     payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [], postageBills: [],
   });
   assert.equal(p.placement.kind, "books_bill");
