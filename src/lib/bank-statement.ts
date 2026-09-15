@@ -163,6 +163,8 @@ export type MatchContext = {
   vendors: { id: string; name: string }[];
   unpaidBills: { id: string; vendorId: string | null; vendorName: string | null; amountCents: number; invoiceDate: string }[];
   unpaidInvoices: { id: string; supplierId: string | null; supplier: string | null; totalCents: number | null; invoiceDate: string | null }[];
+  /** Postage bills booked from purchase confirmations: what a Stamps.com debit must find to be already counted. */
+  postageBills?: { amountCents: number; on: string }[];
   /** The facilitator's payments summed by the day they were paid, from the MTF remittances. */
   facilitatorPaid?: { on: string; cents: number }[];
   /** Card processing bills no bank line has claimed yet, paid or not — the card statement books its fees already paid. */
@@ -259,6 +261,21 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
    * Answering "already counted" first threw the second half away and left the largest debit on the
    * statement unreconciled — which is the thing this was built to fix.
    */
+  /*
+   * Postage: already counted only where the confirmation that booked it is on file. Every Stamps.com debit used
+   * to be taken as counted, and none of August's ten had a bill behind it (Session 2, money map G-POST-1).
+   */
+  if (meaning.kind === "postage" && ctx.postageBills) {
+    const out = -line.amountCents;
+    const near = (on: string) => Math.abs(Date.parse(`${on}T00:00:00Z`) - Date.parse(`${line.on}T00:00:00Z`)) <= 3 * 86_400_000;
+    if (ctx.postageBills.some((b) => b.amountCents === out && near(b.on))) {
+      return { kind: "already_counted", what: meaning.counterparty, where: meaning.alreadyCounted ?? "postage", why: meaning.says };
+    }
+    return {
+      kind: "unplaced",
+      why: "A postage charge with no Endicia or Stamps.com purchase confirmation on file for this amount within three days. The confirmation email books it; if it never came, this is a cost the books do not have.",
+    };
+  }
   if (meaning.alreadyCounted) {
     return { kind: "already_counted", what: meaning.counterparty, where: meaning.alreadyCounted, why: meaning.says };
   }

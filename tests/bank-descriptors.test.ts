@@ -368,3 +368,16 @@ describe("McKesson's rebate arriving in pieces (G-REB-1)", () => {
     }
   });
 });
+
+describe("a postage charge on the bank (G-POST-1)", () => {
+  const ctx = { payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [] };
+  const line = { on: "2026-09-11", description: "Purch STAMPS.COM WASHINGTON DC", amountCents: -10_000, key: "p" };
+  test("REGRESSION: already counted only where its purchase confirmation booked it", () => {
+    assert.equal(placeLine(line, { ...ctx, postageBills: [{ amountCents: 10_000, on: "2026-09-10" }] }).kind, "already_counted");
+  });
+  test("REGRESSION: with no confirmation on file it is left for a person, saying the cost may be missing", () => {
+    const p = placeLine(line, { ...ctx, postageBills: [{ amountCents: 10_000, on: "2026-09-01" }] });
+    assert.equal(p.kind, "unplaced");
+    assert.match(p.why, /no Endicia or Stamps\.com purchase confirmation/);
+  });
+});
