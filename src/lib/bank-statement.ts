@@ -122,6 +122,11 @@ export type ReceiptKind = "third_party" | "patient" | "retail" | "facilitator" |
 
 export type Placement =
   | { kind: "deposit"; receiptKind: ReceiptKind; payer: string | null; why: string }
+  /**
+   * The card processor paying in a day's card takings. Never banked from the statement: the card batch
+   * report is the one door for that money, and this line only confirms the batch. See `placeLine`.
+   */
+  | { kind: "card_deposit"; why: string }
   | { kind: "pays_bill"; expenseId: string; vendorName: string; why: string }
   | { kind: "pays_invoice"; invoiceId: string; supplier: string; why: string }
   /**
@@ -252,6 +257,17 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
   }
   if (meaning.lands === "transfer") return { kind: "own_transfer", why: meaning.says };
   if (line.amountCents > 0) {
+    /*
+     * Card takings, by every spelling the scans produced — before the generic RETAIL rule, which knows
+     * only a clean "HEARTLAND" and missed "HRTLAND PMT SYST TXNS".
+     *
+     * Not a deposit to bank. Banking it here made the cash account depend on which arrived first: read
+     * before its batch report, the batch was refused and the money sat on the retail line; read as one
+     * deposit of two batches, both batches banked on top of it; banked by hand beside a batch, both
+     * counted (Session 2, money map G-CARD-2, -7, -8, reproduced on a snapshot). The batch report banks;
+     * this confirms.
+     */
+    if (meaning.kind === "card_settlement") return { kind: "card_deposit", why: meaning.says };
     if (FACILITATOR.test(d)) return { kind: "deposit", receiptKind: "facilitator", payer: "Medicare Transaction Facilitator", why: "names the facilitator" };
     const payer = ctx.payers.find((p) => mentions(d, p));
     if (payer) return { kind: "deposit", receiptKind: "third_party", payer, why: `names ${payer}` };

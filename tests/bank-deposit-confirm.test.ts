@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { gateDeposit, matchHeldDeposit, type HeldForBank } from "../src/lib/deposit-gate";
+import { placeLine } from "../src/lib/bank-statement";
 
 /**
  * A bank statement deposit, and the receipt already banked for the same money.
@@ -127,11 +128,44 @@ describe("money the statement banked first, and the feed that arrives after it",
     const m = matchHeldDeposit(held, { amountCents: 271_744, on: "2026-09-07", payer: null }, new Set());
     assert.equal(m.kind, "ambiguous");
     assert.deepEqual(m.kind === "ambiguous" ? m.candidates.map((c) => c.id) : [], ["a", "b"]);
-    assert.match(m.kind === "ambiguous" ? m.why : "", /Nothing is banked/);
+    assert.match(m.kind === "ambiguous" ? m.why : "", /nothing needs banking, and banking it with the form would count it twice/);
   });
 
   test("a deposit no combination explains is still new money", () => {
     const held: HeldForBank[] = [{ id: "a", amountCents: 100, receivedOn: "2026-09-05", payer: null }];
     assert.equal(matchHeldDeposit(held, { amountCents: 250, on: "2026-09-06", payer: null }, new Set()).kind, "none");
+  });
+});
+
+describe("card takings have one door: the card batch report", () => {
+  const ctx = { payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [] };
+  test("REGRESSION: every scanned Heartland spelling on a credit is a card deposit, not retail money to bank", () => {
+    /* Session 2, money map G-CARD-8: "HRTLAND PMT SYST TXNS" missed the RETAIL rule and was left for a person to bank by hand. */
+    for (const d of ["HEARTLAND PAYMENT SYS", "HRTLAND PMT SYST TXNS", "HRTI-AND PMT SYS/TXNS"]) {
+      assert.equal(placeLine({ on: "2026-09-09", description: d, amountCents: 422_927, key: d }, ctx).kind, "card_deposit", d);
+    }
+  });
+
+  test("REGRESSION: bank.ts never banks a card deposit", async () => {
+    const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
+    const branch = text.slice(text.indexOf(`placement.kind === "card_deposit") {`), text.indexOf(`placement.kind === "deposit") {`, text.indexOf(`placement.kind === "card_deposit") {`)));
+    assert.ok(branch.length > 0);
+    assert.doesNotMatch(branch, /addCashReceipt/);
+  });
+
+  test("REGRESSION: a batch forwarded after the same deposit was typed by hand is refused", () => {
+    /* G-CARD-8, H2. The typed receipt has only a month. */
+    const typed = { amountCents: 422_927, receivedOn: null, payer: "Heartland", sourceKey: null, month: "2026-09" };
+    const v = gateDeposit([typed], { amountCents: 422_927, month: "2026-09", receivedOn: "2026-09-08", payer: "Card batch", sourceKey: "card-batch|780961413", reference: "780961413" });
+    assert.equal(v.bank, false);
+    assert.match(v.bank ? "" : v.why, /typed in by hand/);
+  });
+
+  test("REGRESSION: the form asks before typing money a feed already banked", async () => {
+    /* G-CARD-8, H1. */
+    const text = await readFile("src/app/(app)/money/page.tsx", "utf8");
+    const action = text.slice(text.indexOf("async function bankIt"), text.indexOf("async function unbank"));
+    assert.ok(action.indexOf("automaticReceiptsLike(") > 0 && action.indexOf("automaticReceiptsLike(") < action.indexOf("addCashReceipt("));
+    assert.doesNotMatch(text, /A deposit here is banked with the form above/);
   });
 });

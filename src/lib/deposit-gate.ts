@@ -46,6 +46,8 @@ export type BankedReceipt = {
 
 export type IncomingReceipt = {
   amountCents: number;
+  /** The month it is filed under — compared with receipts typed by hand, which carry no date. */
+  month?: string;
   receivedOn?: string | null;
   payer?: string | null;
   sourceKey?: string | null;
@@ -115,6 +117,19 @@ export function gateDeposit(held: BankedReceipt[], incoming: IncomingReceipt): G
   }
 
   if (!incoming.receivedOn) return { bank: true };
+  /*
+   * A receipt a person typed with the form: no date, no key, only a month. Invisible to the window below,
+   * so the card batch forwarded after somebody typed the same deposit banked beside it (Session 2, money
+   * map G-CARD-8, H2). Compared by month and exact amount, and not by payer: a person types "Heartland"
+   * for what the feed calls "Card batch".
+   */
+  const typed = held.find((h) => !h.receivedOn && !h.sourceKey && h.amountCents === incoming.amountCents && h.month && h.month === (incoming.month ?? incoming.receivedOn!.slice(0, 7)));
+  if (typed) {
+    return {
+      bank: false,
+      why: `${money(incoming.amountCents)} was already typed in by hand for ${typed.month}${typed.payer ? ` as ${typed.payer}` : ""}. If that is this money, nothing more is needed; if it is different money, remove the typed receipt and forward this again.`,
+    };
+  }
   const clash = held.find(
     (h) =>
       h.amountCents === incoming.amountCents &&
@@ -202,8 +217,8 @@ export function matchHeldDeposit(
       candidates: combos[0],
       why:
         combos.length === 1
-          ? `This deposit is exactly ${describeAll(combos[0])}, already banked separately — probably paid in together. Nothing is banked; confirm it by hand.`
-          : `This deposit equals more than one combination of receipts already banked (${combos.map(describeAll).join("; or ")}). Nothing is banked; it needs a person.`,
+          ? `This deposit is exactly ${describeAll(combos[0])}, already banked separately — probably paid in together. Those receipts are this money: nothing needs banking, and banking it with the form would count it twice.`
+          : `This deposit equals more than one combination of receipts already banked (${combos.map(describeAll).join("; or ")}). Nothing is banked. Check which; do not bank it with the form, which would count it twice.`,
     };
   }
   const describe = (h: HeldForBank) =>
