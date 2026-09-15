@@ -389,7 +389,9 @@ Owner: `money/bank.ts` — **A**; the card batch reader, `card-batch-store.ts` �
 Proposed fix: when a batch banks, link any unplaced `card_deposit` line of the same amount inside the
 window, or have the list re-run `matchHeldDeposit` on unplaced credits each time it is drawn.
 
-**G-CARD-13. The unplaced card-deposit line names the wrong day's batch report to forward.**
+**G-CARD-13. The unplaced card-deposit line names the wrong day's batch report to forward. — FIXED, 54bee8c** (read in
+the code, `bank.ts` 166: *"the batch reports for the days just before <date> … two to four days after it closes, so a
+Monday deposit can be the previous Thursday's to Saturday's"*, which fits the 25 August measurements).
 OBSERVATION: c898bb4's message is *"Forward the batch report for the day before ${line.on}"* (`bank.ts`,
 card_deposit branch). Measured on August's real card statement against the real bank statement, one to one:
 **0 of 25** batches closed the day before their bank credit. It was 2 days before for 16, 3 for 5 and 4 for 4.
@@ -605,6 +607,20 @@ Once on each basis. The cash month is the printed date until the bank statement 
 | — | a corrected re-issue with different fees (synthetic) | not booked; says the bill on file differs and to look at both |
 
 ### Gaps for this feed
+
+**Re-rehearsal of G-CSTMT-1 to -4 at 54bee8c (fresh snapshots, 18:18–18:19 UTC), with the real August statement:**
+
+| order | result | September cash card fees |
+|---|---|---|
+| statement first | booked **$4,778.73, dated 31 Aug, unpaid**; forwarded again, not booked; then the bank's 9/01 fee debit → `pays_bill` | absent → **$4,778.73** |
+| the bank's fee debit first (left unplaced), then the statement | booked, and **the waiting debit linked: paid 9/01**; forwarded again, not booked | absent → **$4,778.73** |
+| the fees typed on Spending first (9/03), then the statement | **the statement books nothing**, naming the bill on Spending | **$4,778.73**, once |
+| year-on statement, 22 of 25 batch receipts and July's last batch on file | names the 3 missing batches; **no "matches no deposit" sentence** | — |
+
+**G-CSTMT-1, -2, -3 and -4: FIXED, 54bee8c.** The August statement on live was read under the old rule ("out of books,
+nothing booked"), so it books only when it is forwarded or read again; session 1 is telling the owner. One wording
+remnant, not a money fault: `money/monthly/page.tsx` still heads the absent-costs list *"Record them on Spending"*,
+above a card-fee line that now says not to.
 
 **G-CSTMT-1. Fees typed on Spending, as the monthly account invites, are counted twice when the statement arrives.**
 OBSERVATION: rehearsal 5, real fees: $4,778.73 typed on Spending, then the statement → **$9,557.46** of
@@ -1413,7 +1429,11 @@ The ten real August Stamps.com charges ($940.99), through the real `placeLine`:
 
 ### Gaps
 
-**G-POST-1. Every Stamps.com bank charge is called "already counted", whether or not anything counted it. — PARTLY FIXED, 0b61a0f; re-rehearsal failed on one case.**
+**G-POST-1. Every Stamps.com bank charge is called "already counted", whether or not anything counted it. — PARTLY FIXED, 0b61a0f; re-rehearsal failed on one case. Then FIXED, 54bee8c.**
+Second re-rehearsal (fresh snapshot, 18:17 UTC), same September case: charges posted 9/09 and 9/11 → `already_counted`;
+**9/12 → unplaced** (*"no Endicia or Stamps.com purchase confirmation on file"*); 9/16 → `already_counted`. Each bill now
+covers one charge. (Session 1: 0b61a0f's consuming edit had not landed, which the first re-rehearsal caught.)
+The first re-rehearsal, as recorded:
 Re-rehearsed on a fresh snapshot (18:10 UTC), reproducing `bank.ts`' `postageBills` and running the real `placeLines`:
 - **the ten real August charges ($940.99), with no bill on file: all unplaced**, with *"a postage charge with no
   Endicia or Stamps.com purchase confirmation on file"*. Passes;
@@ -1583,13 +1603,13 @@ flowchart LR
 | 835 claim payments ↔ deposit | trace → deposit | $14,506.16 net unexplained across 20 HMA remittances (G-835-2) | open, needs a real 835 |
 | MTF 835 ↔ bank credit | MTF payments summed per day = the credit | 7/7 August, same day (section 5) | holds (d477ee4) |
 | Card batch ↔ bank credit | exact cents, ±7 days, `card-batch|…` receipts only | 25/25 August statement deposits = bank credits; close → bank 2–4 days | holds (c898bb4, 56f0ce2) |
-| Card batch ↔ card statement row | batch date ±1 day, exact cents | 22/25 on a year-on rehearsal, the 3 left out named; false "extra" at month edges (G-CSTMT-2) | holds; wording open |
-| Card fee bill ↔ bank fee debit | exact cents among unclaimed `GP-…` bills | ties when the statement came first; never re-placed if the bank came first (G-CSTMT-3) | open |
+| Card batch ↔ card statement row | batch date ±1 day, exact cents | 22/25 on a year-on rehearsal, the 3 left out named; no false "extra" (G-CSTMT-2) | holds (54bee8c) |
+| Card fee bill ↔ bank fee debit | exact cents; the bill is booked unpaid and the debit dates it | ties in both orders on the real August fees (G-CSTMT-3) | holds (54bee8c) |
 | McKesson invoice ↔ AP line | invoice number | 21/21 agree to the cent; 42 on AP with no invoice | holds |
 | AP ACH ↔ bank debit | `CKACH<n>` = bank `ACH<n>` | real ACH ties to 27 invoices; simulated next ACH marks 21/21 paid | holds (7b71c14) |
 | Supplier invoice ↔ PioneerRx receiving | invoice number, exact | 14/18 non-McKesson invoices match; no double by number, digits or amount | holds |
 | Rebate statement ↔ receipt ↔ bank | statement key; HEW LLC credits recognised as rebate parts, not linked | 3/3 real credits `rebate_part`, nothing banked (G-REB-1) | holds (4c61e77); linking is the engine's |
-| Postage confirmation ↔ bank charge | a POSTAGE bill of the same cents within 3 days | 10/10 August unconfirmed charges unplaced; **one bill still covers two charges** (G-POST-1) | partly fixed (0b61a0f) |
+| Postage confirmation ↔ bank charge | a POSTAGE bill of the same cents within 3 days | 10/10 August unconfirmed charges unplaced; one bill covers one charge (G-POST-1) | holds (54bee8c) |
 | McKesson return credit ↔ anything | **none** | $10,411.15 on no account (G-MCK-2) | question |
 | Payment-type report ↔ batches, claims | the report's period days | not rehearsable on the 30–31 August sample | sample requested (3–14 Sep) |
 
@@ -1613,11 +1633,11 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 | G-MTF-1 (b) | an MTF 835 or a bank line replaced the month's MTF money | **$2,783.72 / $1,556.14** (September) | 1 | **FIXED** d477ee4 |
 | G-MTF-2 | an unmatched MTF credit confirmed another payer's receipt | wrong link | A | **FIXED** 7b71c14 |
 | G-MCK-1 | the McKesson ACH tie never ran; invoices never paid | $106,322.62 debit; 21 invoices | A | **FIXED** 7b71c14 |
-| G-CSTMT-1 | card fees typed on Spending plus the statement counted twice | **$4,778.73** (August's fees) | A / 1 | OPEN (session 1's queue) |
-| G-CSTMT-2 | the batch check calls a neighbouring month's batch "extra" | wording | 1 | OPEN (queue) |
-| G-CSTMT-3 | card fees in the wrong cash month; permanent if the bank reads first | **$4,778.73** a month | 1 / A | OPEN (matching engine) |
-| G-CSTMT-4 | August's fees left the bank in September, on no account; September's cash should carry them | **$4,778.73** | 1 | OPEN (1 fixing, with G-CSTMT-3) |
-| G-CARD-13 | the card-deposit message names the wrong day (0 of 25) | wording | A / 1 | OPEN (queue) |
+| G-CSTMT-1 | card fees typed on Spending plus the statement counted twice | **$4,778.73** (August's fees) | 1 / A | **FIXED** 54bee8c |
+| G-CSTMT-2 | the batch check called a neighbouring month's batch "extra" | wording | 1 | **FIXED** 54bee8c |
+| G-CSTMT-3 | card fees in the wrong cash month; permanent if the bank read first | **$4,778.73** a month | 1 / A | **FIXED** 54bee8c |
+| G-CSTMT-4 | August's fees left the bank in September, on no account | **$4,778.73**; books once the August statement is forwarded or read again | 1 | **FIXED** 54bee8c |
+| G-CARD-13 | the card-deposit message named the wrong day (0 of 25) | wording | 1 | **FIXED** 54bee8c (read in code) |
 | G-CARD-12 | unplaced card lines never re-matched | list noise | A / 1 | OPEN (matching engine) |
 | G-PP-2 | a receipt's date is whichever document arrived first | one deposit per month edge | A | OPEN (matching engine) |
 | G-PP-3 | ProviderPay sweeps never clear the list | $56,860.27 of lines (August) | 1 | OPEN (matching engine) |
@@ -1627,7 +1647,7 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 | G-MCK-3 | a moved due date leaves a paid invoice owed | $22,118.56 test | — | OPEN |
 | G-MCK-4 | "N not placed" counts placed lines | wording | A | OPEN |
 | G-REB-1 | a rebate paid as three credits was unrecognised and the form would double it | **$9,706.52** (July) | 1 | **FIXED** 4c61e77 |
-| G-POST-1 | Stamps.com charges called already counted with no bill behind them | $940.99 of August charges (fixed); **$100.00 per unconfirmed charge near a confirmed one** (open) | 1 | PARTLY FIXED 0b61a0f |
+| G-POST-1 | Stamps.com charges called already counted with no bill behind them | $940.99 of August charges; $100.00 per unconfirmed charge near a confirmed one | 1 | PARTLY FIXED 0b61a0f, then **FIXED** 54bee8c |
 | G-CARD-3 | a batch email with an image attached is never banked, silently | 0 of 8 affected | B | OPEN (Phase B) |
 | G-CARD-5 | the payment-type checks have never run on real, overlapping data | — | 1 | sample requested |
 | M-CSTMT-1 | card processing cost 5.06% of deposits; Global Payments' own markup 2.15% + $0.3164/txn | **~$26,000 a year** at an illustrative 0.50% + $0.10 | owner | for the owner |
