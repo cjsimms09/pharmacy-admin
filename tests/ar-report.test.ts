@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { SITE_STARTS_ON } from "../src/lib/books-start";
+import { addDays } from "../src/lib/dates";
 import { owedByPayer, type Receivable, type Received } from "../src/lib/payer-owed";
 import {
   AGE_BANDS,
@@ -31,15 +32,22 @@ import {
  * gets reprinted months later to settle an argument. So the two things that must never move are the
  * date everything is pinned to and the rule about what is allowed in at all:
  *
- *   the books begin on 1 September 2026 and nothing from before it is in any figure, because the
- *   owner said so of this report by name — "these are test only and should not show up on any AR
- *   reports or anything";
+ *   nothing from before the books begin is in any figure, because the owner said so of this report
+ *   by name — "these are test only and should not show up on any AR reports or anything";
  *
  *   and a September report printed in January is the September report, not a January one with a
  *   September heading.
  *
  * Those are what these tests are for. The month arithmetic is here because it is what decides both.
+ *
+ * The boundary tests take their dates from SITE_STARTS_ON rather than naming a day. The books were to
+ * begin on 1 September 2026 and were moved to 1 October (September became the dry run); a test that
+ * names the day tests the calendar, not the rule. books-start.test.ts is the one place the day is pinned.
  */
+
+/** The first month of the books, and the month before them. */
+const FIRST = SITE_STARTS_ON.slice(0, 7);
+const BEFORE = previousMonth(FIRST);
 
 const bill = (o: Partial<Receivable> = {}): Receivable => ({
   bin: "610011", name: "Caremark", dateFilled: "2026-09-05", cents: 10_000, cashPlan: false, ...o,
@@ -117,11 +125,12 @@ describe("which months can be reported on at all", () => {
      * them: "I do not want to track or keep track of payments from before 09/01.. these are test
      * only and should not show up on any AR reports or anything." He named this report.
      */
-    const r = monthIsReportable("2026-06", "2026-09-11");
+    const today = `${FIRST}-11`;
+    const r = monthIsReportable("2026-06", today);
     assert.equal(r.ok, false);
     assert.match(r.why, /books begin/);
-    assert.equal(monthIsReportable("2026-08", "2026-09-11").ok, false, "August is out too, by one day");
-    assert.equal(monthIsReportable("2026-09", "2026-09-11").ok, true);
+    assert.equal(monthIsReportable(BEFORE, today).ok, false, "the month before the books is out too, by one day");
+    assert.equal(monthIsReportable(FIRST, today).ok, true);
   });
 
   test("a month that has not happened is refused rather than rendered empty", () => {
@@ -131,15 +140,18 @@ describe("which months can be reported on at all", () => {
   });
 
   test("the list runs from the first month of the books to this one, newest first", () => {
-    const months = reportableMonths("2026-12-04");
-    assert.deepEqual(months.map((m) => m.month), ["2026-12", "2026-11", "2026-10", "2026-09"]);
-    assert.equal(months[0].complete, false, "December is still running on the 4th");
+    const second = nextMonth(FIRST);
+    const third = nextMonth(second);
+    const fourth = nextMonth(third);
+    const months = reportableMonths(`${fourth}-04`);
+    assert.deepEqual(months.map((m) => m.month), [fourth, third, second, FIRST]);
+    assert.equal(months[0].complete, false, "the current month is still running on the 4th");
     assert.equal(months[1].complete, true);
   });
 
   test("on the first day of the books there is exactly one month to pick", () => {
     const months = reportableMonths(SITE_STARTS_ON);
-    assert.deepEqual(months.map((m) => m.month), ["2026-09"]);
+    assert.deepEqual(months.map((m) => m.month), [FIRST]);
   });
 });
 
@@ -148,14 +160,15 @@ describe("what is allowed into the figures", () => {
     /*
      * This is not hypothetical. `allFills` loads a fill if it was either filled or collected inside
      * the window — the account needs that, because revenue follows the day the patient collects —
-     * so an August fill picked up on 2 September arrives here with an August fill date. It is not
-     * this pharmacy's September receivable and must not be one of its lines.
+     * so a fill from the month before the books, picked up on their second day, arrives here with
+     * its old fill date. It is not a receivable of the books and must not be one of their lines.
      */
+    const monthEnd = lastDayOf(FIRST);
     const kept = receivablesAsAt(
-      [bill({ dateFilled: "2026-08-28" }), bill({ dateFilled: "2026-09-01" }), bill({ dateFilled: "2026-09-30" })],
-      "2026-09-30",
+      [bill({ dateFilled: addDays(SITE_STARTS_ON, -4) }), bill({ dateFilled: SITE_STARTS_ON }), bill({ dateFilled: monthEnd })],
+      monthEnd,
     );
-    assert.deepEqual(kept.map((r) => r.dateFilled), ["2026-09-01", "2026-09-30"]);
+    assert.deepEqual(kept.map((r) => r.dateFilled), [SITE_STARTS_ON, monthEnd]);
   });
 
   test("a fill dated after the month end was not owed at the month end", () => {
@@ -163,13 +176,14 @@ describe("what is allowed into the figures", () => {
     assert.equal(kept.length, 0);
   });
 
-  test("a payment that arrived in October does not settle a September balance", () => {
+  test("a payment that arrived the day after the month end does not settle that month's balance", () => {
     /*
-     * The rule that makes the document stable. Without it, September's report shrinks every time it
+     * The rule that makes the document stable. Without it, a month's report shrinks every time it
      * is reprinted, and the copy in the accountant's file stops matching the copy on the screen.
      */
-    const kept = receivedAsAt([paid({ receivedOn: "2026-09-30" }), paid({ receivedOn: "2026-10-01" })], "2026-09-30");
-    assert.deepEqual(kept.map((p) => p.receivedOn), ["2026-09-30"]);
+    const monthEnd = lastDayOf(FIRST);
+    const kept = receivedAsAt([paid({ receivedOn: monthEnd }), paid({ receivedOn: addDays(monthEnd, 1) })], monthEnd);
+    assert.deepEqual(kept.map((p) => p.receivedOn), [monthEnd]);
   });
 
   test("out-of-books money is thrown out here too, not only in the query", () => {
@@ -361,19 +375,22 @@ describe("when the monthly copy goes out on its own", () => {
      * land is missing money that is about to be counted in it — so the copy in the accountant's
      * file and the copy on the screen disagree within the week.
      */
-    assert.equal(monthDueOn("2026-12-05"), "2026-11");
-    assert.equal(monthDueOn("2026-12-28"), "2026-11");
-    assert.equal(monthDueOn("2026-12-04"), "2026-10", "before the 5th, November's is not due yet");
+    // Dated well after the books begin, so this tests the 5th-of-the-month rule and not the boundary.
+    assert.equal(monthDueOn("2027-12-05"), "2027-11");
+    assert.equal(monthDueOn("2027-12-28"), "2027-11");
+    assert.equal(monthDueOn("2027-12-04"), "2027-10", "before the 5th, November's is not due yet");
   });
 
   test("the turn of the year does not lose a month", () => {
-    assert.equal(monthDueOn("2027-01-06"), "2026-12");
-    assert.equal(monthDueOn("2027-01-02"), "2026-11");
+    assert.equal(monthDueOn("2028-01-06"), "2027-12");
+    assert.equal(monthDueOn("2028-01-02"), "2027-11");
   });
 
   test("nothing is ever due for a month from before the books begin", () => {
-    // October 2026, before the 5th, would otherwise ask for August — which is test data.
-    assert.equal(monthDueOn("2026-10-02"), null);
-    assert.equal(monthDueOn("2026-10-06"), "2026-09");
+    // The month after the books' first, before the 5th, would otherwise ask for the month before the
+    // books — which is test data.
+    const after = nextMonth(FIRST);
+    assert.equal(monthDueOn(`${after}-02`), null);
+    assert.equal(monthDueOn(`${after}-06`), FIRST);
   });
 });

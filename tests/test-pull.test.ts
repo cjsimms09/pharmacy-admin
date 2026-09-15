@@ -1,6 +1,11 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { isOutOfBooks, SITE_STARTS_ON } from "../src/lib/books-start";
+import { addDays } from "../src/lib/dates";
+
+/** Days either side of the books' first day, so the boundary tests follow the constant. */
+const before = (n: number) => addDays(SITE_STARTS_ON, -n);
+const after = (n: number) => addDays(SITE_STARTS_ON, n);
 
 /**
  * The rule that decides whether a pull of claims from PioneerRx is a test.
@@ -24,17 +29,17 @@ describe("a pull of claims is a test, or it is the books", () => {
 
   test("a pull straddling the boundary is NOT a test", () => {
     /*
-     * The case worth protecting. A range asked for as "August onwards" that returns September fills
-     * holds real claims, and flagging the import would take real revenue out of the books — the same
-     * mistake as keying a payment on its fill date instead of when the money arrived.
+     * The case worth protecting. A range asked for as "the month before onwards" that returns fills
+     * from inside the books holds real claims, and flagging the import would take real revenue out of
+     * the books — the same mistake as keying a payment on its fill date instead of when the money arrived.
      */
-    assert.equal(isTestPull(on("2026-08-28", "2026-08-31", "2026-09-02")), false);
-    assert.equal(isTestPull(on("2026-08-31", SITE_STARTS_ON)), false);
+    assert.equal(isTestPull(on(before(4), before(1), after(1))), false);
+    assert.equal(isTestPull(on(before(1), SITE_STARTS_ON)), false);
   });
 
   test("the first day of the books is in the books", () => {
     assert.equal(isTestPull(on(SITE_STARTS_ON)), false);
-    assert.equal(isTestPull(on("2026-08-31")), true);
+    assert.equal(isTestPull(on(before(1))), true);
   });
 
   test("a pull that returned nothing is not a test, and not anything", () => {

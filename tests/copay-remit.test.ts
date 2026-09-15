@@ -241,7 +241,8 @@ describe("recognising one of these files", () => {
 });
 
 /*
- * The fills this statement settles are all before 1 September 2026.
+ * The fills this statement settles are all before the books begin (August 2026; the books begin on
+ * 1 October 2026).
  *
  * The owner settled that nothing before then is being uploaded and the site starts clean, so these
  * will never match a claim however long anybody waits. That is not a failure to match — it is money
@@ -257,7 +258,9 @@ describe("what the site's start date means for these", () => {
   });
 
   test("the start date is the day the owner named, not a guess", () => {
-    assert.equal(SITE_STARTS_ON, "2026-09-01");
+    // The owner, 15 September 2026: "books start on 10/01". Pinned here as well as in books-start.test.ts
+    // because this reader re-exports the constant.
+    assert.equal(SITE_STARTS_ON, "2026-10-01");
   });
 });
 
