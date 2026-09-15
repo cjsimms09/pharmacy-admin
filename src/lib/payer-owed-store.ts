@@ -119,6 +119,8 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
         name: p.name ?? null,
         dateFilled: f.dateFilled,
         cents: planCents,
+        claimId: p.claimId ?? null,
+        portion: "plan",
         /*
          * Asked of the plan register rather than taken off the fill. `Fill.cashPlan` is true when
          * the whole fill was cash-priced; a coordinated fill can carry one cash plan and one that
@@ -127,7 +129,7 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
         cashPlan: cashPlanFor(p.bin, p.pcn, plans) !== null,
       });
       if (owes.programme && owes.programmeCents > 0) {
-        receivables.push({ bin: null, name: owes.programme, dateFilled: f.dateFilled, cents: owes.programmeCents, cashPlan: false });
+        receivables.push({ bin: null, name: owes.programme, dateFilled: f.dateFilled, cents: owes.programmeCents, cashPlan: false, claimId: p.claimId ?? null, portion: "programme" });
       }
     }
   }
@@ -135,13 +137,15 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
   const received: Received[] = payments.map((p) => ({
     /*
      * A programme's payment on a claim the programme owes part of settles the programme's share, never the plan; a plan's
-     * payment on the same claim settles the plan, as before. It settles under the payer the payment itself names
-     * (RedSail, Veridikal eVoucher or Veridikal Denial Conversion), so a payment from one programme on a claim read as the
-     * other's shows as over on one line and owed on the other rather than quietly settling the wrong one.
+     * payment on the same claim settles the plan, as before. Matched to a claim, it settles that claim's programme part
+     * whichever programme it names (owedByPayer keys on claim and part), so a programme read from the column rather than
+     * the message cannot leave a paid share owed. Its own payer name decides only where it is not tied to one claim.
      */
     ...(p.source === "copay_card" && claimShares({ remitCents: p.claimRemit, evoucherCents: p.claimVoucher, evoucherMessageCents: p.claimVoucherMessage, evoucherProgramme: p.claimVoucherProgramme }).programme !== null
-      ? { bin: null, payer: p.payer }
-      : { bin: p.claimBin, payer: p.claimPayer ?? p.payer }),
+      ? { bin: null, payer: p.payer, portion: "programme" as const }
+      : { bin: p.claimBin, payer: p.claimPayer ?? p.payer, portion: "plan" as const }),
+    /* The claim it settled: a payment settles that claim's own share and no other (payer-owed.ts). */
+    claimId: p.claimId,
     cents: p.amountCents,
     receivedOn: p.receivedOn,
     /*

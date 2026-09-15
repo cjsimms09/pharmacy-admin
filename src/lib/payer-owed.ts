@@ -160,7 +160,20 @@ export type Receivable = {
   cents: number;
   /** True where the plan is one the pharmacy bills through that never remits. */
   cashPlan: boolean;
+  /**
+   * The claim this share is of, and which part of it: the plan's own, or a manufacturer programme's inside it (a voucher
+   * or a denial conversion, `claimShares`). Where given, this share is settled only by payments matched to the same claim
+   * and part, and aged claim by claim. Where absent, the payer's share is settled by whatever it sent, summed, as before.
+   */
+  claimId?: string | null;
+  portion?: Portion;
 };
+
+/**
+ * Which part of one payer's claim. Not "primary"/"secondary": those are the claim's coordination-of-benefits position
+ * (`claims.payer_position`), a different thing — a secondary payer's claim has a plan part of its own.
+ */
+export type Portion = "plan" | "programme";
 
 /** One payment that arrived, as `claim_payments` holds it. */
 export type Received = {
@@ -171,7 +184,16 @@ export type Received = {
   receivedOn: string | null;
   /** False where the payment found no claim on file: money with nothing to attach to. */
   matched: boolean;
+  /** The claim and part it settled, where the matcher found one. See `Receivable.claimId`. */
+  claimId?: string | null;
+  portion?: Portion;
 };
+
+/** One claim's share, as it stands: what the month-end report ages. */
+export type ClaimBalance = { payerKey: string; dateFilled: string; billedCents: number; receivedCents: number; outstandingCents: number };
+
+/** A negative remit: a network charging the pharmacy for the claim. Owed by the pharmacy, so never a receivable. */
+export type FeeOwed = { key: string; bin: string | null; name: string; claims: number; cents: number };
 
 export type PayerState =
   /** Bills through this plan; the copay is the money. Nothing is owed, ever. */
@@ -216,6 +238,8 @@ export type PayerLine = {
   state: PayerState;
   /** One sentence saying what the two figures mean, so neither is read alone. */
   says: string;
+  /** Received beyond billed, claim by claim: an overpaid claim does not settle another. Nought where none is. */
+  overpaidCents?: number;
 };
 
 export type OwedSummary = {
@@ -225,6 +249,14 @@ export type OwedSummary = {
   outstandingCents: number;
   /** Payments that found no claim. Not an error: see the module note. */
   unattached: { count: number; cents: number };
+  /** Every claim share that carries a claim id, as it stands, for ageing. */
+  claimBalances: ClaimBalance[];
+  /** Payers' outstanding from shares with no claim id, where the payer has sent something: not ageable. */
+  unaged: { payerKey: string; cents: number }[];
+  /** Negative remits: fees networks charge the pharmacy, listed apart and in no receivable figure. */
+  feesOwed: FeeOwed[];
+  /** Payments matched to a claim this period does not bill (outside it, or a fee claim): settle nothing here. */
+  outside: { count: number; cents: number };
   /** True where no payer has ever sent anything. The state the whole page has to survive. */
   nothingHasArrived: boolean;
   /** The headline, in words, above the table. */
@@ -266,23 +298,59 @@ export function payerKey(bin: string | null, name: string | null): string {
  * `today` is passed rather than read so this stays pure and so the sentences are testable.
  */
 export function owedByPayer(receivables: Receivable[], received: Received[], today: string): OwedSummary {
-  type Acc = { bin: string | null; name: string; claims: number; billed: number; got: number; oldest: string | null; cash: boolean; payments: number };
+  type Share = { payerKey: string; dateFilled: string; billed: number; paid: number };
+  type Acc = {
+    bin: string | null; name: string; claims: number; billed: number; got: number; oldest: string | null; cash: boolean; payments: number;
+    /** Shares carrying a claim id, settled claim by claim. */
+    shares: Share[];
+    /** Billed on shares with no claim id, and what arrived for this payer against no particular claim: the old arithmetic. */
+    looseBilled: number; loosePaid: number;
+  };
   const by = new Map<string, Acc>();
+  const shareOf = new Map<string, Share>();
+  const fees = new Map<string, FeeOwed>();
+  const shareKey = (claimId: string, portion: Portion | undefined) => `${claimId}|${portion ?? "plan"}`;
 
   for (const r of receivables) {
     const k = payerKey(r.bin, r.name);
-    const a = by.get(k) ?? { bin: r.bin, name: r.name ?? r.bin ?? "Unnamed payer", claims: 0, billed: 0, got: 0, oldest: null, cash: r.cashPlan, payments: 0 };
+    /*
+     * A negative remit is a network charging the pharmacy for the claim — ScriptSave, Hippo and other discount networks
+     * take a fee this way. It is owed by the pharmacy, not to it: listed apart, never billed, and never allowed to net
+     * against another claim's balance, which is what made a payer's receivable read below nought.
+     */
+    if (r.cents < 0) {
+      const f = fees.get(k) ?? { key: k, bin: r.bin, name: r.name ?? r.bin ?? "Unnamed payer", claims: 0, cents: 0 };
+      f.claims++;
+      f.cents += -r.cents;
+      fees.set(k, f);
+      continue;
+    }
+    const a = by.get(k) ?? { bin: r.bin, name: r.name ?? r.bin ?? "Unnamed payer", claims: 0, billed: 0, got: 0, oldest: null, cash: r.cashPlan, payments: 0, shares: [], looseBilled: 0, loosePaid: 0 };
     a.claims++;
     a.billed += r.cents;
     if (!a.oldest || r.dateFilled < a.oldest) a.oldest = r.dateFilled;
     // One cash row makes the plan a cash plan: the flag is a property of the plan, not of the fill.
     if (r.cashPlan) a.cash = true;
     if (!a.name || a.name === a.bin) a.name = r.name ?? a.name;
+    if (r.claimId) {
+      const sk = shareKey(r.claimId, r.portion);
+      const existing = shareOf.get(sk);
+      if (existing) existing.billed += r.cents;
+      else {
+        const s: Share = { payerKey: k, dateFilled: r.dateFilled, billed: r.cents, paid: 0 };
+        shareOf.set(sk, s);
+        a.shares.push(s);
+      }
+    } else {
+      a.looseBilled += r.cents;
+    }
     by.set(k, a);
   }
 
   let unattachedCount = 0;
   let unattachedCents = 0;
+  let outsideCount = 0;
+  let outsideCents = 0;
   for (const p of received) {
     if (!p.matched) {
       /*
@@ -294,6 +362,23 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
       unattachedCents += p.cents;
       continue;
     }
+    if (p.claimId) {
+      /*
+       * Settles the one share it was matched to, and nothing else. A payment for a claim this period does not bill — an
+       * earlier fill, or a fee claim — settles nothing here rather than being spread over the payer's other claims.
+       */
+      const s = shareOf.get(shareKey(p.claimId, p.portion));
+      const a = s ? by.get(s.payerKey) : undefined;
+      if (!s || !a) {
+        outsideCount++;
+        outsideCents += p.cents;
+        continue;
+      }
+      s.paid += p.cents;
+      a.got += p.cents;
+      a.payments++;
+      continue;
+    }
     const k = payerKey(p.bin, p.payer);
     const a = by.get(k);
     /*
@@ -301,18 +386,29 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
      * to a claim outside whatever period was asked for. Left out rather than credited, so a
      * September balance is not settled by an August payment that September never billed for.
      */
-    if (!a) continue;
+    if (!a) {
+      outsideCount++;
+      outsideCents += p.cents;
+      continue;
+    }
     a.got += p.cents;
+    a.loosePaid += p.cents;
     a.payments++;
   }
 
   const lines: PayerLine[] = [...by.entries()]
     .map(([key, a]) => {
-      const outstanding = Math.max(0, a.billed - a.got);
-      const days = daysBetween(a.oldest, today);
+      const shareOutstanding = a.shares.reduce((n, s) => n + Math.max(0, s.billed - s.paid), 0);
+      const shareOver = a.shares.reduce((n, s) => n + Math.max(0, s.paid - s.billed), 0);
+      const outstanding = shareOutstanding + Math.max(0, a.looseBilled - a.loosePaid);
+      const overpaid = shareOver + Math.max(0, a.loosePaid - a.looseBilled);
+      /* The oldest share still unsettled, where shares are known; otherwise the oldest billed, as before. */
+      const open = a.shares.filter((s) => s.billed - s.paid > 0).map((s) => s.dateFilled).sort();
+      const oldest = a.looseBilled === 0 && a.shares.length ? open[0] ?? a.oldest : a.oldest;
+      const days = daysBetween(oldest, today);
       const state: PayerState = a.cash
         ? "cashPlan"
-        : a.got > a.billed
+        : outstanding === 0 && overpaid > 0
           ? "overpaid"
           : outstanding === 0
             ? "settled"
@@ -327,10 +423,11 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
         billedCents: a.billed,
         receivedCents: a.got,
         outstandingCents: outstanding,
-        oldestOn: a.oldest,
+        oldestOn: oldest,
         daysWaiting: outstanding > 0 ? days : null,
         state,
-        says: sentenceFor(state, a.name, outstanding, a.got, a.billed, days),
+        says: sentenceFor(state, a.name, outstanding, a.got, a.billed, days) + (state === "owes" && overpaid > 0 ? ` ${money(overpaid)} of what arrived was more than its own claims asked for, and is not counted against the others.` : ""),
+        overpaidCents: overpaid,
       };
     })
     // Largest outstanding first: the page exists to answer "who owes me the most".
@@ -342,12 +439,23 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
   const real = lines.filter((l) => l.state !== "cashPlan");
   const nothingHasArrived = real.length > 0 && real.every((l) => l.receivedCents === 0);
 
+  const claimBalances: ClaimBalance[] = [...by.values()]
+    .filter((a) => !a.cash)
+    .flatMap((a) => a.shares.map((s) => ({ payerKey: s.payerKey, dateFilled: s.dateFilled, billedCents: s.billed, receivedCents: s.paid, outstandingCents: Math.max(0, s.billed - s.paid) })));
+  const unaged = [...by.entries()]
+    .filter(([, a]) => !a.cash && a.loosePaid > 0 && a.looseBilled - a.loosePaid > 0)
+    .map(([k, a]) => ({ payerKey: k, cents: a.looseBilled - a.loosePaid }));
+
   return {
     lines,
     billedCents,
     receivedCents,
     outstandingCents,
     unattached: { count: unattachedCount, cents: unattachedCents },
+    claimBalances,
+    unaged,
+    feesOwed: [...fees.values()].sort((x, y) => y.cents - x.cents),
+    outside: { count: outsideCount, cents: outsideCents },
     nothingHasArrived,
     says: headline({ lines, real, billedCents, receivedCents, outstandingCents, nothingHasArrived, unattachedCount, unattachedCents }),
   };

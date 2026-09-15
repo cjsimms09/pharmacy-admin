@@ -60,7 +60,7 @@ export async function arReportFor(month: string, today = todayIso()): Promise<{ 
    */
   const summary = owedByPayer(receivables, received, window.asAt);
   const report = arReport(month, window, summary);
-  report.ageing = ageOutstanding(receivables, report.lines, window.asAt);
+  report.ageing = ageOutstanding(receivables, summary, window.asAt);
   return { report, why: "" };
 }
 

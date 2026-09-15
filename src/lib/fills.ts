@@ -110,6 +110,8 @@ export type FillPayer = {
   evoucherCents: number;
   evoucherMessageCents: number | null;
   evoucherProgramme: string | null;
+  /** The claim row this payer's figures come from: what a payment matched to it settles (payer-owed.ts). */
+  claimId?: string;
   /** What the patient was left owing after this payer adjudicated. */
   copayCents: number;
 };
@@ -389,6 +391,7 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       evoucherCents: r.evoucherCents ?? 0,
       evoucherMessageCents: r.evoucherMessageCents ?? null,
       evoucherProgramme: r.evoucherProgramme ?? null,
+      claimId: r.id,
       /*
        * The patient's residual, from the column that actually carries it.
        *
