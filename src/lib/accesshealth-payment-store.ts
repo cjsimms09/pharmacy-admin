@@ -106,21 +106,24 @@ export async function fileAccessHealthPayment(
   }
 
   /*
-   * The origination fees, booked once each as a revenue offset with no paid date: the deposit is already net of them,
-   * which is what the note on "DIR fees and price concessions" asks of money a plan took out of a remittance.
+   * The origination fees, booked once each under "PSAO fees" with no paid date: the deposit is already net of them. Not
+   * under DIR: they are the PSAO's charge, not a plan's clawback, and a month with them on file has still not had its
+   * DIR entered (profit-and-loss.ts lists DIR missing on the DIR category alone).
    */
   const { post, held: heldAdjustments } = adjustmentPostings(p);
   let booked = 0;
   if (post.length) {
     const { seedCategories, categories } = await import("./expenses");
     await seedCategories();
-    const category = (await categories(true)).find((c) => c.name === "DIR fees and price concessions");
+    const category = (await categories(true)).find((c) => c.name === "PSAO fees");
+    // Seeded a line above, so absent only if the category was renamed; a fee on no category would be off every account.
+    if (!category) throw new Error('The "PSAO fees" category is not on file, so the origination fees cannot be booked.');
     for (const a of post) {
       const already = await db.query.expenses.findFirst({ where: eq(schema.expenses.invoiceNumber, a.key), columns: { status: true } });
       if (already && already.status !== "void") continue;
       await db.insert(schema.expenses).values({
         id: newId(),
-        categoryId: category?.id ?? null,
+        categoryId: category.id,
         vendorId: null,
         invoiceNumber: a.key,
         invoiceDate: a.on,
@@ -137,7 +140,7 @@ export async function fileAccessHealthPayment(
     }
   }
   const adjustmentText = [
-    post.length ? `Origination fees of ${money(post.reduce((n, a) => n + a.amountCents, 0))} booked as a revenue offset${booked < post.length ? ` (${post.length - booked} already on file)` : ""}; nothing on the cash account, which the net deposit already carries.` : "",
+    post.length ? `Origination fees of ${money(post.reduce((n, a) => n + a.amountCents, 0))} booked under PSAO fees, a revenue offset${booked < post.length ? ` (${post.length - booked} already on file)` : ""}; nothing on the cash account, which the net deposit already carries.` : "",
     heldAdjustments.length ? `Held as data, on neither account until their meaning is settled: ${heldAdjustments.map((a) => `${a.plan} ${a.code}${a.reference ? ` ${a.reference}` : ""} ${money(a.amountCents)}`).join("; ")}.` : "",
   ].filter(Boolean).join(" ");
   if (input.documentId && heldAdjustments.length) {
