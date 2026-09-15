@@ -8,6 +8,23 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `autoroute.ts` and `mailbox.ts` (B's) — the monthly card processing statement
+
+**Written before touching either file.** Global Payments (Heartland) sends a monthly merchant statement, forwarded
+by staff from jdarrah@wwfppa.com as a PDF. It is the only record of card processing fees. Two changes in B's group:
+
+- `autoroute.ts`: a new `RouteKind` `card_statement`, recognised in the PDF branch from the document's own text
+  ("Merchant Statement", "Statement Period", and Global Payments or Heartland), before the "does not recognise" fall-through.
+- `mailbox.ts`: one `else if (cls.kind === "card_statement")` beside the other PDF kinds, calling a new store.
+
+Also, in `pdf-text.ts` (unassigned): streams wrapped in ASCII85 before Flate are now decoded. The statement writes
+every page that way and the reader returned nothing at all for it; the change is additive and only reached where
+Flate and raw inflate have both failed.
+
+What the statement does in the books: **fees only**, as an expense in the statement month, paid on the statement's
+own auto-debit date. Its deposits are the same money as the card batch reports and are never banked — they are
+used to check every batch arrived.
+
 ### From 1 — 15 September, before the edit: `mailbox.ts` (B's) — the daily credit card batch report
 
 **Written before touching the file.** The owner's staff forward one email per card settlement batch: subject
