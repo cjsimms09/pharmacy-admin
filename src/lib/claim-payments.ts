@@ -102,11 +102,11 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
      * The owner: "I do not want to track or keep track of payments from before 09/01.. these are
      * test only and should not show up on any AR reports or anything."
      */
-    outOfBooks: isOutOfBooks(p.receivedOn, p.dateFilled),
+    outOfBooks: isOutOfBooks(p.receivedOn),
     notes: [p.notes, onlyReversed ? "The only claim this pharmacy holds for that fill was reversed, so the payment is recorded against no claim. Worth asking the plan what it paid for." : null].filter(Boolean).join(" ") || null,
     recordedBy: user.name,
   });
-  return { id, matched: claim !== null, settledReversed: onlyReversed, ambiguous, outOfBooks: isOutOfBooks(p.receivedOn, p.dateFilled) };
+  return { id, matched: claim !== null, settledReversed: onlyReversed, ambiguous, outOfBooks: isOutOfBooks(p.receivedOn) };
 }
 
 /**

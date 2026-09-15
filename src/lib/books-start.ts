@@ -18,26 +18,31 @@
  * fill-date rule would throw it out — quietly losing revenue in the name of tidiness. The reverse
  * error is harmless by comparison: a June payment for a June fill is out either way.
  *
- * ── Except where the payment names a fill these books do not contain ──
+ * ── A fill-date exception was tried on 15 September and withdrawn the same day. Do not re-add it ──
  *
- * The paragraph above rests on *"a September remittance settling an August fill is real money in
- * these books"*, and on 14 September that sentence turned out to have an unexamined word in it:
- * **these**. It is real money in these books only if the fill is in these books.
+ * The paragraph above was overridden that morning. Fourteen Medicare Transaction Facilitator
+ * refunds ($1,572.90) arrived in September for fills dated in August, and none of the claims they
+ * settle is in this site, so they can never be matched. The reasoning went: a payment settles a
+ * claim, the claim is not in these books, so the payment should not be either — and a payment that
+ * named a fill date was judged on that date instead of on the day the money arrived.
  *
- * Fourteen Medicare Transaction Facilitator refunds, $1,572.90, arrived between 1 and 14 September
- * for fills dated 10 to 24 August, and every one was counted by the rule above. Not one of the
- * claims they settle exists in this site at all — not in the books, not out of them, never imported,
- * because the claims feed begins on 1 September. So they credited September with revenue whose fill
- * it had never recorded, against a cost it had never carried, and could never be matched to anything
- * for as long as they were kept.
+ * That was accrual reasoning applied to a flag the **cash** account also reads. `profit-and-loss.ts`
+ * counts MTF refunds received in a month as that month's facilitator cash wherever nobody has typed a
+ * facilitator receipt, and nobody had. So the change took real September cash out of the September
+ * cash account — $2,789.08 by that afternoon, including a $1,216.18 refund that arrived the same day
+ * and was shut out on arrival — and it would have gone on removing cash every day the August fills'
+ * refunds kept landing. It was also reported as "neither bottom line moved", which nobody had
+ * measured.
  *
- * So a payment that **names** a fill date is judged on that date. The rule above stands untouched
- * wherever a payment names none: a remittance with no date is far likelier to be this month's, and
- * silently dropping real revenue is still the failure that matters there.
+ * The paragraph above was right, and for exactly the reason it gives: "a fill-date rule would throw it
+ * out — quietly losing revenue in the name of tidiness." Money received in September is September
+ * cash, whatever fill it paid for. The accrual account never reads these payments, so nothing needed
+ * protecting there. That the refunds cannot be matched to a claim is a matching question, and the
+ * owner answered it the same morning: *"the mtf payments are probably for claims before when we
+ * started this site.. that is okay.. they should match going forward."*
  *
- * Nothing is lost by the narrower rule, and that is what makes it safe rather than merely tidier —
- * the revenue was never counted, because the claim was never loaded. The claim and its payment go
- * out together or stay together. Before this they came apart.
+ * The lesson in the shape of the fault: before changing what a flag means, find every reader of the
+ * flag. The costliest faults here have been two correct things meeting.
  *
  * ── Why the rows are kept at all ──
  *
@@ -55,24 +60,7 @@ export const SITE_STARTS_ON = "2026-09-01";
  * and the failure that matters is silently dropping real revenue. Anything pulled as a test comes
  * with its dates, because that is what a portal export is.
  */
-export function isOutOfBooks(receivedOn: string | null | undefined, dateFilled?: string | null): boolean {
-  /*
-   * The fill wins where the payment names a **credible** one: a payment settles a claim, and a claim
-   * these books never loaded cannot be settled inside them. See the third section above for the
-   * $1,572.90 that found this.
-   *
-   * Credible means not after the day the money arrived. Nobody is paid for a fill that has not
-   * happened, so a later fill date is not a fill date — it is a placeholder, and this pharmacy has
-   * 58 of them: ProviderPay rows stamped 2026-12-31, received 27 August, which read as "filled in
-   * the future, therefore after 1 September, therefore in the books" and would have pulled $580 of
-   * August test money in. That is the same fault as the one being fixed, pointing the other way, and
-   * it was caught by a dry run rather than by the reasoning.
-   *
-   * The test is against the received date rather than against today, so this stays pure and needs no
-   * clock. Where no fill is named, or the one named is not credible, the original received-date rule
-   * is unchanged.
-   */
-  if (dateFilled && (!receivedOn || dateFilled <= receivedOn)) return dateFilled < SITE_STARTS_ON;
+export function isOutOfBooks(receivedOn: string | null | undefined): boolean {
   if (!receivedOn) return false;
   return receivedOn < SITE_STARTS_ON;
 }
