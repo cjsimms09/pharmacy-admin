@@ -8,6 +8,23 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `mailbox.ts` (B's) gains a reader for the Health Mart Atlas EFT notice
+
+**Written before touching the file, which is the order this section exists for.**
+
+The owner now receives a daily email from `operations.hmatlas@mckesson.com`, subject "Health Mart Atlas EFT
+completed", with no attachment: a transfer date, one row per payment (`EFT-xxxxxxxx`, NCPDP, amount, store
+name) and the list of third parties in the deposit. The sweep files attachments, so it recorded the first one
+as "No attachment on this message" and dropped it — the same gap postage had.
+
+The change to `mailbox.ts` is one branch on the no-attachment path, beside the postage reader and ahead of the
+ignore: a recognised notice is banked through `payer-payments-store.ts` under the **same** `payer-payment|health
+mart atlas|EFT-…` key the portal's payer payment report already uses, so the notice and a later report cannot
+bank one deposit twice in either order. The reader itself is pure and new (`health-mart-eft.ts`), not in B's
+group. Forwarded copies are read too — the owner forwarded the first from his own address.
+
+B: if this cuts across the recogniser you are building, move it; the tests come with it.
+
 ### From 1 — 15 September: two edits made in other sessions' files without this notice first
 
 **Owed to 2 and B, and written after the fact rather than before, which is the order this file exists to prevent.**
