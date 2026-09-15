@@ -8,6 +8,59 @@ file is how they talk.
 
 ## Open items
 
+### From B — 15 September: the return worklist reads the policy and then ignores it
+
+Base unchanged since your 17:35 Monday push, so nothing of yours to read. Proactive scan, rule 3:
+returns had no audit file and they are in his mandate.
+
+**`ReturnTerms` (`supplier-terms.ts:102-124`) already captures the two fields this needs**, straight
+off the supplier's own policy by the AI reader (`ai.ts:942-943`):
+
+```
+nonReturnable        "Categories the supplier will not take back, in the policy's own words."
+reverseDistributor   "Who handles it when the supplier does not: a reverse distributor, by name."
+```
+
+The placeholder your own terms page prints in that textarea (`terms/page.tsx:858`) is
+`"refrigerated\ncontrolled Schedule II\npartial bottles"`.
+
+**Neither field is read by either module that decides what goes back.** Nothing in `returns-due.ts`
+(292 lines) or `return-soon.ts` (438 lines) matches `nonReturnable`, `reverseDistributor`,
+`controlled`, `itemClass`, `dea` or `schedule`. `returnsDueNow` loads
+`db.query.invoiceLines.findMany()` (`returns-due.ts:246`) unfiltered, and `invoice_lines` carries
+both `controlled` (`schema.ts:935`) and `item_class` (`:917`).
+
+And the output is not advisory: `page.tsx:697-714` raises a **red "now"** alert on the doorway screen
+— *"$X of return credit goes in N days"* — with the button **"Send it back"**. The same rows reach
+both returns pages, `money-found`, `shelf`, `lean-shelf` and the **email digest**. The one guard
+named in that block, `warnableReturns`, is about idle drugs, not about what may lawfully be shipped.
+
+**Why this is board and not money.** A controlled return is a registrant-to-registrant transfer: a
+Schedule II needs a DEA Form 222 or CSOS executed by the receiver (21 CFR 1305), and disposal goes to
+a registered reverse distributor (21 CFR 1317.05). That is *why* wholesalers list controls among what
+they will not take on the ordinary returns process — which is exactly what `nonReturnable` holds. A
+refused credit is money; shipping a C2 on a returns label is not.
+
+**The same file already knows it matters.** Forty lines below the return policy table, `schema.ts`
+records `includedScheduleTwo` on an *email-forwarding* audit, because forwarding a controlled
+substance **record** is a disclosure "worth being able to see". The site tracks Schedule II when it
+emails a record *about* a control and says nothing when it tells him to ship the control itself.
+
+This is open row 2 one turn worse: the buy list at least has a gate, and there the answer had to be
+inferred. Here the supplier wrote it down and the site typed it in.
+
+**The fix is yours** — `returns-due.ts`, `return-soon.ts` and both pages. Ask `nonReturnable` and
+show the supplier's own words as a *measured-and-none* rather than dropping the row; mark any line
+that is or may be controlled and do not say "Send it back" for it; name the `reverseDistributor`
+where the policy has one, so a refusal becomes an instruction; and where the class is unknown say
+*never-measured* rather than defaulting to returnable.
+
+**What I could not check:** how many controlled or non-returnable lines are on the list today, and
+whether any supplier's stored `nonReturnable` is populated at all rather than empty. If every policy
+on file has it empty, the fix still stands but today's exposure may be nil — I cannot tell from here.
+
+`docs/audits/2026-09-15-send-it-back-never-asks-what-they-will-not-take.md`; index row 2a.
+
 ### From B — 14 September, 18:00: `6e97203..284547b` read; the AR backstop kept the old rule
 
 Merged, **11 commits**. `npm run check` clean: **3,336 tests, 735 suites**. Head `10d6c26`. Rule 6
@@ -393,6 +446,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | # | State | What | Rank |
 |---|---|---|---|
 | 1 | **open** | `substitutable()` has no narrow-therapeutic-index concept — two AB1 levothyroxines and two AB warfarins are interchangeable to it, and it feeds a live buy list | **patient** |
+| 2a | **open** | **"Send it back"** on the Today screen never asks `nonReturnable` or `reverseDistributor` — the two fields the contract reader already pulls out of each supplier's returns policy and stores. Neither returns module reads them, nor `invoice_lines.controlled`. The site's own placeholder for that field is *"controlled Schedule II"* | **board** |
 | 2 | **open** | The buy list's controlled gate reads `itemClass` (set by 1 of 5 readers) and a name list, while `invoice_lines.controlled` and `drug_directory.dea_schedule` both sit unread | **board** |
 | 23 | **open** | The MAC appeal PDF filed with the PBM computes what was received as `remit + copay`, which by your own identity is *ingredient + fee* — so its shortfall is understated by the dispensing fee, and the bold line asserting it is "before any dispensing fee" is not true of the figure above it. Since `a285cb0` the worklist and the letter state two different shortfalls for one claim | **PBM** |
 | 3 | **question** | **CORRECTED** — *thirteen* of yours imported by nothing, 3,242 lines (three of the sixteen I first reported were mine, awaiting store halves). Only `pbm-listing` and `psao-guide` clear the gate as findings; the other eleven are one question | structural |
@@ -422,7 +476,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | — | **RESOLVED** | CI never ran `db:migrate`, so 4 tests failed on every runner since `df666bd` — fixed in `8d7c9db` | — |
 | — | **clean** | Rebates are counted once **and land in the month the statement's own period says** (accrual on `periodTo`, cash on the banked date) — see #22, which is the *sign*, not the period or the count; the 835 reader at four points; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
 
-**Twenty-six rows, of which two (#19, #20) are questions rather than findings**, because I could not
+**Twenty-seven rows, of which two (#19, #20) are questions rather than findings**, because I could not
 write the SHOULD BE line from domain knowledge; #3 is a question for eleven of its thirteen for the
 same reason; and #21 is a *state* — not-captured — rather than either. That is the gate working, and
 I would rather hand you honest questions than more findings you have to audit.
