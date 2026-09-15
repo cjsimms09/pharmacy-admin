@@ -146,6 +146,12 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
       : { bin: p.claimBin, payer: p.claimPayer ?? p.payer, portion: "plan" as const }),
     /* The claim it settled: a payment settles that claim's own share and no other (payer-owed.ts). */
     claimId: p.claimId,
+    /*
+     * The Aytu / IPD top-off pays the claim's own share and then more, because the claim adjudicates for the copay
+     * assistance alone and never says how much top-off is coming. What is beyond the share is revenue nobody billed, not
+     * an overpayment to query.
+     */
+    notBilled: p.source === "rxrescue",
     cents: p.amountCents,
     receivedOn: p.receivedOn,
     /*

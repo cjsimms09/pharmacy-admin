@@ -95,6 +95,25 @@ export default async function OwedPage() {
             </Card>
           )}
 
+          {/*
+            The top-off, kept out of both the balance and the overpaid count.
+
+            The RxRescue claim adjudicates for the copay assistance and the credit memo pays that plus a top-off the
+            claim never states, so the money arrives beyond anything anybody billed. Read as an overpayment it would put
+            every one of these fills on a list of payers to query, with nothing to query.
+          */}
+          {owed.topOff.count > 0 && (
+            <Card title="Top-off money nobody billed for">
+              <p className="text-sm text-ink-2">
+                {owed.topOff.count} payment{owed.topOff.count === 1 ? "" : "s"} brought{" "}
+                <span className="font-medium text-ink">{formatCents(owed.topOff.cents)}</span> more than the claims they
+                settled were billed. That is the Aytu / IPD top-off, which arrives on a credit memo weeks after the
+                fill: the claim adjudicates for the copay assistance alone and never says how much top-off is coming. It
+                is revenue, it is not an overpayment, and there is nothing to query.
+              </p>
+            </Card>
+          )}
+
           <div className="overflow-x-auto rounded-lg border border-line bg-surface">
             <table className="table">
               <thead>

@@ -187,6 +187,15 @@ export type Received = {
   /** The claim and part it settled, where the matcher found one. See `Receivable.claimId`. */
   claimId?: string | null;
   portion?: Portion;
+  /**
+   * True where anything beyond what the claim was billed is money nobody billed for, not an overpayment.
+   *
+   * The Aytu / IPD top-off: the RxRescue claim adjudicates for the copay assistance and the credit memo pays that plus a
+   * top-off the claim never states (`fills.ts` can say one is coming, never how much). Counting the difference as
+   * overpaid would put every one of those fills on a list of payers to query, with nothing to query — and a list with
+   * nothing in it worth acting on stops being read.
+   */
+  notBilled?: boolean;
 };
 
 /** One claim's share, as it stands: what the month-end report ages. */
@@ -240,6 +249,13 @@ export type PayerLine = {
   says: string;
   /** Received beyond billed, claim by claim: an overpaid claim does not settle another. Nought where none is. */
   overpaidCents?: number;
+  /**
+   * Money this payer sent that nobody billed it for: the Aytu / IPD top-off (`Received.notBilled`).
+   *
+   * Revenue, and never an overpayment. The claim adjudicates for the copay assistance alone and no field on it says how
+   * much top-off is coming, so there is nothing to chase and nothing that was paid "too much".
+   */
+  topOffCents?: number;
 };
 
 export type OwedSummary = {
@@ -249,6 +265,11 @@ export type OwedSummary = {
   outstandingCents: number;
   /** Payments that found no claim. Not an error: see the module note. */
   unattached: { count: number; cents: number };
+  /**
+   * Money that arrived beyond what any claim was billed, from a programme that pays it after adjudication: the Aytu /
+   * IPD top-off. Revenue, counted nowhere in billed, received or outstanding, and never in the overpaid count.
+   */
+  topOff: { count: number; cents: number };
   /** Every claim share that carries a claim id, as it stands, for ageing. */
   claimBalances: ClaimBalance[];
   /** Payers' outstanding from shares with no claim id, where the payer has sent something: not ageable. */
@@ -305,6 +326,8 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
     shares: Share[];
     /** Billed on shares with no claim id, and what arrived for this payer against no particular claim: the old arithmetic. */
     looseBilled: number; loosePaid: number;
+    /** Money it sent beyond what anybody billed it: the top-off. Revenue, never a balance and never an overpayment. */
+    topOff: number;
   };
   const by = new Map<string, Acc>();
   const shareOf = new Map<string, Share>();
@@ -325,7 +348,7 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
       fees.set(k, f);
       continue;
     }
-    const a = by.get(k) ?? { bin: r.bin, name: r.name ?? r.bin ?? "Unnamed payer", claims: 0, billed: 0, got: 0, oldest: null, cash: r.cashPlan, payments: 0, shares: [], looseBilled: 0, loosePaid: 0 };
+    const a = by.get(k) ?? { bin: r.bin, name: r.name ?? r.bin ?? "Unnamed payer", claims: 0, billed: 0, got: 0, oldest: null, cash: r.cashPlan, payments: 0, shares: [], looseBilled: 0, loosePaid: 0, topOff: 0 };
     a.claims++;
     a.billed += r.cents;
     if (!a.oldest || r.dateFilled < a.oldest) a.oldest = r.dateFilled;
@@ -351,6 +374,9 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
   let unattachedCents = 0;
   let outsideCount = 0;
   let outsideCents = 0;
+  /* Money that arrived beyond anything billed, because nobody billed it: the top-off. Revenue, and not a balance. */
+  let topOffCount = 0;
+  let topOffCents = 0;
   for (const p of received) {
     if (!p.matched) {
       /*
@@ -374,8 +400,16 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
         outsideCents += p.cents;
         continue;
       }
-      s.paid += p.cents;
-      a.got += p.cents;
+      /*
+       * A top-off settles the claim's own share first, and whatever is beyond it is money nobody billed: revenue, kept
+       * apart from both the balance and the overpaid count.
+       */
+      const settles = p.notBilled ? Math.min(p.cents, Math.max(0, s.billed - s.paid)) : p.cents;
+      s.paid += settles;
+      a.got += settles;
+      a.topOff += p.cents - settles;
+      topOffCents += p.cents - settles;
+      if (p.cents - settles > 0) topOffCount++;
       a.payments++;
       continue;
     }
@@ -391,8 +425,12 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
       outsideCents += p.cents;
       continue;
     }
-    a.got += p.cents;
-    a.loosePaid += p.cents;
+    const settles = p.notBilled ? Math.min(p.cents, Math.max(0, a.looseBilled - a.loosePaid)) : p.cents;
+    a.got += settles;
+    a.loosePaid += settles;
+    a.topOff += p.cents - settles;
+    topOffCents += p.cents - settles;
+    if (p.cents - settles > 0) topOffCount++;
     a.payments++;
   }
 
@@ -426,8 +464,12 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
         oldestOn: oldest,
         daysWaiting: outstanding > 0 ? days : null,
         state,
-        says: sentenceFor(state, a.name, outstanding, a.got, a.billed, days) + (state === "owes" && overpaid > 0 ? ` ${money(overpaid)} of what arrived was more than its own claims asked for, and is not counted against the others.` : ""),
+        says:
+          sentenceFor(state, a.name, outstanding, a.got, a.billed, days) +
+          (state === "owes" && overpaid > 0 ? ` ${money(overpaid)} of what arrived was more than its own claims asked for, and is not counted against the others.` : "") +
+          (a.topOff > 0 ? ` ${money(a.topOff)} more arrived that nobody billed it for — the top-off this programme pays after the claim — which is revenue and not an overpayment.` : ""),
         overpaidCents: overpaid,
+        topOffCents: a.topOff,
       };
     })
     // Largest outstanding first: the page exists to answer "who owes me the most".
@@ -452,6 +494,7 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
     receivedCents,
     outstandingCents,
     unattached: { count: unattachedCount, cents: unattachedCents },
+    topOff: { count: topOffCount, cents: topOffCents },
     claimBalances,
     unaged,
     feesOwed: [...fees.values()].sort((x, y) => y.cents - x.cents),
