@@ -20,7 +20,7 @@ const nadac = (o: Partial<NadacRecord> = {}): NadacRecord => ({
 });
 
 const claim = (o: Partial<ClaimForFloor> = {}): ClaimForFloor => ({
-  rxNumber: "313779",
+  rxNumber: "900000",
   dateFilled: "2026-08-15",
   ndc11: "00093721410",
   quantityThousandths: 90_000, // 90 each

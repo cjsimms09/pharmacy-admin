@@ -5,7 +5,7 @@ import { parseFormula, expectedCents } from "../src/lib/rate-formula";
 
 /** A MAC appeal assembled from what the site holds, and refused where a part is missing. */
 const terms: AppealTerms = { pbmName: "Example PBM", submissionChannel: "Provider portal", submissionTarget: "https://portal.example.invalid/appeals", appealWindowDays: 30, windowBasis: "date_of_adjudication", requiredFields: "claim number; NDC; date of service; invoice", invoiceRequired: "yes", responseSlaDays: 10 };
-const claim: AppealClaim = { rxNumber: "336853", fillNumber: 0, dateFilled: "2026-09-01", adjudicatedOn: "2026-09-01", remittedOn: null, ndc11: "00093505698", drugName: "ATORVASTATIN 20MG TAB", quantityThousandths: 30_000, bin: "610455", pcn: "PDPPCN", groupNumber: "RX1234", pbmName: "Example PBM", paidCents: 1_150, ingredientPaidCents: 150 };
+const claim: AppealClaim = { rxNumber: "900000", fillNumber: 0, dateFilled: "2026-09-01", adjudicatedOn: "2026-09-01", remittedOn: null, ndc11: "00093505698", drugName: "ATORVASTATIN 20MG TAB", quantityThousandths: 30_000, bin: "610455", pcn: "PDPPCN", groupNumber: "RX1234", pbmName: "Example PBM", paidCents: 1_150, ingredientPaidCents: 150 };
 const invoice = { supplier: "McKesson", invoiceNumber: "7788123", invoiceDate: "2026-08-28", unitCostMicros: 120_000, packUnits: 90 };
 // No NPI-shaped literal here: the secret scanner treats ten digits after "npi" as one, made up or not.
 const pharmacy = { name: "Example Pharmacy", ncpdp: "1712345", npi: null };

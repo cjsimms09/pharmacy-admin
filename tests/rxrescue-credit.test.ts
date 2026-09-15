@@ -16,13 +16,13 @@ const HEAD =
 
 const MEMO = [
   HEAD,
-  "17998b24-4b3d-4538-9906-d82751e29dbb,000000333801,99991001,62542002030,Adzenys AG,2026-08-13,7000017,WEST WICHITA FAMILY PHARMACY,08,60.0,926.52,60.0,49.94,0.0,60.0,0.0,109.94,C-00004862C20260815,2026-09-03",
+  "17998b24-4b3d-4538-9906-d82751e29dbb,000000900000,99991001,62542002030,Adzenys AG,2026-08-13,7000017,WEST WICHITA FAMILY PHARMACY,08,60.0,926.52,60.0,49.94,0.0,60.0,0.0,109.94,C-00004862C20260815,2026-09-03",
   "d1da64b5-1398-4f5e-9e96-b242a1197011,000000333123,99991001,70165030030,Cotempla,2026-08-10,7000017,WEST WICHITA FAMILY PHARMACY,03,30.0,0.0,538.7,0.0,50.0,511.2,22.5,511.2,C-00004862C20260815,2026-09-03",
   // A reversal, and the rebill of the same prescription on the same day. They net to nothing.
-  "03b22a19-0701-426a-b2e0-e71d0bc5b694,000000332022,99991001,62542002030,Adzenys AG,2026-08-10,7000017,WEST WICHITA FAMILY PHARMACY,08,-30.0,-488.51,-10.0,-19.72,-0.0,-10.0,-0.0,-29.72,C-00004862C20260815,2026-09-03",
-  "eaa43429-a03c-46ec-912f-6723d0c7b9e5,000000332022,99991001,62542002030,Adzenys AG,2026-08-10,7000017,WEST WICHITA FAMILY PHARMACY,08,30.0,488.51,10.0,19.72,0.0,10.0,0.0,29.72,C-00004862C20260815,2026-09-03",
+  "03b22a19-0701-426a-b2e0-e71d0bc5b694,000000900001,99991001,62542002030,Adzenys AG,2026-08-10,7000017,WEST WICHITA FAMILY PHARMACY,08,-30.0,-488.51,-10.0,-19.72,-0.0,-10.0,-0.0,-29.72,C-00004862C20260815,2026-09-03",
+  "eaa43429-a03c-46ec-912f-6723d0c7b9e5,000000900001,99991001,62542002030,Adzenys AG,2026-08-10,7000017,WEST WICHITA FAMILY PHARMACY,08,30.0,488.51,10.0,19.72,0.0,10.0,0.0,29.72,C-00004862C20260815,2026-09-03",
   // The primary paid nothing and the memo left the column blank, which is not a zero.
-  "a6692944-249c-462a-b6b7-7276bdfef7b4,000000322540,99991001,62542002530,Adzenys AG,2026-08-07,7000017,WEST WICHITA FAMILY PHARMACY,00,30.0,,468.23,0.0,50.0,440.73,22.5,440.73,C-00004862C20260815,2026-09-03",
+  "a6692944-249c-462a-b6b7-7276bdfef7b4,000000900002,99991001,62542002530,Adzenys AG,2026-08-07,7000017,WEST WICHITA FAMILY PHARMACY,00,30.0,,468.23,0.0,50.0,440.73,22.5,440.73,C-00004862C20260815,2026-09-03",
 ].join("\n");
 
 const memo = parseRxRescueCredit(MEMO);
@@ -43,11 +43,11 @@ describe("reading a credit memo", () => {
 
   test("the prescription number joins to a claim, unpadded", () => {
     /*
-     * The memo writes "000000333801"; the pharmacy's claim holds "333801". Without this the whole
+     * The memo writes "000000900000"; the pharmacy's claim holds "900000". Without this the whole
      * memo matches nothing at all and the money sits against no claim.
      */
-    assert.equal(memo.rows[0].rxNumber, "333801");
-    assert.equal(unpadRx("000000333801"), "333801");
+    assert.equal(memo.rows[0].rxNumber, "900000");
+    assert.equal(unpadRx("000000900000"), "900000");
     assert.equal(unpadRx("0"), "0", "a number that is all zeros is left as it is, not emptied");
   });
 
@@ -68,14 +68,14 @@ describe("reading a credit memo", () => {
 
   test("a reversal and its rebill are both kept, and cancel", () => {
     // Dropping either would move the memo's total by $29.72 in one direction or the other.
-    const pair = memo.rows.filter((r) => r.rxNumber === "332022");
+    const pair = memo.rows.filter((r) => r.rxNumber === "900001");
     assert.equal(pair.length, 2);
     assert.equal(pair.reduce((n, r) => n + (r.totalCreditCents ?? 0), 0), 0);
   });
 
   test("a blank column is not a zero", () => {
     // "the primary paid nothing" and "the memo did not say" are different facts.
-    const blank = memo.rows.find((r) => r.rxNumber === "322540")!;
+    const blank = memo.rows.find((r) => r.rxNumber === "900002")!;
     assert.equal(blank.primaryPayerReimbCents, null);
     assert.equal(blank.totalCreditCents, 44_073);
   });
@@ -91,7 +91,7 @@ describe("reading a credit memo", () => {
   });
 
   test("a file that is not a credit memo is refused rather than half-read", () => {
-    const wrong = parseRxRescueCredit("Rx Number,NDC\n333801,62542002030");
+    const wrong = parseRxRescueCredit("Rx Number,NDC\n900000,62542002030");
     assert.equal(wrong.rows.length, 0);
     assert.ok(wrong.problems.length > 0);
   });
@@ -120,7 +120,7 @@ describe("re-testing what only the top-off adds", () => {
   });
 
   test("a line with a top-off, where the claim carried only the assistance, confirms the reading", () => {
-    // Rx 333801's shape: assistance $60.00, top-off $49.94, credit $109.94.
+    // Rx 900000's shape: assistance $60.00, top-off $49.94, credit $109.94.
     const r = topOffCheck([{ topOffCents: 4_994, copayAssistCents: 6_000, totalCreditCents: 10_994, claimRemitCents: 6_000 }]);
     assert.equal(r.assistOnly, 1);
     assert.equal(r.verdict, "the top-off is new money");

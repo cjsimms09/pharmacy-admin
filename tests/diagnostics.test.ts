@@ -7,11 +7,11 @@ const opts = { salt: "salt-a" };
 describe("prescription numbers", () => {
   test("are replaced by default, and rows of one fill still match each other", () => {
     const { data, report } = redact(
-      { fills: [{ rxNumber: "331488", leg: 1 }, { rxNumber: "331488", leg: 2 }, { rxNumber: "305766", leg: 1 }] },
+      { fills: [{ rxNumber: "900000", leg: 1 }, { rxNumber: "900000", leg: 2 }, { rxNumber: "900001", leg: 1 }] },
       opts,
     );
     const fills = (data as { fills: { rxNumber: string }[] }).fills;
-    assert.notEqual(fills[0].rxNumber, "331488");
+    assert.notEqual(fills[0].rxNumber, "900000");
     assert.equal(fills[0].rxNumber, fills[1].rxNumber, "one prescription is one value inside the file");
     assert.notEqual(fills[0].rxNumber, fills[2].rxNumber);
     assert.match(fills[0].rxNumber, /^rx-[0-9a-f]{8}$/);
@@ -21,13 +21,13 @@ describe("prescription numbers", () => {
 
   test("mean nothing outside their own file", () => {
     // A different export salts differently, so a series of files cannot be joined into a history.
-    assert.notEqual(pseudonym("331488", "salt-a"), pseudonym("331488", "salt-b"));
-    assert.equal(pseudonym("331488", "salt-a"), pseudonym("331488", "salt-a"));
+    assert.notEqual(pseudonym("900000", "salt-a"), pseudonym("900000", "salt-b"));
+    assert.equal(pseudonym("900000", "salt-a"), pseudonym("900000", "salt-a"));
   });
 
   test("are kept when the pharmacist deliberately asks for them", () => {
-    const { data, report } = redact({ rxNumber: "331488" }, { ...opts, includeIdentifiers: true });
-    assert.equal((data as { rxNumber: string }).rxNumber, "331488");
+    const { data, report } = redact({ rxNumber: "900000" }, { ...opts, includeIdentifiers: true });
+    assert.equal((data as { rxNumber: string }).rxNumber, "900000");
     assert.equal(report.identifiersIncluded, true);
     assert.equal(report.prescriptionsPseudonymised, 0);
   });

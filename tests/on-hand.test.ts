@@ -109,7 +109,7 @@ describe("reading a daily on-hand export", () => {
 
   test("recognising the file, and not recognising a claims file", () => {
     assert.equal(looksLikeOnHand(tabbed), true);
-    assert.equal(looksLikeOnHand("Rx Transaction Details\nRx\tStatus\tDate\n305766\tP\t09/01/2026"), false);
+    assert.equal(looksLikeOnHand("Rx Transaction Details\nRx\tStatus\tDate\n900000\tP\t09/01/2026"), false);
   });
 });
 

@@ -90,8 +90,8 @@ describe("a coordinated fill is one bottle", () => {
   // and left the patient $115.57; the bottle cost $128.68 on the dispensing row and $0 on the other.
   const base = { fillNumber: 2, dateFilled: "2026-08-31", ndc11: "00074662490", itemName: null, pbmName: null, quantityThousandths: 90_000, status: "paid" };
   const rows = [
-    { id: "1", rxNumber: "305766", bin: "610455", payerLabel: "BCBSKS", remitCents: 0, copayCents: 0, patientTotalCents: 0, acquisitionCents: 12_868, ...base },
-    { id: "2", rxNumber: "305766", bin: "601341", payerLabel: "OHCP", remitCents: 4_625, copayCents: 11_557, patientTotalCents: 11_557, acquisitionCents: 0, ...base },
+    { id: "1", rxNumber: "900000", bin: "610455", payerLabel: "BCBSKS", remitCents: 0, copayCents: 0, patientTotalCents: 0, acquisitionCents: 12_868, ...base },
+    { id: "2", rxNumber: "900000", bin: "601341", payerLabel: "OHCP", remitCents: 4_625, copayCents: 11_557, patientTotalCents: 11_557, acquisitionCents: 0, ...base },
   ];
   const [f] = groupIntoFills(rows);
 

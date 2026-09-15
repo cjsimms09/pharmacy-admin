@@ -18,7 +18,7 @@ import { staleAgainstDispensing, type FillRow } from "../src/lib/claims";
  */
 const row = (over: Partial<FillRow> = {}): FillRow => ({
   id: "c1",
-  rxNumber: "337352",
+  rxNumber: "900000",
   fillNumber: 0,
   bin: "610279",
   ndc11: "45802006535",
@@ -34,7 +34,7 @@ describe("what the dispensing record contradicts", () => {
       row({ id: "real", ndc11: "45802006535" }),
       row({ id: "stale", ndc11: "67877031815" }),
     ];
-    const r = staleAgainstDispensing(held, new Map([["337352|0", new Set(["45802006535"])]]));
+    const r = staleAgainstDispensing(held, new Map([["900000|0", new Set(["45802006535"])]]));
     assert.equal(r.stale.length, 1);
     assert.equal(r.stale[0].row.id, "stale");
     assert.deepEqual(r.keep.map((k) => k.id), ["real"]);
@@ -53,7 +53,7 @@ describe("what the dispensing record contradicts", () => {
   });
 
   test("GUARD: an empty set of dispensed NDCs settles nothing either", () => {
-    const r = staleAgainstDispensing([row({ ndc11: "99999999999" })], new Map([["337352|0", new Set<string>()]]));
+    const r = staleAgainstDispensing([row({ ndc11: "99999999999" })], new Map([["900000|0", new Set<string>()]]));
     assert.deepEqual(r.stale, []);
   });
 
@@ -64,7 +64,7 @@ describe("what the dispensing record contradicts", () => {
      */
     const r = staleAgainstDispensing(
       [row({ id: "only", ndc11: "67877031815" })],
-      new Map([["337352|0", new Set(["45802006535"])]]),
+      new Map([["900000|0", new Set(["45802006535"])]]),
     );
     assert.deepEqual(r.stale, []);
     assert.deepEqual(r.keep.map((k) => k.id), ["only"]);
@@ -73,7 +73,7 @@ describe("what the dispensing record contradicts", () => {
   test("a row already reversed is not counted again", () => {
     const r = staleAgainstDispensing(
       [row({ id: "real" }), row({ id: "done", ndc11: "67877031815", status: "reversed" })],
-      new Map([["337352|0", new Set(["45802006535"])]]),
+      new Map([["900000|0", new Set(["45802006535"])]]),
     );
     assert.deepEqual(r.stale, []);
   });
@@ -82,7 +82,7 @@ describe("what the dispensing record contradicts", () => {
     // 62 of September's 2,484 fills are two-payer: same NDC, different BIN. Neither is stale.
     const r = staleAgainstDispensing(
       [row({ id: "primary", bin: "610279" }), row({ id: "secondary", bin: "019158" })],
-      new Map([["337352|0", new Set(["45802006535"])]]),
+      new Map([["900000|0", new Set(["45802006535"])]]),
     );
     assert.deepEqual(r.stale, []);
     assert.equal(r.keep.length, 2);
@@ -91,7 +91,7 @@ describe("what the dispensing record contradicts", () => {
   test("a row with no NDC is neither confirmed nor contradicted", () => {
     const r = staleAgainstDispensing(
       [row({ id: "real" }), row({ id: "blank", ndc11: null })],
-      new Map([["337352|0", new Set(["45802006535"])]]),
+      new Map([["900000|0", new Set(["45802006535"])]]),
     );
     assert.deepEqual(r.stale, []);
   });

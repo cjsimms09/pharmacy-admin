@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { isStrandedReversal, claimCancelledBy, type Pairable } from "../src/lib/claims";
 
 /**
- * Rx 331488, reproduced from the two files that actually produced it.
+ * Rx 900000, reproduced from the two files that actually produced it.
  *
  * It ran for sixty tablets at $1,204.25 on the 4th, was reversed, and re-ran for thirty at $607.38.
  * The pharmacy made $30.62. The site said $658.11.
@@ -16,7 +16,7 @@ import { isStrandedReversal, claimCancelledBy, type Pairable } from "../src/lib/
  */
 const claim = (over: Partial<Pairable>): Pairable => ({
   id: "x",
-  rxNumber: "331488",
+  rxNumber: "900000",
   fillNumber: 1,
   bin: "004336",
   ndc11: "81968004560",

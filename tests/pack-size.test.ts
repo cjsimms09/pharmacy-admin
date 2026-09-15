@@ -97,7 +97,7 @@ describe("the pack size a cost per unit divides by", () => {
   });
 
   test("the September solid-dose claims: a 30-count is thirty tablets", () => {
-    /* rx 337350 mirabegron ER 50 mg and rx 337115 doxepin 3 mg, the two certain overstatements. */
+    /* rx 900000 mirabegron ER 50 mg and rx 900001 doxepin 3 mg, the two certain overstatements. */
     for (const form of ["TABLET, EXTENDED RELEASE", "TABLET, FILM COATED"]) {
       const read = dispensingPack({ packageDescription: "30 TABLET in 1 BOTTLE (0093-1234-30)", form });
       assert.ok(read.ok, form);

@@ -724,14 +724,14 @@ marked a programme. The transaction report's basis-of-reimbursement code (NCPDP 
 less a percentage, 06/07 MAC, 20 NADAC) is what makes this reading safe; it is now on every row.
 
 **8 September, 17:00 (1) — RXADV, from PioneerRx's own screen.** The owner sent the EDI response for
-Rx 333913: Ventegra (BIN 012528, group VRX0071) returned Network Reimbursement ID (2F) RXADV with the
+Rx 900000: Ventegra (BIN 012528, group VRX0071) returned Network Reimbursement ID (2F) RXADV with the
 message "RXADV-AC: NOVO NORDISK HAS PROVIDED A $1027.03 VOUCHER TOWARDS THE PATIENT COPAY. ORIGINAL
 COPAY: $1376. NEW COPAY: $348.97", after the plan rejected the drug (reject 70, plan exclusion). So
 RXADV is the id a plan returns when an automatic manufacturer voucher was applied at the point of
 sale — it rides on whichever plan adjudicated, which is why it sits under five payers — and the
 "remit" on such a row is voucher money toward the copay, not a plan payment. Marked a programme;
 Ventegra's BIN annotated on the register; the money belongs with item 24's reconciliation. The site's
-row for 333913 was faithful to the report; the owner's memory that a voucher was involved was also
+row for 900000 was faithful to the report; the owner's memory that a voucher was involved was also
 right; the report's "Amount" simply does not say which kind of money it is. That is the lesson for
 item 30: a proof against the source file is necessary and not sufficient — the kind of money is a
 fact the response carries and the transaction report does not.
@@ -775,7 +775,7 @@ RedSail's "Remittance Advice — RAS Copay Voucher Reimbursement": payment date,
 payment amount, NPI; rows of rx (twelve digits, zero-padded), date of service, NDC, drug, qty,
 submitted, patient paid, voucher paid, with reversals as the same row negated; footer Total Claims,
 Total Fee, Balance Forward, Total Amount Paid. The rows net to the printed total to the cent
-($177.25 = 321762 $174.31 + 330204 $2.94; five other prescriptions paid and reversed) — the
+($177.25 = 900001 $174.31 + 900002 $2.94; five other prescriptions paid and reversed) — the
 arithmetic gate. The claims it settles adjudicate on BIN 028249 / PCN RXLOCAL (308 on file); the
 claim's remit is what the voucher promised, so a line settles it (revenue 0) and a difference is
 flagged. Spec sent to 2 in full on 8 September; these lines are August fills, before the claims

@@ -15,7 +15,7 @@ import { RebateTerms } from "../src/lib/supplier-terms";
 const REPORT = [
   "McKesson Rebate Breakdown",
   " Pharmacy:W WICHITA",
-  " Location ID:78366",
+  " Location ID:99001",
   " Primary Account #:999001",
   " Start:May 01 2025End:May 31 2025",
   "Paid:Jun 17 2025",

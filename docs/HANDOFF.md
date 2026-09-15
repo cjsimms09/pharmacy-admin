@@ -454,8 +454,8 @@ new `scripts/load-drug-directory.ts` on the make-claude-copy pattern. Nothing el
 Measured on the live database, answering the owner's question whether the Medicare Transaction
 Facilitator is working: the download works (last pull 8 September 08:34, 23 payments held,
 $5,740.51, 18 August to 8 September), and **none of the 23 was tied to a claim.** Two reasons.
-(1) The facilitator writes the prescription as `000000318553FILL1`; `x12-835.ts splitReference`
-only knew `318553-1`, so the whole string was filed as the prescription number. Fixed: the
+(1) The facilitator writes the prescription as `000000900000FILL1`; `x12-835.ts splitReference`
+only knew `900000-1`, so the whole string was filed as the prescription number. Fixed: the
 splitter reads both spellings and drops leading zeros; test added; `scripts/rekey-payments.ts`
 re-keyed the 23 held rows (original reference kept on `reference`). Re-run it after tonight's
 deploy for anything that arrived under the old parser in between. (2) Every payment is for a fill
@@ -2194,7 +2194,7 @@ clean; 1,468 tests; the real 5 Sept report reads as before, 135 rows, no AR rows
 
 - [ ] **`receivableCents` counts plan money as uncollected.** `fills.ts` sets
       `receivableCents = revenueCents` on any fill with an AR leg, and `revenueCents` includes the
-      other legs' remits. On the shape in your own commit message (Rx 333932-0: an AR leg with
+      other legs' remits. On the shape in your own commit message (Rx 900001-0: an AR leg with
       cost and no revenue, a paid leg on another BIN with $491.67) the fill reports $491.67 owed
       on account when it is the plan's remit, already tracked by the remittance reconciliation.
       That is one dollar in two "not money yet" buckets (`data-dictionary.md` §8). Fix: sum the

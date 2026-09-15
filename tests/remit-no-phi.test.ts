@@ -27,13 +27,13 @@ const WITH_PATIENTS = [
   "N1*PR*SS&C HEALTH~",
   "N1*PE*WEST WICHITA FAMILY PHARMACY*XX*7000017~",
   "LX*1~",
-  "CLP*332359-1*1*10000*4614*386*12*101000012043023*80~",
+  "CLP*900000-1*1*10000*4614*386*12*101000012043023*80~",
   "NM1*QC*1*HARGREAVES*WILHELMINA*Q***MI*ZZQ88817733~",
   "NM1*74*1*HARGREAVES*WINNIFRED****MI*ZZQ88817734~",
   "SVC*N4:00093721410*10000*4614**30~",
   "DTM*472*20260401~",
   "CAS*PR*1*386~",
-  "CLP*332360-1*1*5000*2000*100*12*101000012043024*80~",
+  "CLP*900001-1*1*5000*2000*100*12*101000012043024*80~",
   "NM1*QC*1*OYELARAN-BUTLER*THEODOSIA*R***MI*ZZQ44412299~",
   "SVC*N4:00378395293*5000*2000**60~",
   "DTM*472*20260402~",
@@ -76,8 +76,8 @@ describe("a remittance leaves no patient behind", () => {
     assert.deepEqual(
       r.payments.map((p) => [p.rxNumber, p.paidCents]),
       [
-        ["332359", 461_400],
-        ["332360", 200_000],
+        ["900000", 461_400],
+        ["900001", 200_000],
       ],
     );
     assert.equal(r.traceNumber, "912013659");

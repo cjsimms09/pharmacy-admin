@@ -12,8 +12,8 @@ const csv = (lines: string[]) => Buffer.from(lines.join("\n") + "\n", "utf8");
 describe("present-but-empty is not the same as absent", () => {
   const check = checkReport("r.csv", csv([
     "Rx Number,Date Filled,Dispensed Item NDC,Primary Third Party Bin,Primary Third Party PCN,Dispensed Quantity,Primary Remit Amount",
-    "312450,2026-08-28,83980001110,610097,9999,,7.18",
-    "312451,2026-08-28,00093721410,610097,9999,,4.10",
+    "900000,2026-08-28,83980001110,610097,9999,,7.18",
+    "900001,2026-08-28,00093721410,610097,9999,,4.10",
   ]));
 
   test("a column present on every row but never filled reads as empty", () => {
