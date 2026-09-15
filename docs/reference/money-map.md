@@ -375,6 +375,22 @@ Owner: `money/bank.ts` — **A**; the card batch reader, `card-batch-store.ts` �
 Proposed fix: when a batch banks, link any unplaced `card_deposit` line of the same amount inside the
 window, or have the list re-run `matchHeldDeposit` on unplaced credits each time it is drawn.
 
+**G-CARD-13. The unplaced card-deposit line names the wrong day's batch report to forward.**
+OBSERVATION: c898bb4's message is *"Forward the batch report for the day before ${line.on}"* (`bank.ts`,
+card_deposit branch). Measured on August's real card statement against the real bank statement, one to one:
+**0 of 25** batches closed the day before their bank credit. It was 2 days before for 16, 3 for 5 and 4 for 4.
+A weekday batch reaches the bank two days later, and Monday's credits carry Thursday's, Friday's and
+Saturday's batches (3 August: three Heartland credits).
+SHOULD BE: an instruction names the thing to do. Pointing at the wrong day's report sends a person looking
+for a report that belongs to a different deposit, or that does not exist, since there is no Sunday batch.
+DIFFERENCE: yes, measured. Not a money error.
+Owner: `money/bank.ts` — **A** (the line was written by session 1).
+Proposed fix: name the amount, and the window the batch closed in, "2 to 4 days before", or better, list
+the batch dates in that window with no batch report on file.
+
+**August evidence on G-CARD-2 (combined deposits):** measured-and-none. All 25 August batches reached the
+bank as separate credits of their own exact amount. The fix stands regardless.
+
 **Order of forwarding.** Under c898bb4, reading the first bank statement before the three unforwarded
 batches (1, 2 and 12 September) no longer counts anything twice; their deposit lines wait unplaced (G-CARD-12).
 Still: **don't type a Heartland deposit in by hand** (G-CARD-9, G-CARD-10).
@@ -429,13 +445,10 @@ a patient pays off an account by card, the card batch holds that money and the t
 and the check reports the batches as holding more than the till — a correct day read as a discrepancy. If
 they do appear, the check holds. Only the report's behaviour, or PioneerRx, can say which.
 
-**Q-CARD-1 (question for the owner). Which day does a card sale belong to on the cash account — the day
-the batch closed, or the day the money reached the bank?**
-The site uses the close date. On a strict cash basis it is the bank date, and the owner has said batches
-"should match bank statement deposits"; many small practices use the settlement date instead, which is
-also defensible. The difference is only the batches that close on a month's last business day or two:
-**measured-and-none so far** (none closed on the 28th or later), first realised at the end of September.
-Owner of the eventual change: `card-batch-store.ts` — **1**. Session 1 is putting this question to the owner.
+**Q-CARD-1 — DECIDED by the owner, 15 September (via session 1): card money counts on the day the batch
+closed.** He says it reaches the bank a day or two later. The code already does this. Measured on August's
+real statements: close → bank credit is 2 days for 16 batches, 3 for 5, and 4 for 4. So the batches closed on
+a month's last two to four days are cash in that month and reach the bank in the next.
 
 ### Not checked, said out loud
 
@@ -451,3 +464,224 @@ Owner of the eventual change: `card-batch-store.ts` — **1**. Session 1 is putt
 - The "This is different money" tick was not exercised; by the code it skips the form's check entirely.
 - The re-run's test rows stay on the scratch copy, not live, and go when the copy is deleted.
 - Card sales after 14 September: none received at the time of reading.
+
+---
+
+## 2. The card processing statement (Global Payments / Heartland) — rehearsed
+
+**Checkpoint 2, run as a rehearsal. The owner, 15 September: *"we have an example of everything we need..
+we should be able to do test runs and make sure everything works"*. Code at 5cdff17 (reader and store),
+with `bank.ts` at c898bb4.**
+
+Samples used (the owner's uploads; nothing from them is in git):
+- **the real August 2026 merchant statement** (7-page PDF);
+- **the real August 2026 Emprise bank statement** (scanned PDF, 11 pages). No site reader takes it, so its
+  Heartland lines — 26 credits and 1 debit — were read off the page images by eye and used only as an
+  independent record to check the card statement against. The PDF holds 9 page images; the transactions
+  end on the 9th with the daily balance summary, so the last two pages were not looked at.
+
+Booking was rehearsed on a fresh snapshot (16:59 UTC).
+
+### 1 · What it is, who sends it, how often, through which door
+
+The processor's monthly statement, sent by staff from @wwfppa.com, which is also the batch reports'
+domain. It carries:
+- the month's fees by section: Visa, Mastercard, American Express and Discover pass-through, and Global
+  Payments' own charges;
+- one row per batch deposited;
+- one fee auto-debit line.
+
+Door: mailbox sweep → `classify` on the PDF's text (`autoroute.ts` 215) → `card_statement` →
+`bookCardStatement` (`mailbox.ts` 908), ahead of the vendor-bill rule.
+- **Rehearsed:** `classify` returns `card_statement` for the real sample.
+- **Live:** the 10 PDFs already received from @wwfppa.com all reached `classify` (1 rebate report, 9
+  AccessHealth payment PDFs), so nothing intercepts a PDF from that domain first.
+
+### 2 · Recognised automatically? Malformed or lookalike — loud or silent?
+
+Recognition needs three things in the text together: "Merchant Statement", a "Statement Period" with two
+dates, and "Global Payments" or "Heartland" (`card-statement.ts` 78).
+- The real sample is recognised.
+- A scanned copy with no text layer is not: it is filed as "a PDF this does not recognise" and books
+  nothing (synthetic test).
+- A recognised statement whose own figures disagree is held with the reason, *"Held, nothing stored: …"*.
+  That is loud.
+
+### 3 · Read correctly? Do the self-checks run, and could they pass for the wrong reason?
+
+**The real statement reads, and every check ran and agreed:**
+
+| figure | read |
+|---|---|
+| period | 2026-08-01 to 2026-08-31, merchant …4875 |
+| total deposits | $94,529.08 — 25 batch rows sum to it |
+| total fees | $4,778.73 — 5 section subtotals sum to it: Visa $1,120.59, Mastercard $569.45, Amex $42.01, Discover $138.51, Global Payments $2,908.17 |
+| processing summary | 2,430 transactions, sales $94,678.94, refunds −$149.86, net $94,529.08 = total deposits (the check ran) |
+| fee auto-debit | printed 08/31/2026, $4,778.73 = total fees |
+
+**Against an independent record, the bank statement:**
+- **All 25 statement deposits equal a bank Heartland credit to the cent, one to one.** The 26th bank credit
+  ($3,695.38 on 8/03) is July's statement's last deposit.
+- So the reader's deposit figures are right, and in August **no deposit combined two batches**.
+- Could the checks pass for the wrong reason? "Total fees" has to agree with the section subtotals and the
+  printed debit; "total deposits" with the rows, the processing summary, and here the bank. That is four
+  independent agreements.
+
+118 money-bearing lines are read by no pattern. By their shapes (listed in the probe), all are per-card
+fee detail inside the sections, and the subtotals already cover them.
+
+Two quiet paths remain, shown only on synthetic shapes:
+- the processing-summary check skips silently if its line is unfamiliar;
+- an unfamiliar deposit-row shape outside the totals is ignored.
+
+The real statement has neither.
+
+**What the statement and the bank show about timing** (measured, August):
+- batch close → processor ACH: 1 day, all 25;
+- ACH → bank credit: 1–3 days (weekend ACHs post Monday);
+- **batch close → bank credit: 2 days ×16, 3 days ×5, 4 days ×4.**
+- The fee debit is printed for the month's last day. **July's fees ($5,183.71) left the bank on 3 August.
+  August's ($4,778.73) are not on the August bank statement.** The fees leave the bank in the following month.
+
+### 4 · Where it lands, and which date decides the month
+
+Rehearsed on the copy, first **as it is**: the August 2026 statement is before the books, so it is kept and
+nothing is booked.
+
+Then **the same text with every date one year on** (August 2027 has the same days, so every date keeps its
+day of the month):
+- one bill, `GP-…4875-2027-08-31`, **$4,778.73**;
+- invoiceDate 2027-08-31, paidOn 2027-08-31 (the printed debit date), confirmed;
+- category "Card processing and bank fees" (operating), vendor "Global Payments (Heartland)".
+
+The deposits are never booked; they are the batch reports' money (section 1).
+
+### 5 · Which basis reads it — exactly once on each?
+
+`expensesIn`: accrual by invoiceDate, cash by paidOn, confirmed bills only (`expenses.ts` 171). Rehearsed
+with the real `monthlyAccount`:
+
+| | accrual Aug | cash Aug | cash Sep |
+|---|---|---|---|
+| before the statement | absent (listed missing) | absent | absent |
+| statement booked | **$4,778.73** | **$4,778.73** | absent |
+| bank fee debit read, next business day 9/1 (`pays_bill`, then its audit event) | $4,778.73 | absent | **$4,778.73** |
+
+Once on each basis. The cash month is the printed date until the bank statement is read, and the bank's date after.
+
+### 6 · What it matches to, on what key, and the result
+
+- **Statement batches ↔ card batch receipts**: batch date ±1 day and exact cents (`card-statement-store.ts`
+  93–124). The rehearsal made receipts from 22 of the statement's 25 rows, plus July's real last deposit.
+  It gave *"22 of its 25 batches match"* and named the 3 left out, with dates and amounts ($10,889.91).
+  **Right.** It also said *"1 batch report on file for these dates matches no deposit"*, and that is
+  **wrong** (G-CSTMT-2).
+- **Fee bill ↔ bank fee debit**: exact cents among `GP-…` bills no bank line has claimed. August's
+  $4,778.73 → `pays_bill`. July's $5,183.71 (no July statement on file) → unplaced, *"forward that month's
+  statement"*.
+- **Statement deposits ↔ bank credits**: not something the site matches. The bank line matches the batch
+  receipt instead (section 1). Measured by hand above: 25 of 25.
+
+### 7 · Duplication
+
+| # | rehearsal | result |
+|---|---|---|
+| 3 | the same statement forwarded again | **refused**, 1 bill |
+| 5 | **the month's fees typed on Spending first, then the statement** | **booked again — accrual August card fees $9,557.46**, twice $4,778.73 |
+| — | a corrected re-issue with different fees (synthetic) | not booked; says the bill on file differs and to look at both |
+
+### Gaps for this feed
+
+**G-CSTMT-1. Fees typed on Spending, as the monthly account invites, are counted twice when the statement arrives.**
+OBSERVATION: rehearsal 5, real fees: $4,778.73 typed on Spending, then the statement → **$9,557.46** of
+August card fees. The statement's duplicate check looks only for its own bill number
+(`card-statement-store.ts` 48). Until a statement is read, the account lists *"Card processing and bank fees
+— … nobody sends an invoice for it"* (`profit-and-loss.ts` 579) under *"Record them on Spending"*
+(`money/monthly/page.tsx` 127).
+SHOULD BE: one month's fees are one expense, and the site's own instruction is never the step that doubles
+money. The processor does send a monthly statement, so "nobody sends an invoice for it" is no longer true.
+DIFFERENCE: yes, rehearsed. $4,778.73 in a month like August. Live: measured-and-none.
+Owner: `profit-and-loss.ts` and `money/**` — **A**; `card-statement-store.ts` — **1** (built it).
+Proposed fix:
+(a) the absent-fees line says the fees come with the processor's statement after month end, to forward
+and not to type;
+(b) `bookCardStatement` holds, naming the bill, when a confirmed bill in that category dated in the
+statement month has the same amount or a Global Payments / Heartland vendor.
+
+**G-CSTMT-2. The batch check names a neighbouring month's batch as "matching no deposit".**
+OBSERVATION: rehearsal 2. July's real last deposit ($3,695.38, a batch closed 7/30, on July's statement)
+was on file, and the August check reported *"1 batch report on file for these dates matches no deposit."*
+The statement is organised by deposit date, so its first batch closed on the last day of the previous
+month (7/31). The receipt window starts a day before that (`card-statement-store.ts` 104), so the previous
+month's last batch falls inside it. The same happens at the other end whenever a batch closes the day after
+the statement's last batch date.
+SHOULD BE: a check that fires on a correct month teaches its reader to ignore it, including the month it is right.
+DIFFERENCE: yes, rehearsed with real structure. It will say it every month the previous month's last batch is on file.
+Owner: `card-statement-store.ts` — **1**.
+Proposed fix: count as extra only receipts no adjacent statement could hold. The simplest version: drop the
+±1 widening from the extra count, and keep it for matching.
+
+**G-CSTMT-3. The fees count in the wrong cash month until the bank statement is read, and permanently if the bank statement is read first.**
+OBSERVATION: the bill is paid on the printed debit date, the month's last day. **Measured: the money leaves
+the following month** — July's on 3 August, and August's not in August. Rehearsed: August's fees sit on
+August's cash account until the bank line moves them to September. If the bank statement is read before the
+card statement, the debit line is unplaced. Bank lines are kept by key and never re-placed (`bank.ts` 78),
+so the bill keeps the printed date for good.
+SHOULD BE: on the cash basis an expense is recorded on the day the money left the bank.
+DIFFERENCE: yes. **$4,778.73 in the wrong cash month** for August's statement: every month, temporarily, and
+permanently in the bank-first order.
+Owner: `card-statement-store.ts` — **1**; `money/bank.ts` — **A**.
+Proposed fix: (a) book the bill unpaid (`paidOn` null, "taken by auto-debit; the bank statement dates it");
+(b) when a `GP-…` bill is booked, link any unplaced Heartland fee debit of exactly its amount and take its
+date. Trade-off: with (a), a month whose bank statement is never read shows no cash fees at all. The account
+already lists absent costs, so it would be visible.
+
+**G-CSTMT-4. August's card fees, $4,778.73, leave the bank in September and are on no account.**
+OBSERVATION: rehearsal 1, the August statement books nothing (before the books). The bank shows the fees
+leaving the next month. When September's bank statement is read, that debit is unplaced and says to
+forward the statement. Forwarded, the statement books nothing, so the line can never clear. Rehearsal 4
+shows the same shape with July's $5,183.71.
+SHOULD BE: an instruction on screen can be completed. **Whether September's cash account should carry
+August's fees can't be written from domain knowledge alone** → Q-CSTMT-1.
+DIFFERENCE: the instruction, yes. The money waits on the owner.
+Owner: `card-statement-store.ts` — **1**; `bank-statement.ts` message — not in the table.
+
+**M-CSTMT-1 (money, for the owner — not a data fault). August's card processing cost 5.06% of card deposits.**
+OBSERVATION, from the real statement:
+- **Global Payments' own charges, $2,908.17**:
+  - a **2.15% discount rate** on all card volume (Visa $1,324.68, Mastercard $542.02, Discover $130.25,
+    Amex $38.65);
+  - **$0.3164 per transaction** (Visa $552.71, Mastercard $224.99, Discover $27.86, Amex $14.56);
+  - $18.95 "monthly vs daily discount cost";
+  - $33.50 "service & regulatory mandate".
+- On top of those, **$1,870.56** of card-network interchange and assessments passed through at cost.
+- 2,430 transactions, average $38.96.
+
+SHOULD BE: on pass-through ("interchange-plus") pricing, interchange is the unavoidable part and the
+processor's markup is the negotiable part. For a retail merchant turning about $95,000 a month, markups are
+commonly quoted in tenths of a per cent plus a few cents a transaction. A 2.15% markup plus 32 cents is well
+above that. This is industry pricing, not a figure the site holds, so it is offered as a reason to get quotes,
+not as a finding.
+DIFFERENCE: illustratively, at a 0.50% + $0.10 markup August's processor charges would have been about $716
+rather than $2,908.17 — **about $2,190 a month, $26,000 a year**. That is illustrative, not a quote. Whether
+the contract has a term or an early-termination fee is unknown.
+
+**Q-CSTMT-1 (question for the owner).** Global Payments takes each month's card fees from the bank early the
+following month. August's $4,778.73 left in September, after the books began on 1 September, for a month
+before them. Should September's cash account carry them? Money received before 1 September is kept out
+because it arrived before the books; this left after they began. Today it is on no account.
+
+### Not checked, said out loud
+
+- The bank statement through any site reader: none exists for a scanned PDF (session 1 has asked the owner
+  about a CSV). Its Heartland lines were transcribed by eye, and a misread digit would show as an unmatched
+  row. None did.
+- The batch report's close date against the statement's batch date for the same batch: no August batch
+  reports are on file. The ±1 day allowance is untested on real pairs until September's statement meets
+  September's reports.
+- More than one merchant account: the statement shows one (…4875) and the bank shows one Heartland
+  reference. Not asked.
+- July's card statement: not on file. The attribution of the 3 August $5,183.71 debit to July's fees rests
+  on its being the only Heartland debit in August and on the pattern August's own fees follow.
+- The year-on rehearsal changes only the year. Weekdays in 2027 differ, and no code reads them.
+
