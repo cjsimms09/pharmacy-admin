@@ -283,7 +283,7 @@ dates with test imports excluded: 3,841 claim rows (2,971 paid, 870 reversed), 2
 |---|---|---|---|
 | B1 | fills whose shares + patient ≠ fill total price | the pull's last check (13:40 UTC): **2 of 2,903** fills do not add up; 2 fills are on the site only. The fill total price is not stored, so the site cannot re-check | captured (in a setting nobody reads) |
 | B2 | fills with 2+ paid rows | **76** (153 rows, remit $28,986.28): **65** on different BINs (real two-payer), **11** on the same BIN | measured |
-| B2c | same-BIN fills whose rows share PCN and group | **8**, all from the daily report, completed the same day, 7 with different figures on each row; the second rows add **$3,401.46** of revenue | **needs PioneerRx (Q-P3)** |
+| B2c | same-BIN fills whose rows share PCN and group | **8**. PioneerRx (P-1, session 1): 6 are real two-payer fills under one BIN, 1 carries a $0 phantom row, 1 is a misprinted-reversal fault. See G-LC-1 | **answered** |
 | B2 | position (primary / secondary) stored | on **no** row | measured-and-none |
 | B2 | backfilled single rows | **30** (remit $2,710.13); how many were two-payer fills collapsed into one is not measurable from the site | never-measured |
 | B3 | voucher copied onto both rows of a two-payer fill | **2** fills, the same figure on each; a row-level sum counts **$50.04** twice | measured |
@@ -295,15 +295,31 @@ The 18 negative remits by payer:
 - OptumRx: 610011 ×2, 610127 ×2, 610652 ×1
 - ScriptSave ×3, Hippo ×2, Navitus ×2, Capital Rx ×1
 
-**G-LC-1. Eight fills carry two paid claims from the same plan.**
-OBSERVATION: 8 September fills have two paid rows with the same BIN, PCN and group, both from the daily report,
-adding $3,401.46 to revenue and receivables.
-SHOULD BE: a plan pays a fill once. A rebill replaces the claim it follows, which is reversed first. Two paid claims
-from one plan on one fill are a duplicate, unless PioneerRx shows two valid claims for that payer.
-DIFFERENCE: **cannot be settled from the site**. PioneerRx's own rule is one current valid claim per payer
-(`IsLastValidClaimForPayMethod = 1`, `pioneer-claims.ts` header).
-**Q-P3 for session 1:** on these fills, the count of `IsLastValidClaimForPayMethod = 1` paid claims per payer, and
-whether the site's second row matches a reversed or superseded transmission.
+**G-LC-1. A misprinted reversal left one fill paid twice. The other 7 suspects were not duplicates.**
+
+*As first written (82e4d5b):* "8 fills carry two paid claims from the same plan … $3,401.46", suspect, awaiting
+PioneerRx. **That test was wrong in its key: the same BIN, PCN and group is not the same payer.** Several plans
+adjudicate a primary and a secondary under one BIN. Answered by session 1 reading PioneerRx (P-1), fix 214fdad:
+
+| fills | what PioneerRx holds | on the site | verdict |
+|---|---|---|---|
+| 6 (BINs 610097 ×4, 610502 ×2) | two pay methods; `PrimaryClaimID` set on the second; primary and secondary last valid claims | agree with PioneerRx on all six; the intermediate rebills and reversals on two of them paired correctly | **real two-payer fills**, not duplicates |
+| 1 (003858) | a paid claim, then a "D" duplicate response ($0, `IsDuplicateClaim = 1`) | the daily report printed the D as paid $0.00, so the site holds a $0 phantom paid row | no money; a $0 extra row to handle in part C |
+| 1 (012833) | billed, reversed, billed, reversed, billed a third time at $101.18. Each reversal is −$89.44 | the report printed both reversals' amount as −$178.88 (copay correct), so exact-negation pairing failed; both $89.44 claims stayed paid beside two unmatched reversals; the $101.18 claim is not on the site yet | **fault**: remit $178.88 against a true $101.18, copay $149.98 against $74.99 |
+
+OBSERVATION: one fill carries two paid claims whose reversals the daily report misprinted, overstating remit by
+$77.70 and patient pay by $74.99. The other 7 are correct or carry no money.
+SHOULD BE: a reversal cancels the claim it reverses, however the report prints its amount. A fill's payers are told
+apart by pay method and position, never by BIN, PCN and group.
+DIFFERENCE: yes, on one fill. **FIXED in 214fdad (session 1).**
+- The reader pairs a non-negating reversal in the same file on fill, BIN, NDC and copay when every candidate has
+  identical figures.
+- The Claims recheck pairs stranded reversals only under strict conditions: same import, equal counts, identical
+  figures, the copay cancels.
+- The live rows repair when the owner presses recheck on Claims after deploy; session 1 confirms the count. **Not
+  yet re-measured here.**
+
+For rule 1: identifying the payer needs the position PioneerRx holds (P-4), which is one more reason to store it.
 
 ## Rule 2 — accrual
 
@@ -392,7 +408,7 @@ declined), so the comparison stays unmeasured at the precision the standard asks
 
 | finding | dollars (September) | kind |
 |---|---|---|
-| G-LC-1 two paid claims from one plan on 8 fills | $3,401.46 possibly counted twice | needs Q-P3 |
+| G-LC-1 a misprinted reversal left one fill paid twice (first stated as 8 fills, $3,401.46; 6 were real two-payer fills, 1 a $0 row) | $77.70 of remit and $74.99 of patient pay overstated on one fill | FIXED 214fdad; repairs on the owner's recheck |
 | G-LC-2 accrual leaves out unknown-cost fills and unpaid MTF promises | $6,351.99 understated | rule 2 |
 | G-LC-3 cash copays and cheques never banked | unknown until September's statement | rule 3 |
 | G-LC-4 receivables with no settling document read | $174,192.86 across 47 BINs | rule 4, part expected-not-yet |
