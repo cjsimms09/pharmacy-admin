@@ -1,8 +1,8 @@
-import { DEPOSIT_WINDOW_DAYS, gateDeposit, shiftDays } from "./deposit-gate";
+import { DEPOSIT_WINDOW_DAYS, gateDeposit, monthsAround, receiptsSummingTo, shiftDays } from "./deposit-gate";
 import { isOutOfBooks, monthIsOutOfBooks } from "./books-start";
 import "server-only";
 import { db, schema } from "@/db";
-import { and, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import { newId } from "./crypto";
 import { SEED_CATEGORIES } from "./expense-categories";
 import { todayIso } from "./dates";
@@ -185,6 +185,34 @@ export async function recentExpenses(limit = 200): Promise<Expense[]> {
 }
 
 /** Bills owed: incurred and not yet paid. Real money, and easy to lose track of. */
+/**
+ * Receipts a feed has already banked for this amount, around the month a person is about to type it under.
+ *
+ * The form banks typed money outright — "the bank statement is the record" — which let a card deposit be
+ * typed beside the card batch that had already banked it (Session 2, money map G-CARD-8, H1). The form
+ * asks before doing that. The month widened by the deposit window each side, because a batch closed on the
+ * 31st lands in the bank on the 1st.
+ */
+export async function automaticReceiptsLike(month: string, amountCents: number): Promise<{ payer: string | null; receivedOn: string | null; reference: string | null }[]> {
+  const from = shiftDays(`${month}-01`, -DEPOSIT_WINDOW_DAYS);
+  const end = new Date(Date.parse(`${month}-01T00:00:00Z`));
+  end.setUTCMonth(end.getUTCMonth() + 1);
+  const to = shiftDays(end.toISOString().slice(0, 10), DEPOSIT_WINDOW_DAYS - 1);
+  const rows = (
+    await db.query.cashReceipts.findMany({
+      where: and(gte(schema.cashReceipts.receivedOn, from), lte(schema.cashReceipts.receivedOn, to)),
+      columns: { payer: true, receivedOn: true, reference: true, sourceKey: true, amountCents: true },
+    })
+  ).filter((r) => r.sourceKey);
+  const cents = Math.round(amountCents);
+  const pick = ({ payer, receivedOn, reference }: (typeof rows)[number]) => ({ payer, receivedOn, reference });
+  const exact = rows.filter((r) => r.amountCents === cents);
+  if (exact.length) return exact.map(pick);
+  /* Or two or three of them together — a deposit of two batches, typed as one (G-CARD-10). */
+  const combo = receiptsSummingTo(rows, cents)[0];
+  return combo ? combo.map(pick) : [];
+}
+
 export async function unpaid(): Promise<Expense[]> {
   return db.query.expenses.findMany({
     where: and(isNull(schema.expenses.paidOn), eq(schema.expenses.status, "confirmed")),
@@ -276,7 +304,12 @@ export async function addCashReceipt(input: {
       })
     : [];
   const sameKey = input.sourceKey ? await db.query.cashReceipts.findMany({ where: eq(schema.cashReceipts.sourceKey, input.sourceKey) }) : [];
-  const verdict = gateDeposit([...sameKey, ...near], { ...input, amountCents });
+  /* Typed by hand in this month: no date, so the window above cannot see them. See `gateDeposit`. */
+  const typed =
+    input.sourceKey && input.receivedOn
+      ? await db.query.cashReceipts.findMany({ where: and(inArray(schema.cashReceipts.month, monthsAround(input.month)), isNull(schema.cashReceipts.receivedOn), isNull(schema.cashReceipts.sourceKey), eq(schema.cashReceipts.amountCents, amountCents)) })
+      : [];
+  const verdict = gateDeposit([...sameKey, ...near, ...typed], { ...input, amountCents });
   if (!verdict.bank) return { id: null, duplicate: true, why: verdict.why };
 
   const id = newId();

@@ -8,6 +8,39 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `expenses.ts`, `deposit-gate.ts` — G-CARD-9, -10, -11
+
+**Written before touching the files.** Three edge cases from Session 2's money map, same area as the card deposit notice below.
+- G-CARD-9: a feed's receipt is compared with typed receipts in its own month **and the months either side** (a batch
+  closed 30 September, typed under October, was banked twice).
+- G-CARD-10: `automaticReceiptsLike` (the form's check) also refuses an amount equal to two or three automatic receipts
+  together. The combination search moves out of `matchHeldDeposit` into an exported `receiptsSummingTo`.
+- G-CARD-11: `bank.ts` offers a `card_deposit` line only receipts keyed `card-batch|…`, so a card deposit cannot confirm
+  a Health Mart Atlas receipt of the same amount.
+
+### From 1 — 15 September, before the edit: `money/page.tsx`, `money/bank.ts` (A's), `bank-statement.ts`, `expenses.ts` — card deposits are never banked from the bank or by hand beside a batch
+
+**Written before touching the files.** Session 2's money map (G-CARD-2, -7, -8) reproduced three more ways card money
+is counted twice: a combined deposit read before its batches; a batch banked then the same deposit typed with the form;
+the form first, then the batch. Changes:
+
+- `bank-statement.ts` `placeLine`: an incoming line `readBankDescriptor` reads as `card_settlement` (every scanned
+  Heartland spelling) places as a new kind `card_deposit`, before the generic RETAIL rule.
+- `money/bank.ts`: a `card_deposit` line confirms a card batch receipt or stays unplaced saying which batch report to
+  forward. It never banks — the card batch report is the only door for card takings.
+- `money/page.tsx` `bankIt`: refuses an amount already banked automatically in that month unless "this is different
+  money" is ticked; the unplaced-lines hint stops telling a person to bank card deposits with the form.
+- `deposit-gate.ts` / `expenses.ts` `addCashReceipt`: a feed's receipt is compared with undated receipts typed by hand
+  in the same month, by amount.
+
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's) — a deposit the statement banks carries its date
+
+**Written before touching the file.** Session 2 proved on a snapshot (money-map checkpoint 1, case C) that a deposit
+banked from the statement has no `receivedOn`, so a card batch or EFT notice forwarded afterwards cannot see it and
+banks the same money again. One change: the `addCashReceipt` call in the deposit branch passes `receivedOn: line.on`.
+And case D (two batches in one deposit): `matchHeldDeposit` (deposit-gate.ts) now recognises a line equal to two or
+three held receipts together and leaves it for a person rather than banking it as new.
+
 ### From 1 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts` (B's) — PioneerRx's daily sales by payment type
 
 **Written before touching either file.** The owner will send PioneerRx's "System Sales Totals By Payment Type" daily

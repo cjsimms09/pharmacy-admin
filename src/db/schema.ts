@@ -2180,6 +2180,43 @@ export const claimImports = sqliteTable("claim_imports", {
  * transmitted; this is money, drawn by the calendar month, and it includes the front of shop that
  * no claim will ever describe. Reconciling the two is worth doing; merging them is not.
  */
+/**
+ * PioneerRx's sales by payment type, one row per period run: how the till's takings were paid.
+ *
+ * Checks only — card net against the card batch, prescription remit against the claims sold. Never
+ * read by either basis: the money is already the card batches, the bank and the monthly summary.
+ */
+export const salesByPayment = sqliteTable("sales_by_payment", {
+  /** "<from>|<to>". A period re-run replaces its row. */
+  period: text("period").primaryKey(),
+  periodFrom: text("period_from").notNull(),
+  periodTo: text("period_to").notNull(),
+  printedOn: text("printed_on"),
+  cashCents: integer("cash_cents").notNull(),
+  checkCents: integer("check_cents").notNull(),
+  cardCents: integer("card_cents").notNull(),
+  /** Charged to a patient's account: owed, not paid. */
+  accountCents: integer("account_cents").notNull(),
+  couponsCents: integer("coupons_cents").notNull(),
+  returnsCashCents: integer("returns_cash_cents").notNull(),
+  returnsCardCents: integer("returns_card_cents").notNull(),
+  returnsAccountCents: integer("returns_account_cents").notNull(),
+  returnsCouponsCents: integer("returns_coupons_cents").notNull(),
+  /** Card less card refunds: what the card batch should come to. */
+  cardNetCents: integer("card_net_cents").notNull(),
+  retailCents: integer("retail_cents").notNull(),
+  retailTaxCents: integer("retail_tax_cents").notNull(),
+  rxPatientCents: integer("rx_patient_cents").notNull(),
+  rxRemitCents: integer("rx_remit_cents").notNull(),
+  adjustmentsCents: integer("adjustments_cents").notNull(),
+  totalCents: integer("total_cents").notNull(),
+  rowsJson: text("rows_json").notNull().default("[]"),
+  documentId: text("document_id"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(now()),
+  updatedAt: text("updated_at").notNull().default(now()),
+});
+
 export const salesMonths = sqliteTable("sales_months", {
   /** YYYY-MM. The primary key, so a re-sent month replaces rather than repeats. */
   month: text("month").primaryKey(),

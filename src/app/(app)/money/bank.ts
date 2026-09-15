@@ -94,7 +94,7 @@ export async function readBankStatement(fd: FormData) {
     ? (
         await db.query.cashReceipts.findMany({
           where: and(gte(schema.cashReceipts.receivedOn, shiftDays(days[0], -DEPOSIT_WINDOW_DAYS)), lte(schema.cashReceipts.receivedOn, shiftDays(days[days.length - 1], DEPOSIT_WINDOW_DAYS))),
-          columns: { id: true, amountCents: true, receivedOn: true, payer: true, reference: true },
+          columns: { id: true, amountCents: true, receivedOn: true, payer: true, reference: true, sourceKey: true },
         })
       ).filter((r) => !confirmedAlready.has(r.id))
     : [];
@@ -125,9 +125,14 @@ export async function readBankStatement(fd: FormData) {
      * useful is exactly the line most likely to be a deposit a feed already banked, and leaving it on
      * the unplaced pile would hand a person work the receipts on file already answer.
      */
-    const isCredit = placement.kind === "deposit" || (placement.kind === "unplaced" && line.amountCents > 0);
+    const isCredit = placement.kind === "deposit" || placement.kind === "card_deposit" || (placement.kind === "unplaced" && line.amountCents > 0);
     const match = isCredit
-      ? matchHeldDeposit(heldForBank, { amountCents: line.amountCents, on: line.on, payer: placement.kind === "deposit" ? placement.payer : null }, claimed)
+      ? matchHeldDeposit(
+          /* A card deposit confirms only a card batch, never another payer's receipt of the same amount (G-CARD-11). */
+          placement.kind === "card_deposit" ? heldForBank.filter((h) => h.sourceKey?.startsWith("card-batch|")) : heldForBank,
+          { amountCents: line.amountCents, on: line.on, payer: placement.kind === "deposit" ? placement.payer : placement.kind === "card_deposit" ? "Card batch" : null },
+          claimed,
+        )
       : { kind: "none" as const };
     if (match.kind === "confirms") {
       claimed.add(match.receipt.id);
@@ -140,8 +145,18 @@ export async function readBankStatement(fd: FormData) {
       placedAs = "unplaced";
       why = match.why;
       unplaced++;
+    } else if (placement.kind === "card_deposit") {
+      /* Never banked here: the card batch report is the one door for card takings. See `placeLine`. */
+      placedAs = "unplaced";
+      why = `Card takings with no card batch report on file for exactly this amount. Forward the batch report for the day before ${line.on} to the inbox — it banks the money and this line will match it. Do not bank this with the form: that counts it twice when the report arrives.`;
+      unplaced++;
     } else if (placement.kind === "deposit") {
-      receiptId = (await addCashReceipt({ month: line.on.slice(0, 7), kind: placement.receiptKind, amountCents: line.amountCents, payer: placement.payer, notes: `From the bank statement: ${line.description}`, createdBy: user.id })).id;
+      receiptId = (await addCashReceipt({ month: line.on.slice(0, 7), kind: placement.receiptKind, amountCents: line.amountCents, payer: placement.payer, notes: `From the bank statement: ${line.description}`, receivedOn: line.on, createdBy: user.id })).id;
+      /*
+       * `receivedOn` so a feed forwarded after the statement can see this deposit and not bank it again.
+       * Without it the deposit gate's window query skipped it: a card batch forwarded after the statement
+       * was counted twice (Session 2, money map checkpoint 1, case C, proven on a snapshot).
+       */
       deposits++;
       depositCents += line.amountCents;
     } else if (placement.kind === "pays_bill") {

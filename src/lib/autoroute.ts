@@ -13,6 +13,7 @@ import { looksLikeRxRescueCredit } from "./rxrescue-credit";
 import { looksLikePayerPayments } from "./payer-payments";
 import { pdfText } from "./pdf-text";
 import { looksLikeCardStatement } from "./card-statement";
+import { looksLikeSalesByPayment } from "./sales-by-payment";
 import { looksLikeRebateReport } from "./rebate-report";
 import { isDrillDownText } from "./drill-down-read";
 import { looksLikeX12Remittance } from "./business-docs";
@@ -34,7 +35,7 @@ import { ALLOWED_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "empty_report" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "sales_by_payment" | "empty_report" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -330,6 +331,17 @@ export function classify(fileName: string, buf: Buffer): Classification {
         "McKesson's Accounts Payable transactions: every invoice with what was billed, the cash discount, what is actually paid, " +
         "and the ACH it cleared under. Not a bill — every row is an invoice already counted — so nothing on it reaches an account as a cost.",
       headers: ["Receivable Number", "Due Date", "Transaction Status", "Check Number", "Gross Amount ($)", "Cash Discount ($)", "Net Amount ($)"],
+    };
+  }
+  /*
+   * Before the monthly summary: the payment-type report is also named Accrual_System_Sales…, and the
+   * summary's reader refuses it, seven times over, every day. See sales-by-payment.ts.
+   */
+  if (looksLikeSalesByPayment(buf.subarray(0, 8192).toString("utf8"))) {
+    return {
+      kind: "sales_by_payment",
+      why: "PioneerRx's System Sales Totals By Payment Type: the till's takings split by card, cash, cheque and account.",
+      headers: ["Cash", "Check", "Credit/Debit", "A/R / Direct Dep", "Coupons", "Totals", "Tax Collected"],
     };
   }
   if (looksLikeSystemSales(buf.subarray(0, 8192).toString("utf8"), fileName)) {
