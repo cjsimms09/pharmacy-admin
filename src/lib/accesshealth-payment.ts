@@ -97,6 +97,47 @@ function cents(s: string): number {
 }
 const money = (c: number) => `${c < 0 ? "-" : ""}$${(Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/**
+ * The adjustments this site books, and the ones it holds, for one report.
+ *
+ * Agreed with session 1 (money map section 12): an **AH — Origination Fee** is a fee the network keeps back from the
+ * plans' money, so it reduces what the prescriptions earned. It is a revenue offset on the accrual account, in the
+ * EFT's month, the treatment DIR fees get. On the cash account nothing is booked, because the deposit is already net
+ * of it. Every other code is held, named, until its meaning is settled (CS waits on the owner, Q-AH-1).
+ *
+ * Keyed on the EFT, the code and the report's reference, so a report read twice books nothing twice. Two AH rows with
+ * the same reference in one EFT are told apart by their order, `#2` onwards.
+ */
+export type AhPosting = { key: string; code: string; plan: string; on: string; amountCents: number; description: string };
+export type AhHeld = { code: string; plan: string; reference: string | null; amountCents: number };
+
+export function adjustmentPostings(report: AccessHealthPayment): { post: AhPosting[]; held: AhHeld[] } {
+  const post: AhPosting[] = [];
+  const held: AhHeld[] = [];
+  const seen = new Map<string, number>();
+  for (const s of report.sections) {
+    for (const a of s.adjustments) {
+      if (a.code !== "AH") {
+        held.push({ code: a.code, plan: s.plan, reference: a.reference, amountCents: a.amountCents });
+        continue;
+      }
+      const base = `AHADJ|${report.eftNumber}|AH|${a.reference ?? "-"}`;
+      const n = (seen.get(base) ?? 0) + 1;
+      seen.set(base, n);
+      post.push({
+        key: n === 1 ? base : `${base}#${n}`,
+        code: a.code,
+        plan: s.plan,
+        on: report.paidOn,
+        /* The report prints the fee as money taken away; as a revenue offset it is entered as a positive charge. */
+        amountCents: -a.amountCents,
+        description: `Health Mart Atlas origination fee on ${report.eftNumber} (${s.plan})`,
+      });
+    }
+  }
+  return { post, held };
+}
+
 export function looksLikeAccessHealthPayment(text: string): boolean {
   return /Health Mart Atlas/.test(text) && /EFT-\d+\s*Total Paid:/i.test(text) && /Fill Date\s*Rx Number\s*Billed\s*Allowed/i.test(text);
 }

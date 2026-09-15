@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { looksLikeAccessHealthPayment, readAccessHealthPayment } from "../src/lib/accesshealth-payment";
+import { adjustmentPostings, looksLikeAccessHealthPayment, readAccessHealthPayment } from "../src/lib/accesshealth-payment";
 
 /*
  * The shape of a Health Mart Atlas AccessHealth payment report as `pdfText` returns it. Line order, spellings and the
@@ -103,5 +103,46 @@ describe("the Health Mart Atlas AccessHealth payment report", () => {
     const r = readAccessHealthPayment(REPORT.replace("PLAN ONE\nPLAN TWO\n", "PLAN ONE\n"));
     assert.equal(r.ok, false);
     assert.match(r.ok ? "" : r.why, /repeats the name of the PLAN ONE section/);
+  });
+});
+
+describe("the report's remittance-level adjustments", () => {
+  /* The fixture with two origination fees on one reference and one on another, beside the existing CS adjustment. */
+  const withFees = REPORT.replace(
+    "12/31/26Adj-CS1234567         0.00        -0.33         0.00         0.00         0.00        -0.33",
+    [
+      "12/31/26Adj-CS1234567         0.00        -0.33         0.00         0.00         0.00        -0.33",
+      "12/31/26Adj-AH530         0.00        -1.16         0.00         0.00         0.00        -1.16",
+      "12/31/26Adj-AH530         0.00        -0.50         0.00         0.00         0.00        -0.50",
+      "12/31/26Adj-AH777         0.00        -2.00         0.00         0.00         0.00        -2.00",
+    ].join("\n"),
+  )
+    .replace("Paid claims: 4Paid Amount: $84.67", "Paid claims: 7Paid Amount: $81.01")
+    .replace("Total Paid: $118.77", "Total Paid: $115.11");
+
+  test("an origination fee is booked as a positive revenue offset in the EFT's month, keyed per EFT, code and reference", () => {
+    const r = readAccessHealthPayment(withFees);
+    assert.ok(r.ok, r.ok ? "" : r.why);
+    const { post, held } = adjustmentPostings(r.report);
+    assert.deepEqual(post.map((a) => [a.key, a.amountCents, a.on, a.plan]), [
+      ["AHADJ|EFT-12345678|AH|530", 116, "2026-09-04", "PLAN ONE"],
+      ["AHADJ|EFT-12345678|AH|530#2", 50, "2026-09-04", "PLAN ONE"],
+      ["AHADJ|EFT-12345678|AH|777", 200, "2026-09-04", "PLAN ONE"],
+    ]);
+    /* CS is not agreed, so it is held rather than booked. */
+    assert.deepEqual(held, [{ code: "CS", plan: "PLAN ONE", reference: "1234567", amountCents: -33 }]);
+  });
+
+  test("the same report read twice produces the same keys, which is what makes the second read book nothing", () => {
+    const a = readAccessHealthPayment(withFees);
+    const b = readAccessHealthPayment(withFees);
+    assert.ok(a.ok && b.ok);
+    assert.deepEqual(adjustmentPostings(a.report).post.map((x) => x.key), adjustmentPostings(b.report).post.map((x) => x.key));
+  });
+
+  test("a different EFT with the same fee reference is a different key", () => {
+    const r = readAccessHealthPayment(withFees.replace("EFT-12345678", "EFT-87654321"));
+    assert.ok(r.ok, r.ok ? "" : r.why);
+    assert.equal(adjustmentPostings(r.report).post[0].key, "AHADJ|EFT-87654321|AH|530");
   });
 });

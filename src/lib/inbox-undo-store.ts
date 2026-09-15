@@ -1,6 +1,6 @@
 import "server-only";
 import { db, schema } from "@/db";
-import { eq } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import { audit } from "./audit";
 import { effectOf } from "./inbox-undo";
 
@@ -82,7 +82,16 @@ export async function undoInboxItem(itemId: string, user: { id?: string | null; 
     .from(schema.cashReceipts)
     .where(eq(schema.cashReceipts.documentId, doc));
 
-  if (payments.length === 0 && deposits.length === 0) {
+  /*
+   * The origination fees an AccessHealth report books as revenue offsets, keyed `AHADJ|…`. Only those: other bills can
+   * carry a document id too (a card statement's fee bill) and belong to kinds this undo does not remove.
+   */
+  const fees = await db
+    .select({ id: schema.expenses.id, amountCents: schema.expenses.amountCents })
+    .from(schema.expenses)
+    .where(and(eq(schema.expenses.documentId, doc), like(schema.expenses.invoiceNumber, "AHADJ|%")));
+
+  if (payments.length === 0 && deposits.length === 0 && fees.length === 0) {
     return {
       ok: false,
       said:
@@ -96,10 +105,12 @@ export async function undoInboxItem(itemId: string, user: { id?: string | null; 
 
   await db.delete(schema.claimPayments).where(eq(schema.claimPayments.documentId, doc));
   await db.delete(schema.cashReceipts).where(eq(schema.cashReceipts.documentId, doc));
+  if (fees.length) await db.delete(schema.expenses).where(and(eq(schema.expenses.documentId, doc), like(schema.expenses.invoiceNumber, "AHADJ|%")));
 
   const said =
-    `${payments.length} payment${payments.length === 1 ? "" : "s"} (${money(paymentCents)}) and ` +
-    `${deposits.length} bank deposit${deposits.length === 1 ? "" : "s"} (${money(depositCents)}) removed, ` +
+    `${payments.length} payment${payments.length === 1 ? "" : "s"} (${money(paymentCents)}), ` +
+    `${deposits.length} bank deposit${deposits.length === 1 ? "" : "s"} (${money(depositCents)})` +
+    `${fees.length ? ` and ${fees.length} origination fee${fees.length === 1 ? "" : "s"} (${money(fees.reduce((n, f) => n + f.amountCents, 0))})` : ""} removed, ` +
     `read from ${item.fileName ?? "this document"} as ${(item.routedAs ?? "").replace(/_/g, " ")}.`;
 
   await db
