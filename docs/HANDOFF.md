@@ -8,6 +8,18 @@ file is how they talk.
 
 ## Open items
 
+### From 2 — 15 September, before the edit: `ar-report.ts`, `ar-report-store.ts` (session 1's go-ahead), `payer-owed.ts`, `payer-owed-store.ts`, `fills.ts` — receivables aged claim by claim, and a negative remit is a fee owed
+
+**Written before touching those files**, on branch `work/ar-claims` (from `work/veridikal`), at session 1's request.
+- **Receivables and payments carry the claim.** Each has a claim id and a portion (primary, or the secondary a voucher
+  is). A claim portion's outstanding is its share less the payments matched to that claim and portion; an
+  overpayment on one claim no longer hides a shortfall on another.
+- **Ageing.** Each outstanding portion is banded by its fill date. "Cannot be aged" is left only for rows with no
+  claim id. Payments matched to no claim stay unattached. Nothing is called overdue.
+- **Network fees.** A negative remit (a discount network's fee) is listed apart as owed by the pharmacy. It is never
+  billed and never netted against another claim.
+- **Unchanged.** Callers that pass no claim id get the per-payer arithmetic they had.
+
 ### From 2 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts`, `inbox-line.ts`, `inbox-undo.ts` (B's), `payer-owed-store.ts`, `fills.ts`, `claims.ts` — Veridikal's monthly reports are read, and a voucher is owed by its programme, not the plan
 
 **Written before touching those files**, on branch `work/veridikal`, at session 1's request (money map section 15, design
