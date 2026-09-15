@@ -1477,3 +1477,59 @@ established.
 No gap is written: nothing was read, so nothing was stored wrongly. The state is **not-captured**, because
 there is no reader for this layout.
 
+---
+
+## 11. Every route the mailbox takes, and whether anything drops silently
+
+**Checkpoint 11. Code at 7b71c14; live inbox read-only.**
+
+**Everything the mailbox has recorded (136 items, 4–15 September):**
+
+| route | status | items | note |
+|---|---|---:|---|
+| invoice | stored | 45 | supplier invoices |
+| on_hand | stored | 12 | |
+| report_summary | stored | 11 | McKesson totals sheets, recognised and deliberately not read |
+| pioneer_catalog | stored | 10 | |
+| rx_transactions | stored | 9 | daily claims |
+| purchase_drilldown | stored | 9 | |
+| card_batch | stored | 8 | section 1 |
+| training_reply | stored | 7 | |
+| mck_returns | stored | 5 | section 6 |
+| payer_payments | stored | 2 | the HMA EFT notices, section 3 |
+| ap_transactions, postage, rebate_report, return_policy | stored | 1 each | |
+| empty_report | stored | 1 | a daily claims report of 13 September (a Sunday) carrying "No Data", recorded as a fact rather than a failure |
+| **unrecognised** | stored | **9** | all "Fw: SECURE: AccessHealth Payment Data" PDFs; session 1 is building that reader |
+| not_for_filing | ignored | 5 | the two early Endicia confirmations (section 9); a reply about trainings; a login email; an Rx Systems shipment notification |
+
+**Routes the code has that nothing has taken yet:** remittance_835, copay_remit, card_statement,
+sales_by_payment, claims, accrual_sales, rxrescue_credit, supplier_catalog, nadac. Their readers are
+rehearsed in sections 2, 4, 5, 7 and 10 where a sample existed.
+
+**Exits in the sweep that leave no inbox row** (`mailbox.ts` 167–403):
+- a message with no source (170);
+- a message already recorded (178);
+- **a message sent from the mailbox's own address** (190–193). Left unread on purpose, so staff mail sent to
+  that address is not consumed, but it is also never read as a report.
+
+Every other exit writes an inbox row with its reason:
+- sender not allowed (the allow-list is **empty**, so every sender is accepted);
+- a bounce;
+- nothing attached;
+- over 20 MB;
+- refused by the PHI gate.
+
+**Observations, not gaps:**
+- If anyone forwards a report *from the mailbox's own account* (a Gmail address), it will sit unread and
+  unrecorded with nothing said. Whether anyone does is **never-measured**: the skip leaves no trace, so a count
+  of zero proves nothing.
+- The sweep reads the newest 50 unread messages each time. Self-sent messages stay unread for ever, so enough of
+  them would push older unread mail outside that window.
+- The Rx Systems "Shipment Notification" (filed as nothing to file) comes from a vendor the August bank paid
+  $2,577.99 on 20 August. Its bill does not arrive by this route.
+
+### Not checked, said out loud
+
+- The SFTP door: its folder holds a key pair (not opened), and what it fetches was not examined.
+- The Inbox screen's "resort" and "undo" paths (`inbox-resort.ts`, `inbox-undo.ts`) were not rehearsed here.
+
