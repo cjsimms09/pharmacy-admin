@@ -1350,8 +1350,8 @@ Typing them in would bank $9,706.52 a second time. If typed under any kind other
 count as revenue.
 SHOULD BE: one rebate is one receipt, whether it arrives as one credit or three. The site's instruction for
 a line must not be the step that doubles it (the principle of G-CARD-8).
-DIFFERENCE: yes, rehearsed. Each month's McKesson rebate ($9,706.52 for July) arrives this way. Live exposure:
-measured-and-none (no bank statement read).
+DIFFERENCE: yes, rehearsed. July's rebate ($9,706.52) arrived this way. Whether every month's does is
+never-measured: one bank statement is on file. Live exposure: measured-and-none (no bank statement read).
 Owner:
 - `bank-descriptors.ts` / `bank-statement.ts` — not in the table;
 - `money/page.tsx` — **A**;
