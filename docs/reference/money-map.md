@@ -102,8 +102,7 @@ written to the inbox line as *Held*.
 none elsewhere. **Measured-and-none** misrouted.
 
 **Not yet observed: the automatic door on its own.** All 8 receipts were created by **"Session 1,
-backfill"** within 87 ms at 15:30:12 UTC on 15 September, twelve minutes after staff forwarded the emails
-(15:16–15:18). The sweep's handler code ran — the inbox lines, the audit events and the receipts are all
+backfill"** within 87 ms at 15:30:12 UTC on 15 September. The sweep's handler code ran — the inbox lines, the audit events and the receipts are all
 the `bankCardBatch` path — but it was invoked by a backfill (the caller passed that name), not by the
 scheduled sweep. The emails arrived 15:16–15:18; the backfill banked them twelve to fourteen minutes later.
 The first proof that a batch banks with nobody's hand on it is the next batch email arriving by itself.
@@ -121,8 +120,9 @@ summary's; the totals row is readable; card types sum to the total; sales plus r
 credit plus debit sum to the total; the subject's amount equals the total; the subject's count equals the
 summary's.
 
-**Two of the seven compare against the email subject**, which does not come from the HTML table, so a
-misread table cannot agree with itself and pass. Returns are negative and already inside the total
+**Three of the seven compare against the email subject** — its batch number, its amount and its
+transaction count — which does not come from the HTML table, so a misread table cannot agree with itself
+and pass. Returns are negative and already inside the total
 (verified by the reader's own note on the 8 September batch: $4,262.08 sales − $32.81 returns =
 $4,229.27, which is the live receipt above).
 
