@@ -8,6 +8,14 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's) — a deposit the statement banks carries its date
+
+**Written before touching the file.** Session 2 proved on a snapshot (money-map checkpoint 1, case C) that a deposit
+banked from the statement has no `receivedOn`, so a card batch or EFT notice forwarded afterwards cannot see it and
+banks the same money again. One change: the `addCashReceipt` call in the deposit branch passes `receivedOn: line.on`.
+And case D (two batches in one deposit): `matchHeldDeposit` (deposit-gate.ts) now recognises a line equal to two or
+three held receipts together and leaves it for a person rather than banking it as new.
+
 ### From 1 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts` (B's) — PioneerRx's daily sales by payment type
 
 **Written before touching either file.** The owner will send PioneerRx's "System Sales Totals By Payment Type" daily
