@@ -969,3 +969,79 @@ per remittance, so this difference can be read rather than derived.
 - Whether ProviderPay will send 835s by SFTP or email at all: the SFTP folder holds a key pair from 9 September
   (not opened). What it fetches was not checked.
 
+---
+
+## 5. Medicare Transaction Facilitator (MTF) payments — rehearsed
+
+**Checkpoint 5. Code at 882307e.** Samples:
+- **the 12 real MTF 835 files** kept in `data/remits/mtf/filed`, paid 18 August to 10 September (read-only,
+  owner-approved);
+- the August bank statement's 14 "MTF PM NGS/MTF PMT" credits (read by eye, section 2).
+
+Rehearsed on a fresh snapshot (17:39 UTC).
+
+### 1 · What it is, who sends it, through which door
+
+The Medicare Transaction Facilitator pays the Part D negotiated-price difference on Medicare claims, as an 835
+per payment day. Door: the MTF CLI downloads into `data/remits/mtf`, and the facilitator sweep reads it with
+`importRemittance` **without banking**. The same file arriving by email or the intake drop is read with banking
+on (section 4).
+
+### 3 · Read correctly?
+
+All 12 real files parse and **every one balances**: 25 payment lines, BPR total $5,856.77.
+- One file (24 August) pays $0.00: a payment and its reversal.
+- The 8 August files total **$5,541.37 — exactly the live August MTF rows.**
+- **Against the bank: every August MTF 835 with money (7) equals an MTF bank credit to the cent, on the same
+  day.** The bank's 7 earlier MTF credits (3–14 August, $4,790.21) have no file; the CLI's first download is
+  18 August.
+
+### 4–5 · Where it lands, and which basis reads it
+
+- `claim_payments`, source `mtf`, `revenueCents` = the payment. The facilitator pays on top of the plan, so it
+  is new revenue.
+- **Cash account:** where the month has **no** facilitator cash receipt, the MTF payments received in the month
+  stand in as the facilitator line (`profit-and-loss.ts` 1003–1006). Where it has **any**, only the receipts count.
+  **Live September cash facilitator line: $2,789.08 = the September MTF rows exactly.**
+- Two September rows ($193.78) have no revenue figure. The account falls back to the payment, so cash is right.
+- A bank statement places an MTF credit as `deposit/facilitator` and banks it (`bank-statement.ts` FACILITATOR
+  rule): no receipt exists for it to confirm.
+
+### 7 · Duplication and completeness
+
+| # | rehearsal | September cash facilitator line |
+|---|---|---|
+| — | as live | $2,789.08 |
+| 1 | the sweep re-reads all 12 real files | posted 0, 25 already held; unchanged |
+| 2 | the real 8 September file ($5.36) arrives first through a banking door (intake or email) | **$5.36** |
+| 3 | a bank export for 1–12 September carries the five MTF credits of those days ($1,232.94) | **$1,232.94** |
+
+### Gaps for this feed
+
+**G-MTF-1. One facilitator receipt replaces the whole month's facilitator money on the cash account.**
+OBSERVATION: the account uses MTF payments only while the month holds no facilitator receipt, all or nothing
+(`profit-and-loss.ts` 1003). Rehearsed on September's real money:
+- **one MTF 835 through a banking door** made the line $5.36 instead of $2,789.08, **$2,783.72 short, with
+  nothing to correct it**;
+- **a bank export to 12 September** made it $1,232.94, **$1,556.14 short** until a later statement banks the rest.
+
+The account does not say which source it used.
+SHOULD BE: each facilitator dollar counts once on the cash account, from whichever record holds it. A second
+record of some of the money must not remove the rest.
+DIFFERENCE: yes, rehearsed. The first case is reachable by forwarding one MTF 835 by email. The second by
+reading any bank statement that ends before the month does, and a statement read on the day it is exported
+always ends before the month does.
+Owner: `profit-and-loss.ts` — **A**; `claim-payments.ts` (banking an MTF 835 at all) — not in the table.
+Proposed fix: (a) replace all-or-nothing with per payment. An MTF payment stands in unless a facilitator receipt
+holds it: the same trace (for an 835-banked receipt), or the same cents on the same day (for a bank line;
+August, 7 of 7). (b) An MTF 835 never banks, whatever door it comes through, since its money is already on
+the account through the stand-in. The same principle as G-835-1.
+
+### Not checked, said out loud
+
+- The CLI download itself, and whether the filed folder holds every remittance: September's rows on 11, 14 and
+  15 September have no file in the filed folder. They were posted by the automatic check from a folder not
+  examined here.
+- Facilitator money on the accrual account: all MTF rows are unmatched to claims (their fills are July and
+  August, before the books). The accrual side waits for fills inside the books.
+
