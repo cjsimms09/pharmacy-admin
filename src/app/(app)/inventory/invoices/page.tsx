@@ -1156,13 +1156,24 @@ export default async function InvoicesPage({
                 {prices.disagreements.length === 1 ? "does" : "do"} not
                 {prices.overbilledCents > 0 ? (
                   <>
-                    , and <b className="tabular-nums">{money(prices.overbilledCents)}</b> of it is money you were billed
-                    above what arrived
+                    , and the invoices come to <b className="tabular-nums">{money(prices.overbilledCents)}</b> more than was
+                    booked in against them
                   </>
                 ) : (
-                  <>, none of it money &mdash; the totals all match; it is which drug the money is against</>
+                  <>, and no invoice comes to more than was booked in &mdash; it is which drug the money is against</>
                 )}
                 .
+                {/*
+                  Charges are said apart and never counted as a disagreement: every good on these
+                  invoices matched, and the difference is on the total and on no line.
+                */}
+                {prices.charges.length > 0 && (
+                  <>
+                    {" "}Separately, <b className="tabular-nums">{money(Math.abs(prices.chargesCents))}</b> of charges sits on{" "}
+                    {prices.charges.length} invoice total{prices.charges.length === 1 ? "" : "s"} whose every item matched &mdash;
+                    freight or a surcharge, not goods.
+                  </>
+                )}
               </>
             )}
           </p>

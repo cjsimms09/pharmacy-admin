@@ -100,21 +100,77 @@ export type CodeDifference = {
 export type PriceCheck = {
   /** Invoices on file that have a PioneerRx delivery under the same number to check against. */
   checked: number;
-  /** Of those, the ones where the total and every line agree. */
+  /**
+   * Of those, the ones where every line agrees, and the total agrees or differs only by a charge.
+   *
+   * A charge — freight, a fuel surcharge, a handling fee — sits on the invoice total and on no item
+   * line, and PioneerRx never books one in because nothing arrives. So an invoice whose goods match
+   * to the cent and whose total carries $1.57 of freight has not disagreed with the delivery about
+   * anything, and counting it as a disagreement put "$6.40 billed for goods that were not booked in"
+   * in front of the owner on 15 September, about two ParMed invoices whose every good matched.
+   */
   agreeing: number;
   /** Invoice lines compared drug by drug. */
   linesCompared: number;
   disagreements: PriceDisagreement[];
   /** Lines written down two ways with nothing in dispute. Not findings; see CodeDifference. */
   codeDifferences: CodeDifference[];
-  /** Billed above what arrived, across every disagreement that is about money. */
+  /** Billed above what arrived, across every disagreement that is about money. Never a charge. */
   overbilledCents: number;
+  /**
+   * Money on an invoice total that no item line carries, where every line agrees with the delivery.
+   *
+   * Real money the pharmacy pays, and not a dispute: the goods match, so what is left over is what
+   * the wholesaler charged for getting them there. Kept apart so it is neither hidden nor mistaken
+   * for goods billed and never received.
+   */
+  charges: { invoiceNumber: string; supplier: string; invoiceDate: string | null; invoiceId: string; cents: number; say: string }[];
+  chargesCents: number;
   /** Invoices with no delivery to check against, and why — so the coverage is not overstated. */
   unchecked: { invoiceNumber: string | null; supplier: string | null; why: string }[];
   checkedAt: string;
 };
 
 type Line = { ndc11: string | null; description: string | null; quantity: number; unitCostCents: number | null; extendedCents: number };
+
+export type TotalReading =
+  /** The totals agree, within rounding. */
+  | { kind: "agree" }
+  /** Every line agrees and the total does not: the difference is on no line, so it is a charge. */
+  | { kind: "charge"; cents: number; goodsCents: number }
+  /** The totals differ and the lines cannot show whether it is goods or a charge. */
+  | { kind: "differ"; cents: number; goodsCompared: boolean };
+
+/**
+ * What a difference between an invoice total and a delivery total is.
+ *
+ * Pure, because it decides whether the owner is told a wholesaler billed him for goods that never
+ * arrived — and on 15 September it told him that about two ParMed invoices whose every good matched
+ * PioneerRx to the cent. The $1.57 and $4.83 were on the total and on no line.
+ *
+ * The rule is goods first. Where both sides have lines and they sum to the same figure, the goods
+ * agree, so whatever the totals still differ by is not goods: it is freight, a surcharge or a fee,
+ * which PioneerRx never books in because nothing arrives. Where either side has no lines the two
+ * cannot be told apart, and the answer says so rather than choosing.
+ */
+export function readTotals(
+  invoiceTotalCents: number | null,
+  deliveryTotalCents: number | null,
+  invoiceLineCents: number[],
+  deliveryLineCents: number[],
+  tolerance = TOLERANCE_CENTS,
+): TotalReading {
+  if (invoiceTotalCents === null || deliveryTotalCents === null) return { kind: "agree" };
+  const cents = invoiceTotalCents - deliveryTotalCents;
+  if (Math.abs(cents) <= tolerance) return { kind: "agree" };
+  const goodsCompared = invoiceLineCents.length > 0 && deliveryLineCents.length > 0;
+  const invoiceGoods = invoiceLineCents.reduce((n, c) => n + c, 0);
+  const deliveryGoods = deliveryLineCents.reduce((n, c) => n + c, 0);
+  if (goodsCompared && Math.abs(invoiceGoods - deliveryGoods) <= tolerance) {
+    return { kind: "charge", cents, goodsCents: invoiceGoods };
+  }
+  return { kind: "differ", cents, goodsCompared };
+}
 
 /**
  * The delivery's lines, preferring the figures over the sentence.
@@ -236,6 +292,7 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
   let checked = 0;
   let agreeing = 0;
   let linesCompared = 0;
+  const charges: PriceCheck["charges"] = [];
 
   for (const inv of invoices) {
     const number = inv.invoiceNumber?.trim() ?? "";
@@ -254,8 +311,36 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
     const at = { invoiceNumber: number, supplier, invoiceDate: inv.invoiceDate ?? delivery.invoiceDate, invoiceId: inv.id };
 
     /* ── The total ────────────────────────────────────────────────── */
-    if (inv.totalCents !== null && delivery.totalCents !== null && Math.abs(inv.totalCents - delivery.totalCents) > TOLERANCE_CENTS) {
-      const diff = inv.totalCents - delivery.totalCents;
+    /*
+     * Goods first, then the total. Where both sides have lines and those lines sum to the same
+     * figure, the goods agree — so any difference left on the total is on no line, and it is a
+     * charge rather than something billed and never booked in. Where either side has no lines the
+     * two cannot be told apart, and the difference is reported as a difference in totals and
+     * nothing more specific.
+     */
+    const reading = readTotals(
+      inv.totalCents,
+      delivery.totalCents,
+      (linesOf.get(inv.id) ?? []).map((l) => l.extendedCents),
+      deliveryLines(delivery).map((l) => l.extendedCents),
+    );
+    const goodsAgree = reading.kind === "charge";
+
+    if (reading.kind === "charge" && inv.totalCents !== null) {
+      const cents = reading.cents;
+      const invoiceLineCents = reading.goodsCents;
+      charges.push({
+        invoiceNumber: number,
+        supplier,
+        invoiceDate: inv.invoiceDate ?? delivery.invoiceDate,
+        invoiceId: inv.id,
+        cents,
+        say:
+          `${supplier} ${number}: every item matches what PioneerRx booked in, to ${money(invoiceLineCents)}, and the invoice total is ${money(inv.totalCents)}. ` +
+          `The ${money(Math.abs(cents))} between them is on no line — a charge such as freight or a surcharge, not goods.`,
+      });
+    } else if (reading.kind === "differ" && inv.totalCents !== null && delivery.totalCents !== null) {
+      const diff = reading.cents;
       out.push({
         ...at,
         kind: "total",
@@ -266,7 +351,10 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
         differenceCents: diff,
         say:
           `${supplier} billed ${money(inv.totalCents)} on ${number}; PioneerRx booked in ${money(delivery.totalCents)} against the same number — ` +
-          `${money(diff)} ${diff > 0 ? "more on the invoice than arrived" : "more arrived than was billed"}.`,
+          `${money(Math.abs(diff))} ${diff > 0 ? "more on the invoice" : "more on the delivery"}. ` +
+          (goodsAgree
+            ? ""
+            : "The item lines could not be set against each other, so this cannot say whether the difference is goods or a charge on the total."),
       });
     }
 
@@ -441,5 +529,6 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
     .filter((d) => d.kind === "total" || ((d.kind === "price" || d.kind === "billed-not-received") && !totalsSeen.has(d.invoiceNumber)))
     .reduce((n, d) => n + Math.max(0, d.differenceCents), 0);
 
-  return { checked, agreeing, linesCompared, disagreements: out, codeDifferences, overbilledCents, unchecked, checkedAt: new Date().toISOString() };
+  const chargesCents = charges.reduce((n, c) => n + c.cents, 0);
+  return { checked, agreeing, linesCompared, disagreements: out, codeDifferences, overbilledCents, charges, chargesCents, unchecked, checkedAt: new Date().toISOString() };
 }
