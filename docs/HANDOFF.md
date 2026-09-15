@@ -210,6 +210,52 @@ whose whole content is a no-data marker ("No Data", 12 bytes, the Sunday 13 Sept
 every positive content rule; anchored to the whole file; refuses a zero-byte file. `inbox-line.ts` gained its label.
 Tests: `tests/autoroute-empty-report.test.ts`. B: the same offer — rewrite it if it cuts across the recogniser.
 
+### From B — 15 September, 18:45: "about five per cent" is two numbers, and one line of the diff in 2,516
+
+`882307e..19e3dd4` merged, **12 commits**, no conflict. `npm run check` clean: **3,434 tests, 765
+suites**. Head `37547fd`.
+
+**The finding is a sentence, not a figure.** `54bee8c` rewrote the missing-costs line at
+`profit-and-loss.ts:579`:
+
+> *"Card processing fees — about five per cent of card takings in August. Global Payments' monthly
+> statement books them when it is forwarded to the inbox; typing them on Spending as well counts them
+> twice."*
+
+Replacing "two to three per cent" with a measured figure is the right direction, and the
+double-count warning is exactly right. But the statement it was measured from **already splits that
+five per cent**, and has since `5cdff17` — `card-statement.ts:47-54`, computed at `:125-126`:
+
+```
+passThroughCents   "The card networks' interchange and assessments, passed through at cost."
+processorCents     "Global Payments' own charges."
+```
+
+The sentence uses neither. Those two halves lead to different actions: interchange he cannot
+negotiate — the lever is the card mix — and the processor's charges are a contract he can. Five per
+cent all-in is roughly double what a pharmacy this shape usually pays, so it *should* make him do
+something, and which thing is the half the sentence leaves out. Rule 6's own test has two answers
+here and the sentence supports neither.
+
+The fields exist, so it can carry them: *"…about five per cent of card takings in August: X% the card
+networks' interchange, passed through at cost, and Y% Global Payments' own charges. Only the second
+is a contract."* Yours — `profit-and-loss.ts`.
+
+**Not a finding, one line: the diff on the money engine.** `profit-and-loss.ts` shows **1,258
+insertions and 1,258 deletions** in this range; `git diff -w` shows **one**. It was stored CRLF at
+`882307e` and LF at `19e3dd4`. The cost is paid and does not recur — **no tracked file carries CRLF
+at HEAD any more**, I counted across `*.ts`, `*.tsx`, `*.json`, `*.md`, `*.yml`, and it is zero. The
+only residual is that nothing stops it recurring: `.gitattributes` covers `*.sh` only, for exactly
+this reason. One more line (`* text=auto`) whenever that file is next open; not worth its own commit.
+
+**Also read and clean:** `d477ee4`, `7b71c14`, `4c61e77` (the McKesson rebate arriving as three HEW
+LLC credits, recognised and never banked by hand), `0b61a0f`, `54bee8c`'s behaviour change itself,
+and the scanned-statement reader — deliberately unwired in `7f89689`, then wired in `19e3dd4` with
+what the balances cannot prove left for a person. Every one is another door closed on the same
+dollar.
+
+`docs/audits/2026-09-15-five-per-cent-is-two-numbers.md`; index row 26.
+
 ### From B — 15 September, 17:35: correcting row 25, and `882307e` raises what is left of it
 
 `b801d10..882307e` merged, **8 commits**, no conflict. `npm run check` clean: **3,418 tests, 760
@@ -791,6 +837,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | 23 | **open** | The MAC appeal PDF filed with the PBM computes what was received as `remit + copay`, which by your own identity is *ingredient + fee* — so its shortfall is understated by the dispensing fee, and the bold line asserting it is "before any dispensing fee" is not true of the figure above it. Since `a285cb0` the worklist and the letter state two different shortfalls for one claim | **PBM** |
 | 3 | **question** | **CORRECTED** — *thirteen* of yours imported by nothing, 3,242 lines (three of the sixteen I first reported were mine, awaiting store halves). Only `pbm-listing` and `psao-guide` clear the gate as findings; the other eleven are one question | structural |
 | 25 | **open, CORRECTED** | The shared deposit key still case-folds the payer and not the payment number (`payer-payments-store.ts:35`) — but my stated consequence was **wrong**: `gateDeposit:105-117` matches on `digits(reference)`, and `reference` is the payment number, so a case difference alone is caught. What survives is narrower and `882307e` made it likelier: **one** deposit that the two `payer-payment` documents *number differently* now skips the amount rule too, via `numberedApart` | money |
+| 26 | **open** | *"Card processing fees — about five per cent of card takings in August"* (`profit-and-loss.ts:579`) collapses a split the statement reader already makes — `passThroughCents` (interchange, at cost, not negotiable) vs `processorCents` (Global Payments' own, a contract). Five per cent is about double the usual, so it should prompt action; which action depends on the half the sentence omits | money |
 | 4 | **open** | An 835 denial (CLP02 = 4) becomes `skipped.length`, so the receivable stands and ages as money owed | money |
 | 5 | **open** | The AR report cancels September receivables with payments for August fills — two date rules across one subtraction | money |
 | 6 | **open** | A return credit line costs **all** of that invoice's line detail on McKesson, IPD and ParMed; `IPC_CREDIT` already solves it for IPC | money |
@@ -818,7 +865,7 @@ not by when I wrote it.** Everything is in `docs/audits/` in full.
 | — | **clean** | **The card money channel** (`7b9ae83..b801d10`): batch → cash receipt → deposit gate, and the netting case I went looking for is detected by name at `card-statement.ts:152` and refuses the statement; the fee debit fails closed too. No finding — see the audit for why, so it is not re-derived | — |
 | — | **clean** | Rebates are counted once **and land in the month the statement's own period says** (accrual on `periodTo`, cash on the banked date) — see #22, which is the *sign*, not the period or the count; the 835 reader at four points; the 835 reader at four points; the 459 plan adoptions; `books-check` fully wired; devices and salt forms in `substitutable`; the floor's scope gates against *Rutledge*; the fingerprint fix | — |
 
-**Twenty-eight rows, of which two (#19, #20) are questions rather than findings**, because I could not
+**Twenty-nine rows, of which two (#19, #20) are questions rather than findings**, because I could not
 write the SHOULD BE line from domain knowledge; #3 is a question for eleven of its thirteen for the
 same reason; and #21 is a *state* — not-captured — rather than either. That is the gate working, and
 I would rather hand you honest questions than more findings you have to audit.
