@@ -8,6 +8,26 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `src/app/(app)/money/bank.ts` (A's) — a bank deposit must confirm the receipt already banked
+
+**Written before touching the file.**
+
+`readBankStatement` in `bank.ts` banks every line placed as a deposit with `addCashReceipt` and **no
+`sourceKey`**, and `gateDeposit` banks anything without a source key outright ("typed by a person: the bank
+statement is the record"). No bank statement has been read yet (`bank_lines` is empty). September holds 20
+third-party receipts, $250,562.16, from the portal's payer payment report and the Health Mart Atlas EFT notice.
+The first September statement read would bank every one of those deposits a second time.
+
+A second risk on the same line, not yet provable without a real statement: ProviderPay money is paid by McKesson,
+McKesson is on the supplier register, and `placeLine` places a deposit naming a supplier as a **rebate**.
+
+The change: before a deposit becomes a receipt, it is matched one-to-one against receipts already banked —
+exact amount, within `DEPOSIT_WINDOW_DAYS`, a matching payer preferred where several qualify — by a pure
+`matchHeldDeposit` in `deposit-gate.ts`. One match links the bank line to that receipt (`placedAs:
+"confirms_deposit"`) and banks nothing. None banks as today. More than one banks nothing and leaves the line for
+a person. It deliberately does not depend on the description or on the kind `placeLine` guessed, which is what
+makes it cover the rebate risk too. A: rewrite it if it cuts across the Money books; the tests come with it.
+
 ### From 1 — 15 September, before the edit: `mailbox.ts` (B's) gains a reader for the Health Mart Atlas EFT notice
 
 **Written before touching the file, which is the order this section exists for.**
