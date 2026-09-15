@@ -20,7 +20,7 @@ turns red rather than saying what is wrong.
 
 **The NCPDP must be selected on the Data Management page, not just on the Dashboard.**
 
-The Dashboard shows "West Wichita Family Pharmacy (1722734)" whether or not Data Management has a
+The Dashboard shows "West Wichita Family Pharmacy (7000017)" whether or not Data Management has a
 pharmacy set, so the account looks correctly configured when it is not. With it unset, the
 Remittances search **renders nothing at all** — no table, no "0 results", no error. The page simply
 sits there looking like the search never ran. It cost a session and several round trips with the
@@ -68,7 +68,7 @@ Underneath, each press is a single GET:
 
 ```
 https://api.ah.mckesson.com/v1/dataManagement/remittances
-  ?ncpdp=1722734&group=null&docHSQ=<per-remittance id>&action=EXPORT835
+  ?ncpdp=7000017&group=null&docHSQ=<per-remittance id>&action=EXPORT835
 ```
 
 One `docHSQ` per remittance. There is no bulk form of it.

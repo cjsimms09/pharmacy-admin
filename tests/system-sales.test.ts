@@ -14,8 +14,8 @@ import { parseSystemSales, salesCents, looksLikeSystemSales } from "../src/lib/s
 const AUGUST = [
   "﻿System Sales Summary",
   "West Wichita Family Pharmacy",
-  '"8200 W Central Ave, Ste 5 Wichita, KS 67212-3661"',
-  "(316) 491-6428 (f) (316) 512-4001",
+  '"1234 W Example Ave, Ste 5 Wichita, KS 67212-3661"',
+  "(316) 555-0199 (f) (316) 512-4001",
   "8/1/2026 - 8/31/2026",
   "Sales,Discounts,Returns,Subtotal,Tax Calculated,Total",
   "Amount,Amount,Amount",
