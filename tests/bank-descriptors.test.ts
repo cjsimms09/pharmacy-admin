@@ -106,7 +106,7 @@ describe("what each line on the bank statement is", () => {
     assert.equal(wouldDoubleCount("SOME COMPANY NOBODY KNOWS", -12_345), false);
   });
 
-  test("the facilitator and the copay cards carry a caution, and are still banked", () => {
+  test("the facilitator and the copay cards carry a caution, not a certainty (where the line goes is placeLine's: see G-MTF-1)", () => {
     /*
      * Their remittances are read where they arrive and are not where they do not, so this is a
      * warning beside the line rather than a refusal to book it. Treating it as certain would drop
@@ -356,4 +356,38 @@ describe("telling IPC from IPD", () => {
     const other = readBankDescriptor("Independent Phar/WAREHOUSE 99887766 WEST WICHITA FAMILY PH", -300_000);
     assert.notEqual(other.counterparty, "IPC");
   });
+});
+
+describe("McKesson's rebate arriving in pieces (G-REB-1)", () => {
+  test("REGRESSION: the three HEW LLC credits are pieces of the rebate, never money to bank by hand", () => {
+    for (const [d, cents] of [["HEW LLC/BRAND West Wichita", 110_976], ["HEW LLC/GENERIC West Wichita", 824_676], ["HEW LLC/FEES MISC West Wichita", 35_000]] as const) {
+      assert.equal(readBankDescriptor(d, cents).kind, "wholesaler_rebate");
+      const p = placeLine({ on: "2026-08-19", description: d, amountCents: cents, key: d }, { payers: [], suppliers: [{ id: "m", name: "Mckesson" }], vendors: [], unpaidBills: [], unpaidInvoices: [] });
+      assert.equal(p.kind, "rebate_part");
+      assert.match(p.why, /do not bank these by hand/);
+    }
+  });
+});
+
+describe("a postage charge on the bank (G-POST-1)", () => {
+  const ctx = { payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [] };
+  const line = { on: "2026-09-11", description: "Purch STAMPS.COM WASHINGTON DC", amountCents: -10_000, key: "p" };
+  test("REGRESSION: already counted only where its purchase confirmation booked it", () => {
+    assert.equal(placeLine(line, { ...ctx, postageBills: [{ amountCents: 10_000, on: "2026-09-10" }] }).kind, "already_counted");
+  });
+  test("REGRESSION: with no confirmation on file it is left for a person, saying the cost may be missing", () => {
+    const p = placeLine(line, { ...ctx, postageBills: [{ amountCents: 10_000, on: "2026-09-01" }] });
+    assert.equal(p.kind, "unplaced");
+    assert.match(p.why, /no Endicia or Stamps\.com purchase confirmation/);
+  });
+});
+
+test("REGRESSION: a postage confirmation accounts for one charge - September's three bills against four top-ups (G-POST-1)", async () => {
+  const { placeLines } = await import("../src/lib/bank-statement");
+  const charge = (on: string) => ({ on, description: "Purch STAMPS.COM WASHINGTON DC", amountCents: -10_000, key: on });
+  const placed = placeLines([charge("2026-09-09"), charge("2026-09-11"), charge("2026-09-12"), charge("2026-09-16")], {
+    payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [],
+    postageBills: [{ amountCents: 10_000, on: "2026-09-08" }, { amountCents: 10_000, on: "2026-09-10" }, { amountCents: 10_000, on: "2026-09-15" }],
+  });
+  assert.deepEqual(placed.map((p) => p.placement.kind), ["already_counted", "already_counted", "unplaced", "already_counted"]);
 });

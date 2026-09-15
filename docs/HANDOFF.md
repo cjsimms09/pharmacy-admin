@@ -8,6 +8,57 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `money/bank.ts`, `money/page.tsx` (A's) — the scanned Emprise statement is read from the upload
+
+**Written before touching either file.** The owner: Emprise cannot export CSV, QFX or OFX; the statement is a scanned PDF.
+- `bank.ts` `readBankStatement`: a PDF goes through `scanned-bank-statement.ts` + `scanned-bank-solve.ts`, with amounts
+  other feeds already hold as `known`. Proved in full → its lines take the existing placement path unchanged. Any day not
+  proved → nothing is placed; the document is kept and the page is sent to `?scan=<document id>`. The CSV path is split
+  into a shared `placeStatementLines` with no change in behaviour.
+- `page.tsx`: the upload accepts `.pdf`; with `?scan=` a panel lists each unproved stretch (dates, the difference the
+  balances need, each line as the scan printed it with the page) and takes a figure per line; `confirmScannedStatement`
+  re-solves with those figures fixed and only then places the lines.
+
+### From 1 — 15 September, before the edit: `profit-and-loss.ts`, `money/bank.ts` (A's) — card fee wording; the card statement books its bill unpaid
+
+**Written before touching A's files.** Session 2's G-CSTMT-1..4 and G-CARD-13. In my `card-statement-store.ts`: the fee bill
+is booked unpaid (the fees leave the bank the month after — July's on 3 August), including for a statement month before
+the books start, since its debit falls inside them; a bank fee debit already read and unplaced is linked when the
+statement arrives; a card-processing bill typed for the same month and amount stops the statement booking again; the
+batch check's "extra" is counted inside the statement's own batch dates. In A's files, wording only:
+`profit-and-loss.ts` — the missing card-fees line says to forward the processor's monthly statement, not to record
+fees on Spending; `money/bank.ts` — the card deposit message names the days before the deposit, not "the day before".
+
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts`, `bank-descriptors.ts` — a postage debit is already counted only with its confirmation
+
+**Written before touching bank.ts.** Session 2's G-POST-1: every Stamps.com/Endicia debit was `already_counted`
+unconditionally; August's 10 real charges ($940.99) had no postage bill behind any of them. `MatchContext.postageBills`
+(bills keyed `POSTAGE|…`, loaded in `matchContext()`): a debit with an unclaimed bill of the same amount within 3 days
+is `already_counted`; otherwise unplaced, saying no Endicia confirmation is on file.
+
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts` — the McKesson ACH tie runs, and an unmatched MTF credit confirms nothing
+
+**Written before touching the files.** Session 2's money map:
+- G-MCK-1: `matchContext()` never passed `settled`, and `bank.ts` had no `settles_ach` branch, so the real $106,322.62
+  McKesson debit came back unplaced and 27 of 27 invoices stayed unpaid. `matchContext()` now loads
+  `supplier_statement_lines` with a check number; `settles_ach` carries `agrees`; where it agrees the covered invoices get
+  the bank date as `paidOn` (cash cost of goods reads McKesson from its own ledger only — `cash-cogs.ts` — so this adds no
+  cost). Where it does not agree the line is left for a person.
+- G-MTF-2: a facilitator credit with no equal remittance is a new placement kind `facilitator_unmatched`, which `bank.ts`
+  never offers to the receipt match (it confirmed a Health Mart Atlas receipt of the same amount on a snapshot).
+
+### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `bank-statement.ts`, `claim-payments.ts` — 835s and MTF deposits never bank beside their other door
+
+**Written before touching bank.ts.** Session 2's money map G-835-1 and G-MTF-1:
+- `claim-payments.ts`: a remittance through ProviderPay (Health Mart Atlas and direct payers) or from the facilitator posts
+  claim payments and banks nothing. The payer payment report and EFT notice bank plan money; the MTF payments are read by
+  `profit-and-loss.ts` payment by payment, and a facilitator receipt there drops every MTF payment in the month.
+- `deposit-gate.ts`: an `835|…` receipt is compared by amount without the payer name.
+- `bank-statement.ts` `placeLine` + `money/bank.ts` `matchContext()`: `MatchContext.facilitatorPaid` (MTF claim payments
+  summed by received day). A facilitator credit equal to that day's sum is `already_counted`; otherwise unplaced, saying
+  the remittance for it is not on file. Never banked.
+- Still A's to decide: the per-payment stand-in in `profit-and-loss.ts` (G-MTF-1 (a)).
+
 ### From 1 — 15 September, before the edit: `money/bank.ts` (A's), `expenses.ts`, `deposit-gate.ts` — G-CARD-9, -10, -11
 
 **Written before touching the files.** Three edge cases from Session 2's money map, same area as the card deposit notice below.

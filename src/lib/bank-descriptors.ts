@@ -336,6 +336,23 @@ const RULES: Rule[] = [
 
   /* ── Money in ───────────────────────────────────────────────────── */
   {
+    /*
+     * McKesson's rebate, paid as three credits from HEW LLC on one day — BRAND, GENERIC and FEES MISC — which are
+     * the rebate statement's own brand, generic and fee split: July's $9,706.52 arrived on 19 August as $1,109.76,
+     * $8,246.76 and $350.00 (Session 2, money map G-REB-1). One month measured, so the three-way split is seen, not
+     * promised.
+     */
+    kind: "wholesaler_rebate",
+    counterparty: "Mckesson",
+    test: /HEWLLC/,
+    side: "in",
+    lands: "revenue",
+    category: "rebate",
+    feed: "the McKesson rebate statement",
+    mayAlreadyBeCounted: "the rebate receipt banked from McKesson's rebate statement",
+    why: "Part of McKesson's rebate. The rebate statement banks the whole rebate; these credits are it arriving in pieces.",
+  },
+  {
     kind: "card_settlement",
     counterparty: "Heartland",
     test: /HRT[A-Z]?[LIT]?AND|HEARTLAND/,

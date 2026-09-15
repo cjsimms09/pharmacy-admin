@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { addCashReceipt, automaticReceiptsLike, deleteCashReceipt, cashReceiptsFor } from "@/lib/expenses";
-import { readBankStatement, lastStatementLines } from "./bank";
+import { readBankStatement, lastStatementLines, scannedStatementReview, confirmScannedStatement } from "./bank";
 import { Field, Settled } from "@/components/ui";
 import { formatCents, parseCents } from "@/lib/money";
 import { todayIso, fmt } from "@/lib/dates";
@@ -67,9 +67,11 @@ async function uploadPayments(fd: FormData): Promise<never> {
   redirect(`${back}&ok=${encodeURIComponent(said)}`);
 }
 
-export default async function MoneyPage({ searchParams }: { searchParams: Promise<{ period?: string; ok?: string; error?: string }> }) {
+export default async function MoneyPage({ searchParams }: { searchParams: Promise<{ period?: string; ok?: string; error?: string; scan?: string }> }) {
   await requireUser();
-  const { period: periodParam, ok, error } = await searchParams;
+  const { period: periodParam, ok, error, scan } = await searchParams;
+  /* A scanned bank statement waiting on a person: the stretches its balances could not prove. See scanned-bank-solve.ts. */
+  const scanReview = scan ? await scannedStatementReview(scan).catch(() => null) : null;
   const today = todayIso();
   const period = (periodParam && parsePeriod(periodParam)) || periodOf("month", today.slice(0, 7));
   const [books, recent, found, banked, bankLines] = await Promise.all([booksFor(period, today), recentMonths(6, today), moneyFound().catch(() => null), cashReceiptsFor(period.months), lastStatementLines(period.months)]);
@@ -424,11 +426,43 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
         */}
         <form action={readBankStatement} encType="multipart/form-data" className="mt-4 flex flex-wrap items-end gap-2 border-t border-line pt-3">
           <input type="hidden" name="period" value={period.key} />
-          <Field label="Or read the bank's statement" hint="The CSV export from the bank's site: date, description, amount.">
-            <input type="file" name="file" accept=".csv,.txt" required className="w-full" />
+          <Field label="Or read the bank's statement" hint="Emprise's monthly statement as the PDF it comes in, or a CSV export: date, description, amount.">
+            <input type="file" name="file" accept=".pdf,.csv,.txt" required className="w-full" />
           </Field>
           <button className="btn">Read the statement</button>
         </form>
+        {scan && scanReview && (
+          <div className="mt-3 rounded border border-line p-3 text-xs" id="scan">
+            <p className="font-semibold">{scanReview.fileName}: not placed yet</p>
+            {scanReview.why ? (
+              <p className="mt-1 text-ink-2">{scanReview.why}</p>
+            ) : (
+              <form action={confirmScannedStatement} className="mt-1 grid gap-2">
+                <input type="hidden" name="period" value={period.key} />
+                <input type="hidden" name="document" value={scan} />
+                <p className="text-ink-2">
+                  The scan is unclear in {scanReview.unproven.length === 1 ? "one place" : `${scanReview.unproven.length} places`}: the lines it reads do not reach the bank's own balance, and more than one correction would. Open the statement at the page shown, type each figure as printed, and check again. Nothing from this statement is placed until every day agrees.
+                </p>
+                {scanReview.unproven.map((u) => (
+                  <fieldset key={u.from} className="grid gap-1 border-t border-line pt-2">
+                    <legend className="font-semibold">
+                      {fmt(u.from)}{u.to === u.from ? "" : ` to ${fmt(u.to)}`}: the lines must come to {formatCents(Math.abs(u.differenceCents))} {u.differenceCents > 0 ? "more" : "less"} than the scan reads
+                    </legend>
+                    {u.lines.map((l) => (
+                      <label key={l.index} className="flex flex-wrap items-center gap-2">
+                        <span className="w-14 text-ink-3">page {l.page}</span>
+                        <span className="w-24 text-ink-3">{l.section === "credits" ? "deposit" : l.section === "checks" ? "cheque" : l.section === "card" ? "card" : "withdrawal"}</span>
+                        <span className="w-40 font-mono">{l.dateText} {l.amountText}</span>
+                        <input name={`fix-${l.index}`} inputMode="decimal" defaultValue={(Math.abs(l.readAsCents) / 100).toFixed(2)} className="w-28 tabular-nums" aria-label={`Amount printed on page ${l.page} as ${l.amountText}`} />
+                      </label>
+                    ))}
+                  </fieldset>
+                ))}
+                <div><button className="btn btn-primary">Check these figures</button></div>
+              </form>
+            )}
+          </div>
+        )}
         {bankLines.unplaced.length > 0 && (
           <div className="mt-3">
             <p className="text-xs font-semibold">{bankLines.unplaced.length} line{bankLines.unplaced.length === 1 ? "" : "s"} from the statement not placed</p>

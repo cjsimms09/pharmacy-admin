@@ -149,7 +149,11 @@ export type Placement =
    * really was paid, and the day it really left — and, where the figure has moved, that it has.
    */
   | { kind: "confirms_standing"; name: string; exact: boolean; why: string }
-  | { kind: "settles_ach"; supplier: string; reference: string; invoices: string[]; why: string }
+  | { kind: "settles_ach"; supplier: string; reference: string; invoices: string[]; agrees: boolean; why: string }
+  /** A facilitator credit no remittance on file explains. Never matched to other receipts, never banked. */
+  | { kind: "facilitator_unmatched"; why: string }
+  /** A piece of a wholesaler rebate paid in several credits. Never matched one at a time, never banked. */
+  | { kind: "rebate_part"; why: string }
   | { kind: "unplaced"; why: string };
 
 export type MatchContext = {
@@ -159,6 +163,10 @@ export type MatchContext = {
   vendors: { id: string; name: string }[];
   unpaidBills: { id: string; vendorId: string | null; vendorName: string | null; amountCents: number; invoiceDate: string }[];
   unpaidInvoices: { id: string; supplierId: string | null; supplier: string | null; totalCents: number | null; invoiceDate: string | null }[];
+  /** Postage bills booked from purchase confirmations: what a Stamps.com debit must find to be already counted. */
+  postageBills?: { amountCents: number; on: string }[];
+  /** The facilitator's payments summed by the day they were paid, from the MTF remittances. */
+  facilitatorPaid?: { on: string; cents: number }[];
   /** Card processing bills no bank line has claimed yet, paid or not — the card statement books its fees already paid. */
   cardFeeBills?: { id: string; vendorName: string | null; amountCents: number; invoiceDate: string }[];
   /**
@@ -237,6 +245,7 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
         supplier: meaning.counterparty,
         reference: ref,
         invoices: covered.map((x) => x.invoiceNumber),
+        agrees,
         why: agrees
           ? `${ref} covers ${covered.length} ${meaning.counterparty} invoices and comes to exactly this debit. The money is already the cash cost of goods, from their own report, so nothing is booked from this line.`
           : `${ref} covers ${covered.length} ${meaning.counterparty} invoices coming to ${(cents / 100).toFixed(2)}, and the bank took ${((-line.amountCents) / 100).toFixed(2)} — worth a look.`,
@@ -252,6 +261,19 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
    * Answering "already counted" first threw the second half away and left the largest debit on the
    * statement unreconciled — which is the thing this was built to fix.
    */
+  /*
+   * Postage: already counted only where the confirmation that booked it is on file. Every Stamps.com debit used
+   * to be taken as counted, and none of August's ten had a bill behind it (Session 2, money map G-POST-1).
+   */
+  if (meaning.kind === "postage" && ctx.postageBills) {
+    if (postageBillFor(ctx.postageBills, line) >= 0) {
+      return { kind: "already_counted", what: meaning.counterparty, where: meaning.alreadyCounted ?? "postage", why: meaning.says };
+    }
+    return {
+      kind: "unplaced",
+      why: "A postage charge with no Endicia or Stamps.com purchase confirmation on file for this amount within three days. The confirmation email books it; if it never came, this is a cost the books do not have.",
+    };
+  }
   if (meaning.alreadyCounted) {
     return { kind: "already_counted", what: meaning.counterparty, where: meaning.alreadyCounted, why: meaning.says };
   }
@@ -268,7 +290,41 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
      * this confirms.
      */
     if (meaning.kind === "card_settlement") return { kind: "card_deposit", why: meaning.says };
-    if (FACILITATOR.test(d)) return { kind: "deposit", receiptKind: "facilitator", payer: "Medicare Transaction Facilitator", why: "names the facilitator" };
+    /*
+     * Pieces of a wholesaler rebate. Not banked, and not offered to the receipt match one at a time: the rebate
+     * statement banks the whole, and a piece that happened to equal some other receipt would confirm the wrong one.
+     * Until the pieces can be tied to that receipt together, a person sees them with this said.
+     */
+    if (meaning.kind === "wholesaler_rebate") {
+      return {
+        kind: "rebate_part",
+        why: "Part of McKesson's rebate, which arrives as separate brand, generic and fee credits on one day. The rebate statement banks the whole rebate; do not bank these by hand, or it is counted twice.",
+      };
+    }
+    /*
+     * The facilitator's money is counted from its remittances, payment by payment, and a banked facilitator
+     * receipt made the cash account drop every MTF payment in that month (profit-and-loss.ts reads the
+     * payments only where no facilitator receipt exists) — September's $2,789.08 became $1,232.94 on a
+     * snapshot (Session 2, money map G-MTF-1). So the bank line is recognised and left alone.
+     */
+    if (meaning.kind === "facilitator" || FACILITATOR.test(d)) {
+      /* Confirmed only where that day's MTF payments come to exactly this — on August's real files they did, 7 of 7. */
+      const paid = ctx.facilitatorPaid?.find((p) => p.on === line.on)?.cents ?? null;
+      if (paid === line.amountCents) {
+        return {
+          kind: "already_counted",
+          what: "Medicare Transaction Facilitator",
+          where: "facilitator revenue, from the MTF remittances",
+          why: "The Medicare facilitator paying. Its remittance for this day comes to exactly this, and already counts it payment by payment.",
+        };
+      }
+      return {
+        kind: "facilitator_unmatched",
+        why:
+          `The Medicare facilitator paying, but ${paid === null ? "no MTF remittance for this day is on file" : `the MTF remittances for this day come to ${(paid / 100).toFixed(2)}`}. ` +
+          "Nothing is banked from the line — banking it would drop every MTF payment from the month's cash. The remittance for it is what is missing.",
+      };
+    }
     const payer = ctx.payers.find((p) => mentions(d, p));
     if (payer) return { kind: "deposit", receiptKind: "third_party", payer, why: `names ${payer}` };
     const supplier = ctx.suppliers.find((s) => mentions(d, s.name));
@@ -389,13 +445,39 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
   return { kind: "unplaced", why: "a payment the site cannot tie to a bill or an invoice" };
 }
 
+/**
+ * The postage bill a card charge is, or -1: the same amount, confirmed on the day of the charge or up to three days
+ * before it (the card posts after the purchase), the closest first.
+ */
+export function postageBillFor(bills: { amountCents: number; on: string }[], line: BankLine): number {
+  const day = Date.parse(`${line.on}T00:00:00Z`);
+  let best = -1;
+  let bestGap = Infinity;
+  bills.forEach((b, i) => {
+    const gap = day - Date.parse(`${b.on}T00:00:00Z`);
+    if (b.amountCents === -line.amountCents && gap >= 0 && gap <= 3 * 86_400_000 && gap < bestGap) {
+      best = i;
+      bestGap = gap;
+    }
+  });
+  return best;
+}
+
 export function placeLines(lines: BankLine[], ctx: MatchContext): { line: BankLine; placement: Placement }[] {
   /* An open item is settled once: the first line that pays it takes it. */
   const bills = [...ctx.unpaidBills];
   const invoices = [...ctx.unpaidInvoices];
+  /*
+   * And a postage confirmation accounts for one charge. It did not: the bill was never used up, so three confirmations
+   * covered four $100 top-ups in September, and the one with no confirmation was called counted (Session 2, G-POST-1).
+   */
+  const postage = ctx.postageBills ? [...ctx.postageBills] : undefined;
   const out: { line: BankLine; placement: Placement }[] = [];
   for (const line of lines) {
-    const placement = placeLine(line, { ...ctx, unpaidBills: bills, unpaidInvoices: invoices });
+    const placement = placeLine(line, { ...ctx, unpaidBills: bills, unpaidInvoices: invoices, postageBills: postage });
+    if (postage && placement.kind === "already_counted" && readBankDescriptor(line.description, line.amountCents).kind === "postage") {
+      postage.splice(postageBillFor(postage, line), 1);
+    }
     if (placement.kind === "pays_bill") bills.splice(bills.findIndex((b) => b.id === placement.expenseId), 1);
     if (placement.kind === "pays_invoice") invoices.splice(invoices.findIndex((v) => v.id === placement.invoiceId), 1);
     out.push({ line, placement });
