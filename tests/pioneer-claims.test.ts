@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { fillsFromClaimRows, reconcileClaims, type PioneerClaimRow, type ClaimSide } from "../src/lib/pioneer-claims";
+import { voucherProgrammeFromMessage } from "../src/lib/pioneer-claims";
 
 /**
  * One fill, two payers, and the money has to land exactly once.
@@ -84,6 +85,19 @@ describe("a fill with two payers", () => {
     assert.equal(f.patientCents, 500, "the balance after the secondary, not the balance before it");
     assert.equal(f.insuranceCents + f.patientCents, f.fillTotalPriceCents, "the identity that makes it checkable");
     assert.deepEqual(r.disagree, []);
+  });
+
+  test("REGRESSION: a voucher or DIR stays on the payer whose claim carries it, not on both", () => {
+    /*
+     * P-3, 15 September 2026: on September's 76 two-payer fills a voucher sat on the primary's claim only (2 fills),
+     * never on the secondary's. The fill-level figure was written onto both rows, so a row sum counted $50.04 twice.
+     */
+    const r = fillsFromClaimRows([{ ...primary, evoucherCents: 2_502, dirFeeCents: 150 }, secondary]);
+    const f = r.fills[0];
+    assert.equal(f.primary.evoucherCents, 2_502);
+    assert.equal(f.primary.dirFeeCents, 150);
+    assert.equal(f.secondary?.evoucherCents, null, "the secondary's claim carries no voucher");
+    assert.equal(f.secondary?.dirFeeCents, null);
   });
 
   test("each payer keeps its own plan, network and contract", () => {
@@ -242,5 +256,19 @@ describe("reconciling the claims against a day-old copy", () => {
     assert.equal(r.coverTo, null);
     assert.equal(r.missingTotal.fills, 0);
     assert.equal(r.site.fills, 4);
+  });
+});
+
+describe("who ran a claim's copay voucher, from its message", () => {
+  test("RedSail's switch wording", () => {
+    assert.equal(voucherProgrammeFromMessage(": NOVO NORDISK HAS PROVIDED A $99.99 VOUCHER TOWARDS THE PATIENT COPAY. PLEASE NOTIFY PATIENT"), "RedSail");
+  });
+  test("Veridikal's RelayHealth wording, eVoucher and denial conversion", () => {
+    assert.equal(voucherProgrammeFromMessage("Lilly, the mfr of MOUNJARO 5 MG/0.5 ML PEN paid 150.00 toward your copay. $1650.00 out of $1950.00 in benefits remaining."), "Veridikal");
+    assert.equal(voucherProgrammeFromMessage("Lilly, the mfg of ZEPBOUND 10 MG/0.5 ML PEN, paid $671.36 toward your prescription. RelayHealth is primary payer."), "Veridikal");
+  });
+  test("no message, no programme", () => {
+    assert.equal(voucherProgrammeFromMessage(null), null);
+    assert.equal(voucherProgrammeFromMessage("PLAN LIMITATIONS EXCEEDED"), null);
   });
 });

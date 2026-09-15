@@ -56,8 +56,36 @@ export type CounterpartyFile = {
   unanswered: { doc: string; docId: string; what: string }[];
 };
 
-function addDays(iso: string, days: number): string {
+/*
+ * The day `days` from a date the contract reader wrote, or null where it wrote something that is not one.
+ *
+ * The reader is asked for ISO dates and does not always give one. On 15 September 2026 one end date
+ * on file would not parse, `toISOString` threw, and because Today catches that loader, the whole list
+ * of contract deadlines was replaced by an empty one without a word — the renewal notice clock
+ * included, which is the one that renews an agreement on its own if nobody acts. Once read, none fell
+ * inside ninety days that day, so nothing had been hidden yet; the next live date would have been.
+ * Anything that is not a date gives no day, and the clock still shows with its rule naming the end
+ * date as it was printed.
+ *
+ * What is on file, measured that day: 13 of the end dates are written the way the contract prints
+ * them — "July 1, 2024", "6/30/2024", "December 31, 2024 (end of Year 1); may continue…". The one
+ * that threw was "July 1, 2024" with a thirty-day notice. So a written month and a US date at the
+ * start are both read as the date they say, and the words after them are left to the rule.
+ */
+const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+function addDays(printed: string, days: number): string | null {
+  const text = printed.trim();
+  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\b/.exec(text);
+  const written = /^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})\b/.exec(text);
+  const month = written ? MONTHS.findIndex((m) => m.startsWith(written[1].toLowerCase()) && written[1].length >= 3) + 1 : 0;
+  const iso = us
+    ? `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`
+    : written && month > 0
+      ? `${written[3]}-${String(month).padStart(2, "0")}-${written[2].padStart(2, "0")}`
+      : text.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
   const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
@@ -168,6 +196,6 @@ export function counterpartyFile(counterparty: string, docs: Doc[]): Counterpart
 
 /** The clocks that fall within a window of days from today: what Today and the payer landing raise. */
 export function clocksDue(file: CounterpartyFile, today: string, withinDays: number): Clock[] {
-  const until = addDays(today, withinDays);
+  const until = addDays(today, withinDays) ?? today;
   return file.clocks.filter((c) => c.on && c.on >= today && c.on <= until);
 }

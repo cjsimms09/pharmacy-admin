@@ -85,7 +85,15 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
   const { cashPlanFor } = await import("./cash-plans");
 
   const receivables: Receivable[] = [];
+  const { SITE_STARTS_ON } = await import("./books-start");
   for (const f of fills) {
+    /*
+     * A fill from before the books begin is owed by nobody on this site, as its payments are already out of the books.
+     * Without this the payer page billed those fills and none of their money: measured on the cutover rehearsal, the
+     * dry run's $253,986.08 billed against $0.00 received the day the books moved to 1 October. The month-end AR report
+     * already holds to the same boundary (`receivablesAsAt`).
+     */
+    if (f.dateFilled < SITE_STARTS_ON) continue;
     // Once per fill, not once per payer: this loop runs over every fill the pharmacy has.
     const shares = payerShares(f);
     for (let i = 0; i < f.payers.length; i++) {

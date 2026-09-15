@@ -50,6 +50,13 @@ export type BackfilledFill = {
   patientCents: number;
   acquisitionCents: number | null;
   dispensingFeeCents: number | null;
+  /** The fill's total price, PioneerRx TotalPricePaid. Written on the primary row. */
+  fillTotalPriceCents?: number | null;
+  /**
+   * Every payer on the fill, first payer first. Where given, one claim row is written per payer, as the daily report
+   * would have sent them; where not, one row carries the fill (the shape before 15 September).
+   */
+  payers?: { position: "primary" | "secondary"; bin: string | null; pcn: string | null; groupNumber: string | null; networkId: string | null; remitCents: number; patientCents: number; evoucherCents: number | null; dirFeeCents: number | null }[];
 };
 
 export type BackfillReport = {
@@ -169,7 +176,42 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
     });
   }
 
-  const rows: (typeof schema.claims.$inferInsert)[] = wanted.map((f) => ({
+  /*
+   * One row per payer. A two-payer fill written as one row summed both plans' money under the first plan's BIN, so
+   * the second plan owed nothing anybody could see and any payment from it had no claim to settle (30 September
+   * backfilled rows at the time). The bottle's cost, the dispensing fee and the fill's total price go on the primary
+   * row only, so nothing that sums a fill's rows counts them twice; the patient's pay goes where PioneerRx put it.
+   */
+  const perPayer = (f: BackfilledFill): (typeof schema.claims.$inferInsert)[] | null =>
+    f.payers && f.payers.length > 0
+      ? f.payers.map((p, i) => ({
+          id: newId(),
+          importId,
+          rxNumber: f.rxNumber,
+          fillNumber: f.fillNumber,
+          dateFilled: f.filledOn!,
+          ndc11: f.ndc11,
+          itemName: f.itemName,
+          bin: p.bin,
+          pcn: p.pcn,
+          groupNumber: p.groupNumber,
+          networkId: p.networkId,
+          quantityThousandths: i === 0 ? f.quantityThousandths : null,
+          daysSupply: f.daysSupply,
+          remitCents: p.remitCents,
+          copayCents: p.patientCents,
+          acquisitionCents: i === 0 ? f.acquisitionCents : null,
+          dispensingFeePaidCents: i === 0 ? f.dispensingFeeCents : null,
+          evoucherCents: p.evoucherCents,
+          dirFeeCents: p.dirFeeCents,
+          payerPosition: p.position,
+          fillTotalPriceCents: i === 0 ? (f.fillTotalPriceCents ?? null) : null,
+          status: "paid" as const,
+          completedAt: f.soldOn,
+          source: "pioneer_sql",
+        }))
+      : null;
+  const rows: (typeof schema.claims.$inferInsert)[] = wanted.flatMap((f) => perPayer(f) ?? [{
     id: newId(),
     importId,
     rxNumber: f.rxNumber,
@@ -197,10 +239,10 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
      * source without anybody having to remember that a backfill happened.
      */
     source: "pioneer_sql",
-  }));
+  }]);
 
   for (let i = 0; i < rows.length; i += 300) await db.insert(schema.claims).values(rows.slice(i, i + 300));
-  report.written = rows.length;
+  report.written = wanted.length;
   report.cents = wanted.reduce((n, f) => n + f.insuranceCents, 0);
 
   const byDay = new Map<string, number>();

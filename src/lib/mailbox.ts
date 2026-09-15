@@ -802,7 +802,16 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
   const summary = `${result.stored} stored, ${result.rejected} rejected, ${result.ignored} ignored${result.errors.length ? `, ${result.errors.length} error(s)` : ""}`;
   await setSetting("mail_last_sweep", new Date().toISOString());
   await setSetting("mail_last_result", result.errors.length ? `${summary} — ${result.errors[0]}` : summary);
-  await audit({ action: "inbox.sweep", userId: ctx.userId, userName: ctx.userName, details: summary });
+  /*
+   * A sweep that found nothing leaves no audit row. The last sweep and its result are the two settings
+   * above, which is what the feeds page reads; nothing reads these rows. But every audit event moves
+   * the fingerprint every held reading is keyed on, so an empty sweep every half hour threw away the
+   * whole site's cache — 85 of them on 14–15 September — and the owner's next page recomputed money
+   * found (nineteen seconds) for a mailbox that had nothing in it.
+   */
+  if (result.stored || result.rejected || result.ignored || result.errors.length) {
+    await audit({ action: "inbox.sweep", userId: ctx.userId, userName: ctx.userName, details: summary });
+  }
   return result;
 }
 

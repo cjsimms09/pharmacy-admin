@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { adjustmentPostings, looksLikeAccessHealthPayment, readAccessHealthPayment } from "../src/lib/accesshealth-payment";
+import { adjustmentPostings, describeEftPayments, looksLikeAccessHealthPayment, readAccessHealthPayment } from "../src/lib/accesshealth-payment";
 
 /*
  * The shape of a Health Mart Atlas AccessHealth payment report as `pdfText` returns it. Line order, spellings and the
@@ -163,5 +163,26 @@ describe("the report's remittance-level adjustments", () => {
     const r = readAccessHealthPayment(withFees.replace("EFT-12345678", "EFT-87654321"));
     assert.ok(r.ok, r.ok ? "" : r.why);
     assert.deepEqual(adjustmentPostings(r.report).post.map((a) => a.key).slice(0, 2), ["AHADJ|EFT-87654321|CS|1234567", "AHADJ|EFT-87654321|AH|530"]);
+  });
+});
+
+describe("what an EFT's claim payments are, on the inbox line", () => {
+  test("each kind is counted apart, so payments for fills before the books start never read as failures to match", () => {
+    const rows = [
+      { amountCents: 4000, matched: true, filledBeforeBooks: false, onReversedClaim: false },
+      { amountCents: 10000, matched: false, filledBeforeBooks: true, onReversedClaim: false },
+      { amountCents: 2500, matched: false, filledBeforeBooks: true, onReversedClaim: false },
+      { amountCents: 700, matched: false, filledBeforeBooks: false, onReversedClaim: true },
+      { amountCents: -735, matched: false, filledBeforeBooks: false, onReversedClaim: true },
+    ];
+    assert.equal(
+      describeEftPayments(rows, "2026-09-01"),
+      "Of the 5 claim payments under this EFT ($164.65): 1 ($40.00) settle claims on this site; 2 ($125.00) pay for prescriptions filled before the books start on 1 September: nothing to match, nothing owed; 2 (net -$0.35) are paid and taken back on claims the pharmacy reversed.",
+    );
+  });
+
+  test("a fill from the books' own period with no claim here is the one kind named as waiting", () => {
+    const s = describeEftPayments([{ amountCents: 1234, matched: false, filledBeforeBooks: false, onReversedClaim: false }], "2026-09-01");
+    assert.match(s, /1 \(\$12\.34\) are for fills since 1 September with no claim on this site yet/);
   });
 });

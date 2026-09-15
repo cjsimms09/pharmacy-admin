@@ -35,7 +35,7 @@ Anytown, KS  00000
 Anytown, KS  00000
 Cust#Cust POCommentsTerms
 *** Please note NR code for Not Returnable items ***
-106896484389ACH - Withdrawal date 09/10/26
+555012344389ACH - Withdrawal date 09/10/26
      ItemNote Order Ship      Unit     Extended
      Description
      Nbr       NDCWACAWPCdQtyQty     Price     Amount
@@ -103,7 +103,7 @@ Anytown, KS  00000
 Anytown, KS  00000
 Cust#Cust POCommentsTerms
 *** Please note NR code for Not Returnable items ***
-106896484389ACH - Withdrawal date 09/10/26
+555012344389ACH - Withdrawal date 09/10/26
      ItemNote Order Ship      Unit     Extended
      Description
      Nbr       NDCWACAWPCdQtyQty     Price     Amount

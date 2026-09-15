@@ -617,7 +617,35 @@ export type Pairable = {
   copayCents: number | null;
   transactionKey: string | null;
   reversalKey: string | null;
+  /** The file the row came in. Only `pairAlikeReversals` reads it. */
+  importId?: string | null;
 };
+
+/**
+ * Stranded reversals whose amount the report misprinted, paired with the claims they cancel — all of them, or none.
+ *
+ * P-1, measured against PioneerRx on 15 September 2026: one fill billed and reversed twice in fifteen minutes, then
+ * billed a third time. PioneerRx holds each reversal at −$89.44 against a $89.44 claim; the daily report printed both
+ * as ($178.88). `claimCancelledBy` rightly found nothing that exactly cancels, so both $89.44 claims stayed live.
+ *
+ * Every guard must hold, and together they make the choice of which claim cancels which irrelevant:
+ *   - the reversals and the claims came in the same file, so none is a transmission from a day this site never saw;
+ *   - as many reversals as live claims on that prescription, fill, BIN and NDC, so every live claim is cancelled;
+ *   - every claim carries the same figures, every reversal the same figures, and each reversal's copay is the negation
+ *     of the claims' copay;
+ *   - each reversal takes money back.
+ * A fill with a primary and a secondary under one BIN (six such fills that day) fails the same-figures guard.
+ */
+export function pairAlikeReversals<T extends Pairable>(revs: T[], live: T[]): { rev: T; hit: T }[] | null {
+  if (revs.length === 0 || revs.length !== live.length) return null;
+  const file = revs[0].importId;
+  if (!file || ![...revs, ...live].every((c) => c.importId === file)) return null;
+  const figures = (c: Pairable) => `${c.remitCents}|${c.copayCents}`;
+  if (new Set(live.map(figures)).size !== 1 || new Set(revs.map(figures)).size !== 1) return null;
+  if (!live.every((c) => c.status === "paid") || !revs.every((r) => (r.remitCents ?? 0) < 0)) return null;
+  if ((live[0].copayCents ?? 0) !== -(revs[0].copayCents ?? 0)) return null;
+  return revs.map((rev, i) => ({ rev, hit: live[i] }));
+}
 
 /** A reversal held that was never matched to anything: negative, reversed, pointing at itself. */
 export function isStrandedReversal(c: Pairable): boolean {
@@ -740,7 +768,7 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
     where: eq(schema.claims.source, "transaction_report"),
     columns: {
       id: true, rxNumber: true, fillNumber: true, bin: true, ndc11: true, status: true,
-      remitCents: true, copayCents: true, transactionKey: true, reversalKey: true, dateFilled: true,
+      remitCents: true, copayCents: true, transactionKey: true, reversalKey: true, dateFilled: true, importId: true,
     },
   });
 
@@ -774,6 +802,7 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
   let paired = 0;
   /* Reversals of dispensings from before the books begin: counted, never reported as a job. */
   let beforeTheBooks = 0;
+  const unpaired: typeof strays = [];
   for (const rev of strays) {
     const found = claimCancelledBy(rev, (live.get(key(rev)) ?? []).filter((c) => !used.has(c.id)));
     /*
@@ -802,6 +831,7 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
         beforeTheBooks++;
         continue;
       }
+      unpaired.push(rev);
       stillStranded.push({ rxNumber: rev.rxNumber, dateFilled: rev.dateFilled, amountCents: rev.remitCents ?? 0, why: found.why });
       continue;
     }
@@ -812,6 +842,27 @@ export async function repairReversals(): Promise<{ paired: number; strays: numbe
       .set({ status: "reversed", reversedOn: rev.dateFilled, reversalKey: rev.transactionKey })
       .where(eq(schema.claims.id, hit.id));
     paired++;
+  }
+
+  /* What exact pairing could not settle: a fill whose reversals were misprinted, all cancelled together or none (pairAlikeReversals). */
+  const byFill = new Map<string, typeof strays>();
+  for (const rev of unpaired) byFill.set(key(rev), [...(byFill.get(key(rev)) ?? []), rev]);
+  for (const [k, revs] of byFill) {
+    const pairs = pairAlikeReversals(revs, (live.get(k) ?? []).filter((c) => !used.has(c.id)));
+    if (!pairs) continue;
+    for (const { rev, hit } of pairs) {
+      used.add(hit.id);
+      await db
+        .update(schema.claims)
+        .set({ status: "reversed", reversedOn: rev.dateFilled, reversalKey: rev.transactionKey })
+        .where(eq(schema.claims.id, hit.id));
+      paired++;
+    }
+    const done = new Set(revs.map((r) => `${r.rxNumber}|${r.dateFilled}|${r.remitCents}`));
+    for (let i = stillStranded.length - 1; i >= 0; i--) {
+      const s = stillStranded[i];
+      if (done.has(`${s.rxNumber}|${s.dateFilled}|${s.amountCents}`)) stillStranded.splice(i, 1);
+    }
   }
   return { paired, strays: strays.length, beforeTheBooks, stillStranded: stillStranded.slice(0, 20) };
 }
