@@ -8,6 +8,19 @@ file is how they talk.
 
 ## Open items
 
+### From 1 — 15 September, before the edit: `mailbox.ts` (B's) — the daily credit card batch report
+
+**Written before touching the file.** The owner's staff forward one email per card settlement batch: subject
+"Credit Card Batch (779536378, 9/3/2026) Report: $2704.35, 101 Transactions", two HTML attachments ("Batch N
+Summary Report.html", "Batch N Report.html"). `acceptableAttachment` declines HTML, so every one reaches the
+no-attachment branch and is recorded as "Nothing on it was a type this reads".
+
+The change is one more reader on that branch, beside the EFT notice, handed the declined HTML summary. It banks the
+batch's net total as a `patient` cash receipt keyed `card-batch|<batch id>` — counter takings the cash account has
+never carried (September's cash receipts were third-party only). Accrual is untouched: it reads claims and the
+till, never cash receipts. The reader is pure and new (`card-batch.ts`). `acceptableAttachment` is not changed —
+the HTML is not filed as a report, only read for the batch figures, and the summary is kept as the document.
+
 ### From 1 — 15 September, before the edit: `src/app/(app)/money/bank.ts` (A's) — a bank deposit must confirm the receipt already banked
 
 **Written before touching the file.**
