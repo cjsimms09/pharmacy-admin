@@ -373,6 +373,8 @@ async function pullClaims(): Promise<string> {
             p.AcquisitionCost as acquisition,
             c.OtherPayerAmountPaid as other_payer,
             c.EvoucherAmountPaid as evoucher,
+            c.EvoucherAmountFromMessage as evoucher_from_message,
+            c.EvoucherMessage as evoucher_message,
             c.DirFeeTotal as dir_fee,
             f.TotalPricePaid as fill_total_price,
             (select convert(varchar(10), max(sale.PostingDate), 23)
@@ -408,7 +410,7 @@ async function pullClaims(): Promise<string> {
     return d.length === 11 ? d : null;
   };
 
-  const { fillsFromClaimRows } = await import("../src/lib/pioneer-claims");
+  const { fillsFromClaimRows, voucherProgrammeFromMessage } = await import("../src/lib/pioneer-claims");
   const built = fillsFromClaimRows(
     r.rows.map((row) => ({
       rxNumber: text(row.rx_number) ?? "",
@@ -433,6 +435,9 @@ async function pullClaims(): Promise<string> {
       dispensingFeeCents: cents(row.dispensing_fee),
       dirFeeCents: cents(row.dir_fee),
       evoucherCents: cents(row.evoucher),
+      evoucherMessageCents: cents(row.evoucher_from_message),
+      /* Only the programme is kept; the message carries the patient's remaining benefit. */
+      evoucherProgramme: voucherProgrammeFromMessage(text(row.evoucher_message)),
       acquisitionCents: cents(row.acquisition),
       filledOn: text(row.date_filled),
       fillTotalPriceCents: cents(row.fill_total_price),
@@ -460,6 +465,8 @@ async function pullClaims(): Promise<string> {
       dispensingFeeCents: f.dispensingFeeCents,
       dirFeeCents: f.dirFeeCents,
       evoucherCents: f.evoucherCents,
+      evoucherMessageCents: f.evoucherMessageCents ?? null,
+      evoucherProgramme: f.evoucherProgramme ?? null,
       gcn: f.gcn,
       basisOfReimbursement: f.basisOfReimbursement,
       basisOfCostDetermination: f.basisOfCostDetermination,

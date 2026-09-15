@@ -2372,6 +2372,10 @@ export const claims = sqliteTable(
      * `copay-remit-store.ts` records it with `revenueCents: 0`. That is what keeps it counted once.
      */
     evoucherCents: integer("evoucher_cents"),
+    /** The voucher amount PioneerRx read from the switch message (EvoucherAmountFromMessage). Veridikal's vouchers are here, not in evoucherCents. */
+    evoucherMessageCents: integer("evoucher_message_cents"),
+    /** Who ran the voucher, from the message wording: "RedSail" or "Veridikal". Null where not read or no voucher. See voucherProgrammeFromMessage. */
+    evoucherProgramme: text("evoucher_programme"),
     /** The contract id the plan returned on the claim, as the export prints it. */
     contractId: text("contract_id"),
     gcn: text("gcn"),

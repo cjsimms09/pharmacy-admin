@@ -35,6 +35,9 @@ export type DispensedRow = {
   dispensingFeeCents: number | null;
   dirFeeCents: number | null;
   evoucherCents: number | null;
+  /** PioneerRx pull only: the voucher amount from the switch message, and the programme its wording names. */
+  evoucherMessageCents?: number | null;
+  evoucherProgramme?: string | null;
   gcn: string | null;
   basisOfReimbursement: string | null;
   basisOfCostDetermination: string | null;
@@ -286,6 +289,9 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
       dispensingFeePaidCents: r.dispensingFeeCents,
       dirFeeCents: r.dirFeeCents,
       evoucherCents: r.evoucherCents,
+      /* Written only by a source that reads them, so a CSV enrichment does not clear what the pull found. */
+      ...(r.evoucherMessageCents !== undefined ? { evoucherMessageCents: r.evoucherMessageCents } : {}),
+      ...(r.evoucherProgramme !== undefined ? { evoucherProgramme: r.evoucherProgramme } : {}),
       gcn: r.gcn,
       soldOn: r.completedOn,
       enrichedFrom: stamp,

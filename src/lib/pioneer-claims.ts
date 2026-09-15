@@ -37,6 +37,27 @@
  * reason, and the difference between the two is the single easiest way to overstate a month.
  */
 
+/**
+ * Who ran a claim's copay voucher, from the wording of PioneerRx's `Prescription.Claim.EvoucherMessage`.
+ *
+ * The owner, 15 September: RedSail vouchers are not identified by a BIN, and "the evoucher is a secondary". Measured
+ * the same day on PioneerRx:
+ *   RedSail (the switch vouchers):  "NOVO NORDISK HAS PROVIDED A $99.99 VOUCHER TOWARDS THE PATIENT COPAY…", with
+ *                                   the amount in EvoucherAmountPaid.
+ *   Veridikal (through RelayHealth): "Lilly, the mfr of MOUNJARO … paid 150.00 toward your copay…" or "…paid $671.36
+ *                                   toward your prescription… RelayHealth is primary payer.", with EvoucherAmountPaid
+ *                                   zero on 66 of 67 and the amount in EvoucherAmountFromMessage, equal to Veridikal's
+ *                                   own report on all 67.
+ * The message is read for this and dropped: it carries the patient's remaining benefit, which the site does not keep.
+ */
+export function voucherProgrammeFromMessage(message: string | null | undefined): "RedSail" | "Veridikal" | null {
+  const t = (message ?? "").trim();
+  if (!t) return null;
+  if (/relayhealth/i.test(t) || /\bthe mf[rg] of\b[\s\S]*\bpaid\b/i.test(t)) return "Veridikal";
+  if (/\bHAS PROVIDED A\b/i.test(t)) return "RedSail";
+  return null;
+}
+
 /** One current, paid claim: one payer's answer on one fill. */
 export type PioneerClaimRow = {
   rxNumber: string;
@@ -65,6 +86,10 @@ export type PioneerClaimRow = {
   dispensingFeeCents: number | null;
   dirFeeCents: number | null;
   evoucherCents: number | null;
+  /** EvoucherAmountFromMessage: where Veridikal's voucher amount is. */
+  evoucherMessageCents?: number | null;
+  /** From the message wording; the message itself is never kept. See voucherProgrammeFromMessage. */
+  evoucherProgramme?: string | null;
   acquisitionCents: number | null;
   filledOn: string | null;
   /** The day the script was actually sold at the till, or null where it has never been picked up. */
@@ -103,6 +128,8 @@ export type PioneerFill = {
   dispensingFeeCents: number | null;
   dirFeeCents: number | null;
   evoucherCents: number | null;
+  evoucherMessageCents?: number | null;
+  evoucherProgramme?: string | null;
   acquisitionCents: number | null;
   filledOn: string | null;
   /** The day it was sold at the till. Null means it is still in the bin and nobody has paid for it. */
@@ -226,6 +253,8 @@ export function fillsFromClaimRows(rows: PioneerClaimRow[]): FillsReport {
       dispensingFeeCents: head.dispensingFeeCents,
       dirFeeCents: head.dirFeeCents,
       evoucherCents: head.evoucherCents,
+      evoucherMessageCents: claims.map((r) => r.evoucherMessageCents ?? null).find((c) => c !== null && c !== 0) ?? head.evoucherMessageCents ?? null,
+      evoucherProgramme: claims.map((r) => r.evoucherProgramme ?? null).find(Boolean) ?? null,
       acquisitionCents: head.acquisitionCents,
       filledOn: head.filledOn,
       soldOn: head.soldOn,

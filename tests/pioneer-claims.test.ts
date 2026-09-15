@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { fillsFromClaimRows, reconcileClaims, type PioneerClaimRow, type ClaimSide } from "../src/lib/pioneer-claims";
+import { voucherProgrammeFromMessage } from "../src/lib/pioneer-claims";
 
 /**
  * One fill, two payers, and the money has to land exactly once.
@@ -242,5 +243,19 @@ describe("reconciling the claims against a day-old copy", () => {
     assert.equal(r.coverTo, null);
     assert.equal(r.missingTotal.fills, 0);
     assert.equal(r.site.fills, 4);
+  });
+});
+
+describe("who ran a claim's copay voucher, from its message", () => {
+  test("RedSail's switch wording", () => {
+    assert.equal(voucherProgrammeFromMessage(": NOVO NORDISK HAS PROVIDED A $99.99 VOUCHER TOWARDS THE PATIENT COPAY. PLEASE NOTIFY PATIENT"), "RedSail");
+  });
+  test("Veridikal's RelayHealth wording, eVoucher and denial conversion", () => {
+    assert.equal(voucherProgrammeFromMessage("Lilly, the mfr of MOUNJARO 5 MG/0.5 ML PEN paid 150.00 toward your copay. $1650.00 out of $1950.00 in benefits remaining."), "Veridikal");
+    assert.equal(voucherProgrammeFromMessage("Lilly, the mfg of ZEPBOUND 10 MG/0.5 ML PEN, paid $671.36 toward your prescription. RelayHealth is primary payer."), "Veridikal");
+  });
+  test("no message, no programme", () => {
+    assert.equal(voucherProgrammeFromMessage(null), null);
+    assert.equal(voucherProgrammeFromMessage("PLAN LIMITATIONS EXCEEDED"), null);
   });
 });
