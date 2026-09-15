@@ -169,3 +169,36 @@ describe("card takings have one door: the card batch report", () => {
     assert.doesNotMatch(text, /A deposit here is banked with the form above/);
   });
 });
+
+describe("the edges Session 2 found after the card fix (G-CARD-9, -10, -11)", () => {
+  test("REGRESSION: a batch closed on 30 September is refused beside the same deposit typed under October", () => {
+    const typed = { amountCents: 53_535, receivedOn: null, payer: "Heartland", sourceKey: null, month: "2026-10" };
+    const v = gateDeposit([typed], { amountCents: 53_535, month: "2026-09", receivedOn: "2026-09-30", payer: "Card batch", sourceKey: "card-batch|1", reference: "1" });
+    assert.equal(v.bank, false);
+  });
+
+  test("two batches together are found for the form's check, and one explanation is told from several", async () => {
+    const { receiptsSummingTo } = await import("../src/lib/deposit-gate");
+    assert.deepEqual(receiptsSummingTo([{ amountCents: 7_007 }, { amountCents: 8_008 }, { amountCents: 999 }], 15_015).map((c) => c.map((r) => r.amountCents)), [[7_007, 8_008]]);
+    assert.equal(receiptsSummingTo([{ amountCents: 100 }, { amountCents: 200 }], 250).length, 0);
+  });
+
+  test("REGRESSION: a card deposit is offered only card batch receipts", async () => {
+    const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
+    assert.match(text, /placement\.kind === "card_deposit" \? heldForBank\.filter\(\(h\) => h\.sourceKey\?\.startsWith\("card-batch\|"\)\)/);
+  });
+});
+
+describe("two payments of the same amount from the same payer", () => {
+  test("REGRESSION: the same feed's differently numbered payments both bank (DomaniRx, August, G-PP-1)", () => {
+    const first = { amountCents: 90_400, receivedOn: "2026-08-26", payer: "DOMANIRX", sourceKey: "payer-payment|domanirx|1234538", reference: "1234538" };
+    const v = gateDeposit([first], { amountCents: 90_400, receivedOn: "2026-08-28", payer: "DOMANIRX", sourceKey: "payer-payment|domanirx|9872227", reference: "9872227" });
+    assert.equal(v.bank, true);
+  });
+
+  test("across feeds, one deposit under two numbers is still refused", () => {
+    const fromPortal = { amountCents: 90_400, receivedOn: "2026-08-26", payer: "DOMANIRX", sourceKey: "payer-payment|domanirx|1234538", reference: "1234538" };
+    const v = gateDeposit([fromPortal], { amountCents: 90_400, receivedOn: "2026-08-25", payer: "DOMANIRX", sourceKey: "835|domanirx|555000111|20260825", reference: "555000111" });
+    assert.equal(v.bank, false);
+  });
+});

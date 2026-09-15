@@ -123,15 +123,27 @@ export function gateDeposit(held: BankedReceipt[], incoming: IncomingReceipt): G
    * map G-CARD-8, H2). Compared by month and exact amount, and not by payer: a person types "Heartland"
    * for what the feed calls "Card batch".
    */
-  const typed = held.find((h) => !h.receivedOn && !h.sourceKey && h.amountCents === incoming.amountCents && h.month && h.month === (incoming.month ?? incoming.receivedOn!.slice(0, 7)));
+  /* Its own month and the months either side: a batch closed on the 30th is typed under the month it reached the bank (G-CARD-9). */
+  const around = monthsAround(incoming.month ?? incoming.receivedOn.slice(0, 7));
+  const typed = held.find((h) => !h.receivedOn && !h.sourceKey && h.amountCents === incoming.amountCents && h.month && around.includes(h.month));
   if (typed) {
     return {
       bank: false,
       why: `${money(incoming.amountCents)} was already typed in by hand for ${typed.month}${typed.payer ? ` as ${typed.payer}` : ""}. If that is this money, nothing more is needed; if it is different money, remove the typed receipt and forward this again.`,
     };
   }
+  /*
+   * Two payments the same feed numbered differently are two payments, whatever their amounts. DomaniRx paid
+   * $904.00 as …4538 on 26 August and $904.00 as …2227 on 28 August; the bank shows both, and the amount rule
+   * refused the second (Session 2, money map G-PP-1). Across feeds the rule still holds, because one deposit
+   * really does carry different numbers in different feeds — an 835's trace against the portal's payment number.
+   */
+  const feedOf = (key: string | null | undefined) => (key ?? "").split("|")[0];
+  const numberedApart = (h: BankedReceipt) =>
+    digits(h.reference).length >= 6 && mine.length >= 6 && digits(h.reference) !== mine && feedOf(h.sourceKey) !== "" && feedOf(h.sourceKey) === feedOf(incoming.sourceKey);
   const clash = held.find(
     (h) =>
+      !numberedApart(h) &&
       h.amountCents === incoming.amountCents &&
       withinWindow(h.receivedOn, incoming.receivedOn) &&
       (!incoming.payer || !h.payer || head(h.payer) === head(incoming.payer)),
@@ -177,12 +189,44 @@ export function gateDeposit(held: BankedReceipt[], incoming: IncomingReceipt): G
  *
  * Pure.
  */
-export type HeldForBank = { id: string; amountCents: number; receivedOn: string | null; payer: string | null; reference?: string | null };
+export type HeldForBank = { id: string; amountCents: number; receivedOn: string | null; payer: string | null; reference?: string | null; sourceKey?: string | null };
 
 export type BankDepositMatch =
   | { kind: "confirms"; receipt: HeldForBank; why: string }
   | { kind: "ambiguous"; candidates: HeldForBank[]; why: string }
   | { kind: "none" };
+
+/**
+ * Two or three receipts that together come to exactly `amountCents` — up to five such combinations, so a
+ * caller can tell one explanation from several. Receipts of zero or more than the amount are ignored.
+ */
+export function receiptsSummingTo<T extends { amountCents: number }>(pool: T[], amountCents: number): T[][] {
+  const usable = pool.filter((h) => h.amountCents > 0 && h.amountCents < amountCents);
+  const combos: T[][] = [];
+  for (let i = 0; i < usable.length && combos.length < 5; i++) {
+    for (let j = i + 1; j < usable.length && combos.length < 5; j++) {
+      const two = usable[i].amountCents + usable[j].amountCents;
+      if (two === amountCents) combos.push([usable[i], usable[j]]);
+      else if (two < amountCents) {
+        for (let k = j + 1; k < usable.length && combos.length < 5; k++) {
+          if (two + usable[k].amountCents === amountCents) combos.push([usable[i], usable[j], usable[k]]);
+        }
+      }
+    }
+  }
+  return combos;
+}
+
+/** The month before and after a YYYY-MM, and the month itself. */
+export function monthsAround(month: string): string[] {
+  const d = new Date(Date.parse(`${month}-01T00:00:00Z`));
+  const shift = (n: number) => {
+    const x = new Date(d);
+    x.setUTCMonth(x.getUTCMonth() + n);
+    return x.toISOString().slice(0, 7);
+  };
+  return [shift(-1), month, shift(1)];
+}
 
 export function matchHeldDeposit(
   held: HeldForBank[],
@@ -198,18 +242,7 @@ export function matchHeldDeposit(
      * against one bank line, so the line goes to a person, named — never banked.
      */
     const pool = held.filter((h) => !claimed.has(h.id) && h.amountCents > 0 && h.amountCents < line.amountCents && h.receivedOn && h.receivedOn <= line.on && withinWindow(h.receivedOn, line.on));
-    const combos: HeldForBank[][] = [];
-    for (let i = 0; i < pool.length && combos.length < 5; i++) {
-      for (let j = i + 1; j < pool.length && combos.length < 5; j++) {
-        const two = pool[i].amountCents + pool[j].amountCents;
-        if (two === line.amountCents) combos.push([pool[i], pool[j]]);
-        else if (two < line.amountCents) {
-          for (let k = j + 1; k < pool.length && combos.length < 5; k++) {
-            if (two + pool[k].amountCents === line.amountCents) combos.push([pool[i], pool[j], pool[k]]);
-          }
-        }
-      }
-    }
+    const combos = receiptsSummingTo(pool, line.amountCents);
     if (combos.length === 0) return { kind: "none" };
     const describeAll = (c: HeldForBank[]) => c.map((h) => `${money(h.amountCents)}${h.payer ? ` from ${h.payer}` : ""}${h.receivedOn ? ` on ${h.receivedOn}` : ""}`).join(" + ");
     return {
