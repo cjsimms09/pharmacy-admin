@@ -986,6 +986,11 @@ Owner: `claim-payments.ts` — not in the table; the reconciliation plan in `doc
 line → deposit").
 Proposed: when a real 835 sample is in hand, rehearse `importRemittance` and store the provider-level adjustments
 per remittance, so this difference can be read rather than derived.
+**Explained for one EFT, and the cause found — see G-835-3 (section 12).** EFT …5975 of 31 August: the 835 rows on
+file total $366.53 against a deposit of $377.41. The AccessHealth report for the same EFT shows claim rows of
+$378.15 and an adjustment of −$0.74. The 835 import dropped one repeated row ($11.62), and $378.15 − $0.74 =
+$377.41. The August total ($14,506.16) is very probably the same cause across the other remittances. That is
+**not proven**: no AccessHealth report for them is on file.
 
 ### Not checked, said out loud
 
@@ -1572,6 +1577,134 @@ Every other exit writes an inbox row with its reason:
 
 ---
 
+## 12. Health Mart Atlas AccessHealth payment reports — reader built and rehearsed
+
+**Checkpoint 12. Built by session 2 on branch `work/accesshealth-reader` (403985f), at session 1's request.** Samples:
+the **9 real "Fw: SECURE: AccessHealth Payment Data" PDFs** in the document store, read read-only. Nothing
+patient-linked was printed while designing it: words appearing in fewer than 7 of the 9 files and every Rx digit
+were masked.
+
+### What it is
+
+Each report is one Health Mart Atlas EFT, itemised:
+- the EFT number and Total Paid;
+- one section per plan, with claim rows of fill date, Rx, billed, allowed, dispensing fee, tax, co-pay,
+  amount and a rejection code;
+- remittance-level "Adj-" rows, codes from the report's own glossary;
+- each section closed by "Paid claims: n Paid Amount: $x".
+
+### Read correctly — the rules, measured on all 9 real reports
+
+- a section's Paid Amount = its claim rows' amounts + its adjustments;
+- a section's Paid claims = its claim rows + its adjustment rows;
+- the sections' Paid Amounts = the EFT's Total Paid.
+
+**All 9 close to the cent** under those rules, and the reader refuses any report that does not. Plan names are
+printed twice, above the section and after its footer, and three of the nine break a page between a plan's name
+and its rows. The reader takes the last text line since the previous footer. A section named like the one just
+closed is refused rather than guessed.
+
+| EFT (report date) | total | plans | claim rows | adjustments | deposit banked for that EFT |
+|---|---:|---:|---:|---|---|
+| …5975 (31 Aug) | $377.41 | 5 | 23 | AH −$0.74 | $377.41, 1 Sep — agrees |
+| …0121 (1 Sep) | $21,175.45 | 4 | 510 | CS −$1.16 | $21,175.45, 2 Sep — agrees |
+| …4855 (2 Sep) | $25,006.44 | 5 | 647 | AH −$64.30 | $25,006.44, 3 Sep — agrees |
+| …9473 (3 Sep) | $452.83 | 2 | 2 | AH −$0.06 | $452.83, 4 Sep — agrees |
+| …4994 (4 Sep) | $37,909.27 | 9 | 597 | AH −$1.16, CS −$3.35 | $37,909.27, 8 Sep — agrees |
+| …0312 (8 Sep) | $27,727.70 | 5 | 513 | AH −$2.90 | $27,727.70, 9 Sep — agrees |
+| …5402 (9 Sep) | $21,094.87 | 4 | 477 | AH −$73.04 | $21,094.87, 10 Sep — agrees |
+| …0491 (10 Sep) | $5,942.36 | 3 | 70 | none | **none on file** |
+| …5651 (11 Sep) | $24,559.62 | 8 | 620 | none | $24,559.62, 11 Sep — agrees |
+
+**8 of 9 EFT totals equal the deposit banked for them, to the cent.** The report is dated one to four days before
+the deposit. EFT …0491 ($5,942.36, 10 September) has no deposit on file: the payer payment report received
+covers only to the 10th, and no EFT notice for it arrived. Its state is **expected-not-yet**, which the next
+payer payment report will settle.
+
+### Where it lands, basis, duplication
+
+`claim_payments`, one per non-zero claim row:
+- source `plan`, payer "Health Mart Atlas", **revenue 0** (the claim already carries its remittance), reference
+  `EFT-…/<rx>`;
+- dated by the deposit where one is on file, else by the report;
+- **nothing banked**: the payer payment report and the EFT notice are the banking doors;
+- a report whose total differs from its EFT's deposit is refused.
+
+**Rehearsed on a fresh snapshot (18:31 UTC):**
+
+| rehearsal | result |
+|---|---|
+| all 9 through the real `classify` | `accesshealth_payment` ×9 |
+| first read | **2,135 claim payments posted**, revenue $0.00 on every one; cash receipts 115 → 115 |
+| September's accounts before → after | accrual revenue $249,744.33 → **$249,744.33**; cash revenue $312,023.27 → **$312,023.27** |
+| all 9 read again | **0 posted**, 2,145 already held |
+| EFT …5975, where the ProviderPay 835 had posted 10 rows ($366.53) | 10 held, **1 posted** (the repeated row the 835 dropped), total **$378.15** = the report's claim rows |
+| a copy with its total one cent higher | refused |
+| undo of one EFT (…0491) | its 60 payments removed, no deposit touched |
+
+Matched to a claim on this site: 328 of 2,135. Most fills are July and August, before the claims feed began.
+
+### Gaps
+
+**G-835-3. The 835 import drops a claim payment that repeats the same prescription and amount inside one remittance.**
+OBSERVATION: `importOneRemittance` (`claim-payments.ts` 507–512) skips any payment whose
+`reference|rx|amount` is already in a **set**, and adds each payment to that set as it posts it. A plan that pays a
+claim, takes it back and pays it again for the same amount (paid, reversed, repaid) produces two identical
+lines. The second is skipped as "already held" on the first read.
+- **Measured in the real reports: 38–43 such repeats in each large EFT, $11.62 to $6,063.50 per EFT, $15,001.38
+  across the nine.**
+- **On the one EFT with both documents (…5975), the 835 rows on file are exactly the report's claim rows less
+  the dropped repeat.**
+
+SHOULD BE: each line of a remittance is a payment. Two identical lines are two payments, and a re-read is
+recognised by counting, not by a set.
+DIFFERENCE: yes. Every ProviderPay 835 imported so far is short by its repeats (April and August, out of
+books), and each one imported from now on will be. This is very probably most of G-835-2's $14,506.16. A claim
+paid on its second line reads as unpaid or short on the receivables. Cash is unaffected: 835s no longer bank
+(d477ee4).
+Owner: `claim-payments.ts` — not in the ownership table (session 1 last edited it).
+Proposed fix: count held rows by `reference|rx|amount`, as `accesshealth-payment-store.ts` does. Reading the
+AccessHealth report after an 835 already completes that EFT, which is what the rehearsal shows.
+
+### Proposal — how the Adj codes should post (not built; data only until session 1 has read this)
+
+Seen in the nine: **AH −$142.20** across six EFTs, **CS −$4.51** across two. The glossary also names 50, 51,
+90, B2, E3, FB and WU. The deposit is already net of every one of them, so **on the cash account nothing further
+is posted**: the banked receipt is the net figure. The question is the accrual account, where a claim's
+remittance is counted gross.
+
+**AH — "Origination Fee".**
+OBSERVATION: a fee withheld from the EFT, a few cents to $73.04, belonging to no claim.
+SHOULD BE: a fee a payer or network keeps back from reimbursement is not an expense the pharmacy chose to incur.
+It reduces what the prescriptions earned, which is a revenue offset (the treatment the account already gives DIR
+fees), in the month of the EFT.
+DIFFERENCE: today it is on no account; accrual revenue is overstated by it. Proposed: a revenue offset in the
+EFT's month.
+
+**CS — "Adjustment".**
+OBSERVATION: two negative amounts ($1.16 and $3.35) with a seven-digit reference each.
+SHOULD BE: **cannot be written from domain knowledge.** "Adjustment" can be a recoupment of an earlier
+overpayment (a revenue offset), a correction of a fee, or a balance carried between EFTs. **Question for the
+owner, or Health Mart Atlas:** what do the CS adjustments on the AccessHealth reports represent?
+Proposed meanwhile: kept as data, named on the inbox line.
+
+**The rest, if they appear** (proposed, none seen):
+- 50 late charge and 51 interest penalty: money the payer pays the pharmacy for paying late, so other income.
+- 90 early payment allowance: a discount the payer takes for paying early, so a revenue offset.
+- B2 rebate: owed to whoever the rebate is for; a question when it appears.
+- FB forwarding balance, E3 withholding and WU unspecified recovery: balances or recoveries carried between
+  EFTs. Not income or cost in themselves; each needs its counterpart before posting, and a person until then.
+
+### Not checked, said out loud
+
+- Mailbox delivery end to end: `classify` is proven on the real files, but the sweep branch has not run on
+  arrival.
+- Whether a later AccessHealth report can carry a claim row an earlier report already carried: the count-based key
+  would treat a genuine re-issue as held.
+- The 10 September EFT's deposit (…0491), which waits on the next payer payment report.
+
+---
+
 ## LINKS — how the records join, on what key, and how well it held on real data
 
 ```mermaid
@@ -1600,7 +1733,9 @@ flowchart LR
 | HMA EFT notice ↔ payer payment report | `payer-payment|<payer>|<EFT number>` (shared) | both orders hold one receipt (section 3) | holds |
 | Payer payment receipt ↔ bank credit | exact cents, ±7 days; combinations of 2–3 | 20/20 HMA and 9/9 single ProviderPay confirm; 6 sweeps named, not linked (G-PP-3) | holds; sweeps open |
 | ProviderPay 835 ↔ payer payment report | trace digits = payment number (HMA); **none for direct payers** | 20/20 HMA by number; 15 direct payers equal only by amount | fixed by never banking a ProviderPay 835 (G-835-1) |
-| 835 claim payments ↔ deposit | trace → deposit | $14,506.16 net unexplained across 20 HMA remittances (G-835-2) | open, needs a real 835 |
+| 835 claim payments ↔ deposit | trace → deposit | $14,506.16 net across 20 HMA remittances (G-835-2); on EFT …5975 fully explained by a dropped repeat (G-835-3) | open |
+| AccessHealth report ↔ deposit | EFT number | 8/9 totals equal their deposit to the cent; 1 deposit not yet on file | holds (403985f, branch) |
+| AccessHealth report ↔ 835 claim payments | `EFT-…/<rx>` counted by rx and amount (the rx on 8,162/8,162 HMA rows) | …5975: 10 held, 1 posted, total = the report | holds (403985f, branch) |
 | MTF 835 ↔ bank credit | MTF payments summed per day = the credit | 7/7 August, same day (section 5) | holds (d477ee4) |
 | Card batch ↔ bank credit | exact cents, ±7 days, `card-batch|…` receipts only | 25/25 August statement deposits = bank credits; close → bank 2–4 days | holds (c898bb4, 56f0ce2) |
 | Card batch ↔ card statement row | batch date ±1 day, exact cents | 22/25 on a year-on rehearsal, the 3 left out named; no false "extra" (G-CSTMT-2) | holds (54bee8c) |
@@ -1641,7 +1776,8 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 | G-CARD-12 | unplaced card lines never re-matched | list noise | A / 1 | OPEN (matching engine) |
 | G-PP-2 | a receipt's date is whichever document arrived first | one deposit per month edge | A | OPEN (matching engine) |
 | G-PP-3 | ProviderPay sweeps never clear the list | $56,860.27 of lines (August) | 1 | OPEN (matching engine) |
-| G-835-2 | HMA 835 payments short of their deposits, unexplained | **$14,506.16** net | — | OPEN (needs a real 835) |
+| G-835-2 | HMA 835 payments short of their deposits | **$14,506.16** net; explained on EFT …5975 by G-835-3 | — | OPEN |
+| G-835-3 | the 835 import drops a repeated same-rx, same-amount payment in one remittance | $15,001.38 of repeats across the nine September EFTs; $11.62 proven on …5975 | — | OPEN |
 | G-MTF-1 (a) | the facilitator stand-in is all-or-nothing | only a typed receipt triggers it now | **A** | OPEN |
 | G-MCK-2 | McKesson return credits reach no account | **$10,411.15** | — | QUESTION Q-MCK-1 |
 | G-MCK-3 | a moved due date leaves a paid invoice owed | $22,118.56 test | — | OPEN |
@@ -1656,10 +1792,17 @@ FIXED means fixed by its owner and re-rehearsed here; the commit is the one that
 |---|---|---|
 | Q-CARD-1 | which day card money counts on | **DECIDED**: batch close date |
 | Q-CARD-2 | whether account payments appear in the payment-type report | open |
-| Q-MCK-1 | how McKesson applies return credits | open |
-| Q-POST-1 | what the $40.99 "Stamps.com El Segundo CA" charge on 18 August is | open |
-| Q-835-1 | a sample request: one real ProviderPay 835 file (for G-835-2 and the 835 reader) | open |
-| Q-SBP-1 | a sample request: PioneerRx's payment-type report run for 3–14 September (for G-CARD-5) | open |
+| Q-MCK-1 | how McKesson applies return credits | **answered in part** (owner, via session 1: *"mckesson returns are credits I believe"*). Proposed, not built: accrual reduces cost of goods on the credit date; cash when the credit is taken off an ACH. **OPEN** until the next AP report shows a credit row or an ACH short of its invoices |
+| Q-POST-1 | what the $40.99 "Stamps.com El Segundo CA" charge on 18 August is | **answered**: mailing, meaning postage. No confirmation email comes for it, so the bank line is its only door; session 1 is making that merchant line book a postage expense from the bank |
+| Q-835-1 | a sample request: one real ProviderPay 835 file (for G-835-2 and the 835 reader) | open. The owner says one exists; session 1 has explained the April and August files were not kept and asked for another |
+| Q-SBP-1 | a sample request: PioneerRx's payment-type report run for 3–14 September (for G-CARD-5) | open. The owner re-sent 30–31 August; 3–14 September asked for again |
+| Q-AH-1 | what the "CS — Adjustment" rows on the AccessHealth reports represent ($4.51 across two EFTs) | open |
+
+**Notes for A:**
+- **Blame on `profit-and-loss.ts` across 54bee8c:** use `git blame -w`. That commit normalised the file's line
+  endings, and its real change is 2 lines.
+- **Wording gap:** `money/monthly/page.tsx` heads the absent-costs list *"Record them on Spending"*, above a
+  card-fee line that says not to type card fees. A's page.
 
 **Not rehearsable yet, and why:**
 - the bank statement feed: no reader for the scanned PDF yet (session 1 is building it). The owner says Emprise
