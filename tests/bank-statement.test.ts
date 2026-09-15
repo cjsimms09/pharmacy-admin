@@ -62,10 +62,13 @@ describe("placing each line", () => {
   const placed = placeLines(lines, ctx);
   const at = (i: number) => placed[i].placement;
   test("deposits: a known payer, a wholesaler paying in, card takings, the facilitator, and a stranger", () => {
+    assert.equal(placeLines([lines[3]], { ...ctx, facilitatorPaid: [{ on: lines[3].on, cents: lines[3].amountCents }] })[0].placement.kind, "already_counted");
     assert.deepEqual([at(0).kind, (at(0) as { payer: string }).payer], ["deposit", "CVS Caremark"]);
     assert.equal((at(1) as { receiptKind: string }).receiptKind, "rebate");
     assert.equal((at(2) as { receiptKind: string }).receiptKind, "retail");
-    assert.equal((at(3) as { receiptKind: string }).receiptKind, "facilitator");
+    /* Not banked: the MTF remittances count it (G-MTF-1). With none on file for the day it is left for a person. */
+    assert.equal(at(3).kind, "unplaced");
+    assert.match(at(3).why, /no MTF remittance for this day is on file/);
     assert.equal(at(4).kind, "unplaced");
   });
   test("payments: exactly one open item with this amount and this name is marked paid; two is left to a person", () => {

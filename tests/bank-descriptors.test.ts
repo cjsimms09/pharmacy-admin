@@ -106,7 +106,7 @@ describe("what each line on the bank statement is", () => {
     assert.equal(wouldDoubleCount("SOME COMPANY NOBODY KNOWS", -12_345), false);
   });
 
-  test("the facilitator and the copay cards carry a caution, and are still banked", () => {
+  test("the facilitator and the copay cards carry a caution, not a certainty (where the line goes is placeLine's: see G-MTF-1)", () => {
     /*
      * Their remittances are read where they arrive and are not where they do not, so this is a
      * warning beside the line rather than a refusal to book it. Treating it as certain would drop

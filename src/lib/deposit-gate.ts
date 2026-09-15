@@ -146,7 +146,12 @@ export function gateDeposit(held: BankedReceipt[], incoming: IncomingReceipt): G
       !numberedApart(h) &&
       h.amountCents === incoming.amountCents &&
       withinWindow(h.receivedOn, incoming.receivedOn) &&
-      (!incoming.payer || !h.payer || head(h.payer) === head(incoming.payer)),
+      /*
+       * An 835 names whoever sent the file, which is often not the name another feed banked the deposit under,
+       * so for a remittance the payer is not required to agree: same amount inside the window is refused and
+       * said (Session 2, money map G-835-1).
+       */
+      (feedOf(incoming.sourceKey) === "835" || !incoming.payer || !h.payer || head(h.payer) === head(incoming.payer)),
   );
   if (clash) {
     return {

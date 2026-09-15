@@ -196,6 +196,18 @@ describe("two payments of the same amount from the same payer", () => {
     assert.equal(v.bank, true);
   });
 
+  test("REGRESSION: an 835 whose payer name differs from the report's is refused at the same amount (G-835-1)", () => {
+    const report = { amountCents: 549_012, receivedOn: "2026-08-26", payer: "ARGUS HEALTH SYS", sourceKey: "payer-payment|argus health sys|4401122", reference: "4401122" };
+    const v = gateDeposit([report], { amountCents: 549_012, receivedOn: "2026-08-25", payer: "ProviderPay", sourceKey: "835|providerpay|1TRACE889900|2026-08-25", reference: "1TRACE889900" });
+    assert.equal(v.bank, false);
+  });
+
+  test("REGRESSION: a ProviderPay remittance posts its claims and banks nothing (G-835-1)", async () => {
+    const text = await readFile("src/lib/claim-payments.ts", "utf8");
+    assert.ok(text.includes("const throughProviderPay = "));
+    assert.ok(text.includes("if (opts.bank && !throughProviderPay &&"));
+  });
+
   test("across feeds, one deposit under two numbers is still refused", () => {
     const fromPortal = { amountCents: 90_400, receivedOn: "2026-08-26", payer: "DOMANIRX", sourceKey: "payer-payment|domanirx|1234538", reference: "1234538" };
     const v = gateDeposit([fromPortal], { amountCents: 90_400, receivedOn: "2026-08-25", payer: "DOMANIRX", sourceKey: "835|domanirx|555000111|20260825", reference: "555000111" });

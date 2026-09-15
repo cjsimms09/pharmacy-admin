@@ -159,6 +159,8 @@ export type MatchContext = {
   vendors: { id: string; name: string }[];
   unpaidBills: { id: string; vendorId: string | null; vendorName: string | null; amountCents: number; invoiceDate: string }[];
   unpaidInvoices: { id: string; supplierId: string | null; supplier: string | null; totalCents: number | null; invoiceDate: string | null }[];
+  /** The facilitator's payments summed by the day they were paid, from the MTF remittances. */
+  facilitatorPaid?: { on: string; cents: number }[];
   /** Card processing bills no bank line has claimed yet, paid or not — the card statement books its fees already paid. */
   cardFeeBills?: { id: string; vendorName: string | null; amountCents: number; invoiceDate: string }[];
   /**
@@ -268,7 +270,30 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
      * this confirms.
      */
     if (meaning.kind === "card_settlement") return { kind: "card_deposit", why: meaning.says };
-    if (FACILITATOR.test(d)) return { kind: "deposit", receiptKind: "facilitator", payer: "Medicare Transaction Facilitator", why: "names the facilitator" };
+    /*
+     * The facilitator's money is counted from its remittances, payment by payment, and a banked facilitator
+     * receipt made the cash account drop every MTF payment in that month (profit-and-loss.ts reads the
+     * payments only where no facilitator receipt exists) — September's $2,789.08 became $1,232.94 on a
+     * snapshot (Session 2, money map G-MTF-1). So the bank line is recognised and left alone.
+     */
+    if (meaning.kind === "facilitator" || FACILITATOR.test(d)) {
+      /* Confirmed only where that day's MTF payments come to exactly this — on August's real files they did, 7 of 7. */
+      const paid = ctx.facilitatorPaid?.find((p) => p.on === line.on)?.cents ?? null;
+      if (paid === line.amountCents) {
+        return {
+          kind: "already_counted",
+          what: "Medicare Transaction Facilitator",
+          where: "facilitator revenue, from the MTF remittances",
+          why: "The Medicare facilitator paying. Its remittance for this day comes to exactly this, and already counts it payment by payment.",
+        };
+      }
+      return {
+        kind: "unplaced",
+        why:
+          `The Medicare facilitator paying, but ${paid === null ? "no MTF remittance for this day is on file" : `the MTF remittances for this day come to ${(paid / 100).toFixed(2)}`}. ` +
+          "Nothing is banked from the line — banking it would drop every MTF payment from the month's cash. The remittance for it is what is missing.",
+      };
+    }
     const payer = ctx.payers.find((p) => mentions(d, p));
     if (payer) return { kind: "deposit", receiptKind: "third_party", payer, why: `names ${payer}` };
     const supplier = ctx.suppliers.find((s) => mentions(d, s.name));

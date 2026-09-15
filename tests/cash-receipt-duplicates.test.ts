@@ -83,9 +83,20 @@ describe("what must still be banked", () => {
     assert.equal(v.bank, true);
   });
 
-  test("the same amount from a different payer goes through", () => {
-    const v = gateDeposit([fromReport], { amountCents: 3_790_927, receivedOn: "2026-09-08", payer: "Express Scripts", sourceKey: "835|esi|99|2026-09-08", reference: "9900123" });
+  test("the same amount from a different payer goes through, from any feed but a remittance", () => {
+    const v = gateDeposit([fromReport], { amountCents: 3_790_927, receivedOn: "2026-09-08", payer: "Express Scripts", sourceKey: "payer-payment|express scripts|9900123", reference: "9900123" });
     assert.equal(v.bank, true);
+  });
+
+  test("CHANGED: an 835 at the same amount is refused whatever payer it names", () => {
+    /*
+     * This test said the opposite until 15 September. An 835 names whoever sent the file — "ProviderPay" — not the
+     * payer the report banked the deposit under, and August's remittances rebuilt on a snapshot banked $148,965.45
+     * beside the report that way (Session 2, money map G-835-1). An exact-cent collision between two real payments
+     * from different payers inside a week is the rarer error, and its refusal is said, not silent.
+     */
+    const v = gateDeposit([fromReport], { amountCents: 3_790_927, receivedOn: "2026-09-08", payer: "Express Scripts", sourceKey: "835|esi|99|2026-09-08", reference: "9900123" });
+    assert.equal(v.bank, false);
   });
 
   test("the same amount and payer well outside the window is a second payment, not a second copy", () => {

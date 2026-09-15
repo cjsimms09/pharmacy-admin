@@ -541,7 +541,16 @@ async function importOneRemittance(
     } else out.unmatched++;
     seen.add(`${reference}|${p.rxNumber}|${p.paidCents}`);
   }
-  if (opts.bank && r.paidOn && (r.totalPaidCents ?? out.amountCents) > 0 && out.payments > 0) {
+  /*
+   * A remittance that comes through ProviderPay — Health Mart Atlas's plans and the direct payers alike — posts
+   * its claim payments and banks nothing. That money has its own banking doors, the payer payment report and the
+   * EFT notice, and they name it differently: "ARGUS HEALTH SYS" with the report's payment number against the
+   * 835's "ProviderPay" with its trace. The gate cannot see those as one deposit, and on August's 48 remittances
+   * rebuilt on a snapshot it banked 15 of them beside the report's payment, $148,965.45 twice (Session 2, money
+   * map G-835-1). Other payers' remittances still bank, and still meet the gate.
+   */
+  const throughProviderPay = /provider\s*pay|health\s*mart|access\s*health/i.test(r.payer ?? "");
+  if (opts.bank && !throughProviderPay && !facilitator && r.paidOn && (r.totalPaidCents ?? out.amountCents) > 0 && out.payments > 0) {
     const { addCashReceipt } = await import("./expenses");
     await addCashReceipt({
       month: r.paidOn.slice(0, 7),
