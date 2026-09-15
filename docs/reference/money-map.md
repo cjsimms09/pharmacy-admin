@@ -23,7 +23,8 @@ expenses, bank statements, invoices, cogs, etc"*.
   owner-approved. Every writing probe refuses to start unless its database is that copy, and that guard
   was tested against the live path first (it refused, exit 2). The copy is deleted when the audit ends.
   After session 1's fix **6ad1c04**, the copy was deleted and taken again at **16:33 UTC** and the card
-  tests re-run against the fixed code; section 1 · 7 says which run each result is from.
+  tests re-run against the fixed code. After **c898bb4** it was taken a third time, at **16:48 UTC**.
+  Section 1 · 7 says which run each result is from.
 - **Masking**: no patient names, dates of birth or identifiers anywhere below. Processor batch numbers are
   shown last four digits only. Dollar figures are business totals.
 - **Status words** follow CLAUDE.md rule 5: *captured · expected-not-yet · never-measured ·
@@ -250,6 +251,44 @@ Reproduced on the copy:
 Live exposure today: **measured-and-none** — all 115 receipts on the copy carry a source key and a
 received date, and no bank line has ever been read.
 
+**Third run (code at c898bb4, fresh snapshot 16:48 UTC).** Session 1's fix makes the batch report the one
+door for card takings. A Heartland credit in any spelling now places as `card_deposit`, which confirms a
+batch or stays unplaced, and never banks. The form refuses an amount a feed already banked around that
+month. The gate refuses a feed's receipt beside a typed, undated one of the same amount in the same month.
+Reproduced:
+- `readBankStatement`, `bank.ts` 88–150, including the `claimed` set shared across one statement's lines.
+- `bankIt`, `page.tsx` 96–119, with "This is different money" not ticked. Both are signed-in actions, so
+  **the form's new check was proved by calling `automaticReceiptsLike`, the function `bankIt` calls, and not
+  through the page.**
+
+| # | scenario | all three spellings (identical) |
+|---|---|---|
+| A | same batch forwarded twice | refused |
+| B | batch first, deposit next day | `card_deposit` → **confirms** the batch |
+| C | deposit read first, batch forwarded after | unplaced, nothing banked; batch banks once |
+| D | two batches banked, then one deposit of both | ambiguous, nothing banked |
+| E | one deposit of two batches read first, batches after | unplaced, nothing banked; both batches bank once |
+
+Over-count per spelling: **$0.00, $0.00, $0.00.**
+
+| # | hand path (spelling does not enter it) | result |
+|---|---|---|
+| H1 | batch 9/17 banked, same deposit typed for September | **form refuses** — "already banked automatically from Card batch on 2026-09-17" |
+| H2 | typed for September, then batch 9/18 forwarded | **batch refused** — "already typed in by hand for 2026-09" |
+| H1b | batch closed 9/30 banked, deposit typed for **October** | **form refuses** (its search runs 7 days either side of the month) |
+| H2b | deposit typed for **October** (the bank date, 1 Oct), then the batch closed **9/30** forwarded | **both banked** — the gate compares typed receipts within the same month only |
+| H1c | batches 9/24 and 9/25 banked, their **combined** deposit typed for September | **both banked** — the form looks for one receipt of the exact amount |
+
+Hand-path over-count: **$685.50 — exactly H2b ($535.35) plus H1c ($150.15).**
+
+| # | one statement, one card deposit and one PSAO deposit of the same cents | result |
+|---|---|---|
+| K | an HMA receipt of $987.65 banked 9/19; no batch on file; the statement carries a Heartland credit and an Access Health credit, both $987.65, on 9/20 | card line **confirms the HMA receipt**; the Access Health line, finding it claimed, is left unplaced; the batch forwarded afterwards banks. **$0.00 over**, but the card line is linked to the wrong receipt, and the PSAO line is left unplaced, though its money is on file. |
+
+K is $0.00 here only because the Access Health spelling on record names no payer the site knows, so it
+stays unplaced. By the code, a PSAO line that did name a payer would be placed as a deposit and banked
+beside the HMA receipt, because `gateDeposit` never compares a receipt with no source key. That variant is the HMA/835 class session 1 has put in the 835 checkpoint, and it was not run here.
+
 ### Gaps for this feed
 
 **G-CARD-1. A bank statement read before a batch is forwarded counted that money twice. — FIXED, 6ad1c04.**
@@ -257,73 +296,88 @@ OBSERVATION (first run): `bank.ts` 144 banked a statement deposit with no receiv
 forwarded afterwards could not see it. $234.56 banked twice.
 SHOULD BE: one deposit is one receipt whichever record reaches the site first.
 FIXED: `bank.ts` 144 now passes `receivedOn: line.on`. Re-run: the later batch is refused, $0.00 over.
-What remains is G-CARD-7 (which label and month the money keeps) and G-CARD-8 (the spelling, and the hand path).
+Third run (c898bb4): in C nothing is banked from the bank line, which stays unplaced, and the batch banks
+once. $0.00 on all three spellings.
 
-**G-CARD-2. One deposit covering two batches counted the money twice. — FIXED for batches-first, 6ad1c04; the reverse order is open.**
+**G-CARD-2. One deposit covering two batches counted the money twice. — FIXED: batches first in 6ad1c04, deposit first (scenario E) in c898bb4.**
 OBSERVATION (first run): batches $111.11 + $222.22, then one deposit $333.33, banked as new retail cash.
-FIXED: `matchHeldDeposit` looks for 2–3 unclaimed receipts dated on or before the line, inside the window,
-summing exactly, and returns ambiguous naming them. Re-run: nothing banked, on every spelling.
-STILL OPEN, scenario E: the same combined deposit read **before** its batches, clean spelling —
-OBSERVATION: the deposit banks as `retail`; each batch then meets no receipt of its own amount, and both
-bank. $393.97 over on the test.
-SHOULD BE: one deposit is one receipt whichever record reaches the site first (as G-CARD-1).
-DIFFERENCE: yes, for the clean spelling. Needs both a combined deposit and the statement read first;
-whether this bank ever combines batches is **never-measured**. Only the bank statement can show it, since
-the card statement lists batch by batch. The header of `card-statement.ts` describes a processor statement
-that is not on file here: *"Each batch reaches the bank whole, the next day, weekends included"*, one ACH line
-per batch. That is evidence against, not proof.
-Owner: `deposit-gate.ts` — **1**.
-Proposed fix: the symmetric check in `gateDeposit`. A sourced receipt whose amount, with one or two other
-held receipts, sums exactly to an unconfirmed bank-statement receipt in the window goes to a person, named.
-It is never banked.
+Second run, E: the combined deposit read before its batches banked as `retail`, and both batches banked
+beside it, $393.97 over.
+SHOULD BE: one deposit is one receipt whichever record reaches the site first.
+FIXED: third run, D ambiguous and E unplaced with nothing banked, then both batches bank once. $0.00 on all
+three spellings. Whether this bank ever combines batches is still **never-measured**; the fix no longer
+depends on the answer.
 
-**G-CARD-7. When the bank statement reads first, the card money keeps the bank's label and month.**
-OBSERVATION: re-run C, clean spelling. The deposit is banked as `retail`, month and date 9/23 (the bank
-date). The batch closed 9/22 is refused. So $234.56 of card takings sits on the cash account's *retail*
-line. Had the batch arrived first, it would sit on the *patient* line under the close date. Same dollars,
-different line and possibly different month, **decided by reading order**.
-SHOULD BE: the line and period a receipt lands in follow what the money is, never which document happened
-to be read first. Accounts that shift with processing order can't be compared month to month.
-DIFFERENCE: yes. The cash total is unaffected. The split between the patient and retail lines is, and the
-month is too for a batch closing on a month's last day or two (see Q-CARD-1, with the owner via session 1).
-Dollars: **never-measured** — it depends on how many batches arrive after their statement.
-Owner: `money/bank.ts` — **A**; `deposit-gate.ts` — **1**.
-Proposed fix: a sourced card-batch receipt that meets an unconfirmed bank-statement receipt of the same
-amount inside the window **takes it over**: it keeps the batch's kind, date and key, and links the bank
-line to it. A refusal leaves the bank's guess standing.
+**G-CARD-7. When the bank statement read first, the card money kept the bank's label and month. — FIXED, c898bb4.**
+OBSERVATION (second run, C, clean spelling): the deposit banked as `retail` dated 9/23, and the batch closed
+9/22 was refused, so the money's line and month depended on reading order.
+SHOULD BE: the line and period a receipt lands in follow what the money is, never which document was read first.
+FIXED: a card deposit never banks. The batch report is the only thing that banks card takings, always
+`patient`, always at the close date. Third run, C: the batch banks, and the line stays unplaced.
 
-**G-CARD-8. Heartland deposits in the spelling on record are unplaced, and the screen's advice for them doubles the money.**
-OBSERVATION: `bank-descriptors.ts` recognises `HRTLAND`/`HRTI-AND` deposits as `card_settlement`, category
-patient, "the till". `placeLine` never reads that category, and its own `RETAIL` pattern knows only
-`heartland`. **Two readers for one thing, disagreeing.** With no batch on file (orders C and E), the line
-is left unplaced: *"a deposit from nobody the site knows; bank it by hand with the payer"*. The page
-footer says a deposit here *"is banked with the form above"*. That form passes no date and no key, so the
-gate never compares it and no later feed can see it: H1 and H2 both bank twice. The D fix's ambiguous line
-says *"confirm it by hand"*. The screen has no way to confirm a line: nothing in `src` updates a bank line
-after it is written. Its one instruction is the form, and typing that deposit in is H1: the two batches are
-already banked, and the typed deposit banks on top.
-SHOULD BE: the site's own instruction for a line must never be the step that counts money twice. A
-deposit that a feed on the site will also bank should either wait for that feed or be linked to its
-receipt, not typed again.
-DIFFERENCE: yes. Live exposure **measured-and-none** (0 bank lines read, 0 receipts typed by hand). The
-trigger is in the plan: the first bank statement, and the three unforwarded batches (1, 2, 12 September).
-Owner: `bank-statement.ts` and `bank-descriptors.ts` — **not in the ownership table**; `money/page.tsx`
-and `money/bank.ts` — **A**; `deposit-gate.ts` — **1**.
-Proposed fix, four parts:
-(a) `placeLine` places `card_settlement` from the descriptor, so one reader decides. (`counter_deposit`,
-a bare "DEPOSIT", has the same disagreement. It is left to the till checkpoint, because what a counter
-deposit is isn't settled here.)
-(b) An unplaced card deposit says *"forward that day's batch; do not bank this by hand"*, as the card-fee
-debit already does (`bank-statement.ts` 358).
-(c) The `/money` form carries the day the money arrived, so a feed arriving later sees the hand receipt.
-That closes H2 only. H1 stays open because `gateDeposit` never compares a receipt with no source key, dated
-or not. The form also has to show any receipt of the same amount inside the window, and ask before banking
-beside it. This part applies to every hand receipt, and the bank-statement checkpoint will measure it
-across all feeds.
-(d) The ambiguous line needs a confirm action on the screen: link the bank line to the receipts it names.
-Until one exists, "confirm it by hand" has nothing to press.
-**Until fixed: forward the three missing batches before the first bank statement is read** (unchanged from
-checkpoint 1), and don't bank a Heartland line by hand.
+**G-CARD-8. Heartland deposits in the spelling on record were unplaced, and the screen's advice for them doubled the money. — FIXED for H1 and H2, c898bb4; two narrower cases open as G-CARD-9 and G-CARD-10.**
+OBSERVATION (second run): `placeLine` ignored the descriptor's `card_settlement`, so `HRTLAND`/`HRTI-AND`
+credits were unplaced and the page said to bank them with the form. The form passed no date and no key, so
+H1 (batch, then typed) and H2 (typed, then batch) both banked twice.
+SHOULD BE: the site's own instruction for a line must never be the step that counts money twice.
+FIXED:
+- every spelling places as `card_deposit`;
+- the unplaced line says to forward the batch report and not to use the form;
+- the page footer says a card deposit is never banked by hand;
+- the ambiguous message no longer says "confirm it by hand".
+Third run: H1 refused by the form (proved at `automaticReceiptsLike`), H2 refused by the gate.
+
+**G-CARD-9. A card deposit typed under the bank's month, for a batch that closed the month before, still counts twice.**
+OBSERVATION: third run, H2b. A deposit of $535.35 was typed for October (the day it reached the bank, 1
+October). The batch that closed 30 September was then forwarded, and both banked. The gate's new check
+compares typed receipts **within the same month only** (`addCashReceipt` queries `month = input.month`). The
+form's own check runs 7 days either side of the month (H1b, the reverse order, is refused), but the gate's
+does not.
+SHOULD BE: one deposit is one receipt; the month boundary is exactly where card money crosses (a batch
+closed on the last day lands in the bank on the first), so it is the case a boundary check most needs to hold.
+DIFFERENCE: yes, in code and on the copy. Reachable only if somebody types a card deposit despite the
+screen saying not to. Dollars on live: **measured-and-none** (no typed receipts).
+Owner: `expenses.ts` `addCashReceipt` and `deposit-gate.ts` — **1**.
+Proposed fix: query typed receipts for the batch's month **and the month after** (the same widening
+`automaticReceiptsLike` already uses), and compare across both.
+
+**G-CARD-10. A combined deposit typed with the form, beside the two batches it covers, still counts twice.**
+OBSERVATION: third run, H1c. Batches of $70.07 on 9/24 and $80.08 on 9/25 were banked, then their combined
+$150.15 was typed for September, and both banked. `automaticReceiptsLike` looks for one receipt of the exact
+amount. The ambiguous bank line now says *"banking it with the form would count it twice"*, but the form
+itself does not refuse it.
+SHOULD BE: as G-CARD-9 — an instruction on the screen is not a control; the form is where the double is made.
+DIFFERENCE: yes, in code and on the copy. Reachable only against the screen's own words. Dollars: **measured-and-none**.
+Owner: `money/page.tsx` — **A**; `expenses.ts` — **1**.
+Proposed fix: `automaticReceiptsLike` also looks for 2–3 automatic receipts summing exactly, the same search
+`matchHeldDeposit` does, and names them.
+
+**G-CARD-11. A card deposit can confirm a receipt that is not a card batch.**
+OBSERVATION: third run, K. With no batch on file, a Heartland credit of $987.65 confirmed a Health Mart
+Atlas receipt of $987.65 banked the day before. `matchHeldDeposit` confirms a single candidate whatever its
+payer; the payer is only used to choose between several. In the same statement the Access Health line of
+that amount then found its receipt claimed and was left unplaced. Money: $0.00 over in this run. The card
+line is linked to the wrong receipt, and the PSAO line sits unplaced with its money on file.
+SHOULD BE: a card deposit is evidence about card takings only; it confirms a card batch or nothing.
+DIFFERENCE: yes. Needs two deposits of the same cents within 7 days, one card and one not. How often: **never-measured**.
+Where the other line names a known payer, it would bank beside the claimed receipt. That variant is left
+to the 835 checkpoint, as session 1 asked.
+Owner: `deposit-gate.ts` — **1**; `money/bank.ts` — **A**.
+Proposed fix: for `card_deposit`, restrict candidates to receipts keyed `card-batch|…` before counting them.
+
+**G-CARD-12. An unplaced card deposit is never re-matched when its batch arrives. (Recorded for session 1, who found it.)**
+OBSERVATION: third run, C and E. The bank line stays unplaced, and the batch forwarded afterwards banks the
+money correctly. Nothing in `src` updates a bank line after it is written (measured in the second run), so
+the line stays on the unplaced list saying to forward a report that has already been forwarded.
+SHOULD BE: a list of work to do shrinks when the work is done; a stale instruction teaches a person to ignore the list.
+DIFFERENCE: yes. Not a money error; a stale list.
+Owner: `money/bank.ts` — **A**; the card batch reader, `card-batch-store.ts` — **1**.
+Proposed fix: when a batch banks, link any unplaced `card_deposit` line of the same amount inside the
+window, or have the list re-run `matchHeldDeposit` on unplaced credits each time it is drawn.
+
+**Order of forwarding.** Under c898bb4, reading the first bank statement before the three unforwarded
+batches (1, 2 and 12 September) no longer counts anything twice; their deposit lines wait unplaced (G-CARD-12).
+Still: **don't type a Heartland deposit in by hand** (G-CARD-9, G-CARD-10).
 
 **G-CARD-3. A batch email that picks up an image attachment is never banked, silently.**
 OBSERVATION: the batch reader runs only when a message has no acceptable attachment; `.png`/`.jpg`/`.pdf`
@@ -388,12 +442,12 @@ Owner of the eventual change: `card-batch-store.ts` — **1**. Session 1 is putt
 - The **Global Payments card statement** reader (5cdff17) against a real statement: none has been read.
   Audited in its own checkpoint.
 - Whether any real deposit combines two batches (G-CARD-2, scenario E): needs a bank statement.
-- Which spelling the bank's CSV export gives Heartland (G-CARD-8): never-measured. The re-run covers the
-  two spellings on record and the clean one, and no others.
-- The `retail` label a bank deposit takes when no batch matches (session 1's lead): confirmed in code
-  (`bank-statement.ts` 260), and only for the clean spelling (G-CARD-7, G-CARD-8).
-- `readBankStatement` itself was not called. It is a signed-in action, so its lines 93–146 were reproduced
-  instead, and `placeLines` (plural) was not exercised. It differs from `placeLine` only in consuming
-  open bills and invoices, which a credit never touches.
+- Which spelling the bank's CSV export gives Heartland: never-measured. The runs cover the two spellings
+  on record and the clean one. Any spelling that `card_settlement`'s pattern (`HRT[A-Z]?[LIT]?AND|HEARTLAND`,
+  on squashed letters) misses would fall back to the generic rules, and that was not tried.
+- `readBankStatement` and `bankIt` were not called; both are signed-in actions and were reproduced line
+  for line (bank.ts 88–150, page.tsx 96–119 at c898bb4). `placeLines` (plural) was not exercised; it
+  differs from `placeLine` only in consuming open bills and invoices, which a credit never touches.
+- The "This is different money" tick was not exercised; by the code it skips the form's check entirely.
 - The re-run's test rows stay on the scratch copy, not live, and go when the copy is deleted.
 - Card sales after 14 September: none received at the time of reading.
