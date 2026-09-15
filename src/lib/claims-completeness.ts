@@ -38,6 +38,9 @@ export type ClaimsCompleteness = {
   /** Fills dated after the copy's horizon. Not a discrepancy; the ordinary state of a day-old copy. */
   aheadFills: number;
   aheadCents: number;
+  /** Fills where PioneerRx's payers plus the patient do not add to the fill's own total price, and the first of them. */
+  notAddingUp: number;
+  notAddingUpList: { rxNumber: string; fillNumber: number; addsToCents: number; fillSaysCents: number }[];
 };
 
 export async function claimsCompleteness(): Promise<ClaimsCompleteness | null> {
@@ -75,5 +78,7 @@ export async function claimsCompleteness(): Promise<ClaimsCompleteness | null> {
     onlyOnSite: n(v.fillsOnlyOnSite),
     aheadFills: n(ahead.fills),
     aheadCents: n(ahead.cents),
+    notAddingUp: n(v.fillsThatDoNotAddUp),
+    notAddingUpList: Array.isArray(v.fillsThatDoNotAddUpList) ? (v.fillsThatDoNotAddUpList as ClaimsCompleteness["notAddingUpList"]) : [],
   };
 }

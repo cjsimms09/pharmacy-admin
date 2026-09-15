@@ -373,6 +373,8 @@ async function pullClaims(): Promise<string> {
             p.AcquisitionCost as acquisition,
             c.OtherPayerAmountPaid as other_payer,
             c.EvoucherAmountPaid as evoucher,
+            c.EvoucherAmountFromMessage as evoucher_from_message,
+            c.EvoucherMessage as evoucher_message,
             c.DirFeeTotal as dir_fee,
             f.TotalPricePaid as fill_total_price,
             (select convert(varchar(10), max(sale.PostingDate), 23)
@@ -408,7 +410,7 @@ async function pullClaims(): Promise<string> {
     return d.length === 11 ? d : null;
   };
 
-  const { fillsFromClaimRows } = await import("../src/lib/pioneer-claims");
+  const { fillsFromClaimRows, voucherProgrammeFromMessage } = await import("../src/lib/pioneer-claims");
   const built = fillsFromClaimRows(
     r.rows.map((row) => ({
       rxNumber: text(row.rx_number) ?? "",
@@ -433,6 +435,9 @@ async function pullClaims(): Promise<string> {
       dispensingFeeCents: cents(row.dispensing_fee),
       dirFeeCents: cents(row.dir_fee),
       evoucherCents: cents(row.evoucher),
+      evoucherMessageCents: cents(row.evoucher_from_message),
+      /* Only the programme is kept; the message carries the patient's remaining benefit. */
+      evoucherProgramme: voucherProgrammeFromMessage(text(row.evoucher_message)),
       acquisitionCents: cents(row.acquisition),
       filledOn: text(row.date_filled),
       fillTotalPriceCents: cents(row.fill_total_price),
@@ -460,6 +465,9 @@ async function pullClaims(): Promise<string> {
       dispensingFeeCents: f.dispensingFeeCents,
       dirFeeCents: f.dirFeeCents,
       evoucherCents: f.evoucherCents,
+      evoucherMessageCents: f.evoucherMessageCents ?? null,
+      evoucherProgramme: f.evoucherProgramme ?? null,
+      fillTotalPriceCents: f.fillTotalPriceCents,
       gcn: f.gcn,
       basisOfReimbursement: f.basisOfReimbursement,
       basisOfCostDetermination: f.basisOfCostDetermination,
@@ -536,6 +544,18 @@ async function pullClaims(): Promise<string> {
         patientCents: f.patientCents,
         acquisitionCents: f.acquisitionCents,
         dispensingFeeCents: f.dispensingFeeCents,
+        fillTotalPriceCents: f.fillTotalPriceCents,
+        payers: [f.primary, ...(f.secondary ? [f.secondary] : []), ...f.furtherPayers].map((p, i) => ({
+          position: i === 0 ? ("primary" as const) : ("secondary" as const),
+          bin: p.bin,
+          pcn: p.pcn,
+          groupNumber: p.groupNumber,
+          networkId: p.networkId,
+          remitCents: p.remitCents ?? 0,
+          patientCents: p.copayCents ?? 0,
+          evoucherCents: p.evoucherCents ?? null,
+          dirFeeCents: p.dirFeeCents ?? null,
+        })),
       })),
     "2026-09-01",
   );
@@ -554,6 +574,8 @@ async function pullClaims(): Promise<string> {
       siteCopayCents: recon.site.patientCents,
       gapCents: recon.gapCents,
       fillsThatDoNotAddUp: built.disagree.length,
+      /* The fills themselves, so the check is something a person can open rather than a count in a setting. */
+      fillsThatDoNotAddUpList: built.disagree.slice(0, 20),
       daysShort: recon.missingFromSite,
       missingTotal: recon.missingTotal,
       fillsOnlyOnSite: recon.onlyOnSite.fills,

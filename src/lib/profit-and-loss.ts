@@ -44,6 +44,7 @@ import { cashCostOfGoods } from "./cash-cogs";
 import { standingLines } from "./standing-math";
 import { todayIso } from "./dates";
 import { formatCents } from "./money";
+import { SITE_STARTS_ON, monthIsOutOfBooks } from "./books-start";
 
 
 export type PLLine = { label: string; amountCents: number; note?: string };
@@ -127,6 +128,14 @@ export type MonthlyPL = {
    * and stop meaning anything at all.
    */
   caveats: string[];
+  /**
+   * A month before `SITE_STARTS_ON`: not an account. Every figure is nought and `missing` says why.
+   *
+   * Its receipts and payments are out of the books by the rule in books-start.ts, but its bills and paid invoices carry
+   * no such flag. Drawn as an ordinary month, it therefore counted costs with no revenue: August's cash account did, and
+   * September's would the day the books move to 1 October.
+   */
+  beforeBooks?: boolean;
 };
 
 export type PLInputs = {
@@ -234,6 +243,56 @@ function byCategory(rows: PLInputs["expenses"], kind: string): PLLine[] {
     .filter(([, cents]) => cents !== 0)
     .map(([label, amountCents]) => ({ label, amountCents }))
     .sort((a, b) => b.amountCents - a.amountCents);
+}
+
+/** The inputs of a month before the books begin: nothing on either side. */
+export function beforeBooksInputs(month: string, basis: "accrual" | "cash"): PLInputs {
+  return {
+    month,
+    basis,
+    sales: null,
+    receipts: [],
+    laterMoneyCents: 0,
+    claimsRevenueCents: null,
+    claimsRemitCents: null,
+    claimsPatientCents: null,
+    claimsCount: 0,
+    costUnknownFills: 0,
+    costUnknownRevenueCents: null,
+    waitingFills: 0,
+    waitingRevenueCents: null,
+    waitingCostCents: null,
+    openingStockCents: null,
+    closingStockCents: null,
+    dispensedCostCents: null,
+    purchasesCents: null,
+    billedPurchasesCents: null,
+    invoicesInMonth: [],
+    uninvoicedPurchasesCents: null,
+    uninvoicedPurchases: 0,
+    cashCogsSays: null,
+    notYetTakenCents: 0,
+    standing: [],
+    rebatesCents: null,
+    expenses: [],
+    onAccount: null,
+  };
+}
+
+/**
+ * A month before the books begin, as the account shows it: labelled, with no figures.
+ *
+ * Refused rather than drawn, as the month-end AR report refuses it (`monthIsReportable`). Drawing it counted costs
+ * with no revenue, because only receipts and payments carry the out-of-books flag.
+ */
+export function beforeBooksAccount(month: string, basis: "accrual" | "cash"): MonthlyPL {
+  return {
+    ...monthlyPL(beforeBooksInputs(month, basis)),
+    missing: [`${month} is before these books begin on ${SITE_STARTS_ON}. Nothing from before then is counted on either basis, so there is no account for this month.`],
+    caveats: [],
+    usable: false,
+    beforeBooks: true,
+  };
 }
 
 export function monthlyPL(given: PLInputs): MonthlyPL {
@@ -701,12 +760,14 @@ export async function accountsFor(
   if (wanted.length === 0) throw new Error("accountsFor needs at least one month; an empty period is answered without a read.");
   const { held } = await import("./held");
   return held(`accounts:${basis}:${wanted.join(",")}`, async () => {
-    const shared = await loadShared(wanted, basis);
-    const inputs = wanted.map((m) => monthInputs(m, basis, shared));
+    /* A month before the books is labelled and empty, never drawn: see `beforeBooksAccount`. */
+    const inBooks = wanted.filter((m) => !monthIsOutOfBooks(m));
+    const shared = inBooks.length ? await loadShared(inBooks, basis) : null;
+    const inputs = wanted.map((m) => (shared && !monthIsOutOfBooks(m) ? monthInputs(m, basis, shared) : beforeBooksInputs(m, basis)));
     return {
-      months: inputs.map(monthlyPL),
+      months: inputs.map((i) => (monthIsOutOfBooks(i.month) ? beforeBooksAccount(i.month, basis) : monthlyPL(i))),
       inputs,
-      fills: shared.fills.map((f) => ({ dateFilled: f.dateFilled, cashPlan: f.cashPlan, revenueCents: f.revenueCents })),
+      fills: (shared?.fills ?? []).map((f) => ({ dateFilled: f.dateFilled, cashPlan: f.cashPlan, revenueCents: f.revenueCents })),
     };
   });
 }
@@ -1098,7 +1159,8 @@ export async function accountMonths(): Promise<string[]> {
   for (const b of bills) set.add(b.invoiceDate.slice(0, 7));
   for (const c of claims) set.add(c.dateFilled.slice(0, 7));
   for (const r of receipts) set.add(r.month.slice(0, 7));
-  return [...set].filter((m) => /^\d{4}-\d{2}$/.test(m)).sort().reverse();
+  // A month before the books begin is not offered: it is not an account (see `beforeBooksAccount`).
+  return [...set].filter((m) => /^\d{4}-\d{2}$/.test(m) && !monthIsOutOfBooks(m)).sort().reverse();
 }
 
 /**

@@ -1,5 +1,6 @@
 import { familyTabs } from "@/lib/families";
 import Link from "next/link";
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
@@ -74,7 +75,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const scanReview = scan ? await scannedStatementReview(scan).catch(() => null) : null;
   const today = todayIso();
   const period = (periodParam && parsePeriod(periodParam)) || periodOf("month", today.slice(0, 7));
-  const [books, recent, found, banked, bankLines] = await Promise.all([booksFor(period, today), recentMonths(6, today), moneyFound().catch(() => null), cashReceiptsFor(period.months), lastStatementLines(period.months)]);
+  const [books, recent, banked, bankLines] = await Promise.all([booksFor(period, today), recentMonths(6, today), cashReceiptsFor(period.months), lastStatementLines(period.months)]);
   const { accrual, cash, scripts, gap, pace, sources, countedOnce, feeds, difference, balances } = books;
   /* Read back from the last pull, so this can never disagree with the feed that computed it. */
   const completeness = await claimsCompleteness();
@@ -536,26 +537,10 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
         </Card>
 
         {/* The three lines worth the most from the money list, so the books lead to the action. */}
-        <Card title="Worth the most right now" subtitle="From the money list: amounts this site can see and what to do about each." actions={<Link href="/money/found" className="btn btn-sm">All of it</Link>}>
-          {found && found.rows.length > 0 ? (
-            <ol className="rows">
-              {found.rows.slice(0, 3).map((r) => (
-                <li key={r.key} className="row">
-                  <div className="min-w-0">
-                    <div className="row-title">{r.says}</div>
-                    <p className="row-why">{r.todo}</p>
-                  </div>
-                  <div className="whitespace-nowrap text-right text-sm">
-                    <Link href={r.href} className="font-semibold tabular-nums text-accent">{formatCents(r.amountCents)}</Link>
-                    <span className="block text-[11px] text-ink-3">{r.cadence === "recurring_monthly" ? "a month" : "one-off"}</span>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="text-sm text-ink-3">Nothing on the list yet. It fills in as invoices, catalogues and claims arrive.</p>
-          )}
-        </Card>
+        {/* Streamed: money found is the slowest reading on this page, and the books above do not wait for it. */}
+        <Suspense fallback={<Card title="Worth the most right now" subtitle="Weighing what is worth the most…"><p className="text-sm text-ink-3" aria-busy="true">Working it out.</p></Card>}>
+          <WorthTheMostCard />
+        </Suspense>
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
@@ -675,6 +660,25 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                 this was compared against, so a fresh run carries the fills the first one missed.
               </p>
             )}
+            {/*
+              PioneerRx's own arithmetic, checked every morning: each payer's payment plus the patient's pay is the fill's
+              total price. It was counted into a setting nothing read (claim-lifecycle.md, rule 1). A fill that does not
+              add up has a share nobody can attribute, so it is named here, by prescription, where it can be looked up.
+            */}
+            {completeness.notAddingUp > 0 && (
+              <div className="mt-2 rounded-lg bg-warn-soft/60 p-2 text-xs text-ink-2">
+                <b>
+                  {completeness.notAddingUp} fill{completeness.notAddingUp === 1 ? "" : "s"} where the payers and the patient do not add to
+                  the fill&rsquo;s price
+                </b>{" "}
+                in PioneerRx&rsquo;s own figures, so part of {completeness.notAddingUp === 1 ? "its" : "their"} money has no owner here:{" "}
+                {completeness.notAddingUpList
+                  .slice(0, 6)
+                  .map((d) => `Rx ${d.rxNumber}-${d.fillNumber} (${formatCents(d.addsToCents)} against ${formatCents(d.fillSaysCents)})`)
+                  .join("; ")}
+                {completeness.notAddingUp > 6 ? `, and ${completeness.notAddingUp - 6} more` : ""}.
+              </div>
+            )}
             <p className="mt-2 text-xs text-ink-3">
               Measured through {fmt(completeness.coverTo ?? "")}, which is as far as the day-old copy reaches.
               {completeness.aheadFills > 0 && (
@@ -772,5 +776,32 @@ function Line({ label, a, c, href, note, strong }: { label: string; a: number | 
       <td className="num">{formatCents(c)}</td>
       <td className={`num ${gap !== null && gap < 0 ? "text-crit" : "text-ink-2"}`}>{gap === null ? <span className="text-ink-3">—</span> : formatCents(gap)}</td>
     </tr>
+  );
+}
+
+/** The three lines worth the most from the money list, read on their own so the books are not held up by them. */
+async function WorthTheMostCard() {
+  const found = await moneyFound().catch(() => null);
+  return (
+    <Card title="Worth the most right now" subtitle="From the money list: amounts this site can see and what to do about each." actions={<Link href="/money/found" className="btn btn-sm">All of it</Link>}>
+      {found && found.rows.length > 0 ? (
+        <ol className="rows">
+          {found.rows.slice(0, 3).map((r) => (
+            <li key={r.key} className="row">
+              <div className="min-w-0">
+                <div className="row-title">{r.says}</div>
+                <p className="row-why">{r.todo}</p>
+              </div>
+              <div className="whitespace-nowrap text-right text-sm">
+                <Link href={r.href} className="font-semibold tabular-nums text-accent">{formatCents(r.amountCents)}</Link>
+                <span className="block text-[11px] text-ink-3">{r.cadence === "recurring_monthly" ? "a month" : "one-off"}</span>
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-sm text-ink-3">Nothing on the list yet. It fills in as invoices, catalogues and claims arrive.</p>
+      )}
+    </Card>
   );
 }

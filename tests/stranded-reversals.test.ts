@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { isStrandedReversal, claimCancelledBy, type Pairable } from "../src/lib/claims";
+import { isStrandedReversal, claimCancelledBy, pairAlikeReversals, type Pairable } from "../src/lib/claims";
 
 /**
  * Rx 900000, reproduced from the two files that actually produced it.
@@ -75,6 +75,19 @@ describe("a reversal held that never matched anything", () => {
     const found = claimCancelledBy(stranded, [sixty, twin]);
     assert.equal(found.hit, null);
     assert.match((found as { why: string }).why, /equally well/);
+  });
+
+  test("REGRESSION: two reversals the report misprinted at double the claim cancel both identical claims from their file, together", () => {
+    // P-1, 15 September 2026: PioneerRx held each reversal at −$89.44; the report printed ($178.88).
+    const bill = (id: string) => claim({ id, remitCents: 8_944, copayCents: 7_499, transactionKey: id, importId: "day14" });
+    const rev = (id: string) => claim({ id, status: "reversed", remitCents: -17_888, copayCents: -7_499, transactionKey: id, reversalKey: id, importId: "day14" });
+    const pairs = pairAlikeReversals([rev("r1"), rev("r2")], [bill("b1"), bill("b2")]);
+    assert.deepEqual(pairs?.map((p) => [p.rev.id, p.hit.id]), [["r1", "b1"], ["r2", "b2"]]);
+
+    assert.equal(pairAlikeReversals([rev("r1")], [bill("b1"), bill("b2")]), null, "one reversal against two claims: which one is not an answer");
+    assert.equal(pairAlikeReversals([rev("r1"), rev("r2")], [bill("b1"), { ...bill("b2"), importId: "day13" }]), null, "a claim from another day is never taken");
+    assert.equal(pairAlikeReversals([rev("r1"), rev("r2")], [bill("b1"), { ...bill("b2"), remitCents: 0 }]), null, "a primary and a secondary under one BIN differ, so neither is taken");
+    assert.equal(pairAlikeReversals([{ ...rev("r1"), copayCents: -100 }], [bill("b1")]), null, "the copay must cancel");
   });
 
   test("a reversal only cancels a claim on the same prescription, fill, BIN and drug", () => {

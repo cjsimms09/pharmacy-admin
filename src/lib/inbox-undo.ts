@@ -155,7 +155,7 @@ const EFFECTS: Record<string, KindEffect> = {
   },
   veridikal_report: {
     short: "pays vouchers, banks nothing",
-    writes: "a payment against each claim the Veridikal summary names, with the fee Veridikal pays the pharmacy as revenue; nothing on the cash account",
+    writes: "a payment against each claim the Veridikal summary names, counting as revenue only what the claim did not already carry; nothing on the cash account",
     reversal: "removable",
     leaves: "payments against those fills, which this site can take back out. No deposit: the bank statement banks the Veridikal credit.",
   },

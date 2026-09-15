@@ -35,12 +35,17 @@ export type DispensedRow = {
   dispensingFeeCents: number | null;
   dirFeeCents: number | null;
   evoucherCents: number | null;
+  /** PioneerRx pull only: the voucher amount from the switch message, and the programme its wording names. */
+  evoucherMessageCents?: number | null;
+  evoucherProgramme?: string | null;
   gcn: string | null;
   basisOfReimbursement: string | null;
   basisOfCostDetermination: string | null;
   filledOn: string | null;
   completedOn: string | null;
   netProfitCents: number | null;
+  /** The fill's total price, where the source states one (the PioneerRx pull). Written on the primary row only. */
+  fillTotalPriceCents?: number | null;
 };
 
 export type PayerSide = {
@@ -54,6 +59,16 @@ export type PayerSide = {
   remitCents: number | null;
   copayCents: number | null;
   otherPayerAmountCents: number | null;
+  /**
+   * What this payer's own claim carries. PioneerRx puts a voucher on the claim it applied to and DIR on the claim that
+   * owes it — measured 15 September 2026 (P-3) on September's 76 two-payer fills: a voucher on the primary only (2),
+   * never on the secondary, no message amount and no DIR on either. The fill-level copies below were written onto both
+   * rows, so a row-level sum counted the voucher twice. Optional: a CSV export has no per-claim figures.
+   */
+  evoucherCents?: number | null;
+  dirFeeCents?: number | null;
+  evoucherMessageCents?: number | null;
+  evoucherProgramme?: string | null;
 };
 
 export type DispensedParse = { rows: DispensedRow[]; headers: string[]; unmapped: string[]; problems: string[] };
@@ -286,6 +301,9 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
       dispensingFeePaidCents: r.dispensingFeeCents,
       dirFeeCents: r.dirFeeCents,
       evoucherCents: r.evoucherCents,
+      /* Written only by a source that reads them, so a CSV enrichment does not clear what the pull found. */
+      ...(r.evoucherMessageCents !== undefined ? { evoucherMessageCents: r.evoucherMessageCents } : {}),
+      ...(r.evoucherProgramme !== undefined ? { evoucherProgramme: r.evoucherProgramme } : {}),
       gcn: r.gcn,
       soldOn: r.completedOn,
       enrichedFrom: stamp,
@@ -306,6 +324,16 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
      * fact is not better evidence, and quietly replacing one with the other is how two systems stop
      * agreeing for reasons nobody can reconstruct.
      */
+    /* Where the source says what each payer's own claim carries, each row gets its own, never the other payer's. */
+    const carriedBy = (side: PayerSide) =>
+      side.evoucherCents !== undefined
+        ? {
+            evoucherCents: side.evoucherCents,
+            dirFeeCents: side.dirFeeCents ?? null,
+            evoucherMessageCents: side.evoucherMessageCents ?? null,
+            evoucherProgramme: side.evoucherProgramme ?? null,
+          }
+        : {};
     const fillCost = r.acquisitionCents !== null && r.acquisitionCents !== 0 ? { acquisitionCents: r.acquisitionCents } : {};
     if (p) {
       if (p.remitCents !== null && r.primary.remitCents !== null && p.remitCents !== r.primary.remitCents) {
@@ -316,6 +344,9 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
         .update(schema.claims)
         .set({
           ...shared,
+          ...carriedBy(r.primary),
+          payerPosition: "primary",
+          ...(r.fillTotalPriceCents !== undefined ? { fillTotalPriceCents: r.fillTotalPriceCents } : {}),
           // The bottle's cost, and only if this row does not already carry one of its own.
           ...(p.acquisitionCents === null || p.acquisitionCents === 0 ? fillCost : {}),
           basisOfReimbursement: r.basisOfReimbursement ?? undefined,
@@ -328,7 +359,7 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
       report.primaryEnriched++;
     }
     if (s && r.secondary) {
-      await db.update(schema.claims).set({ ...shared, planId: r.secondary.planId ?? undefined, contractId: r.secondary.contractId ?? undefined, networkId: r.secondary.networkId ?? undefined }).where(eq(schema.claims.id, s.id));
+      await db.update(schema.claims).set({ ...shared, ...carriedBy(r.secondary), payerPosition: "secondary", fillTotalPriceCents: null, planId: r.secondary.planId ?? undefined, contractId: r.secondary.contractId ?? undefined, networkId: r.secondary.networkId ?? undefined }).where(eq(schema.claims.id, s.id));
       report.secondaryEnriched++;
     }
   }

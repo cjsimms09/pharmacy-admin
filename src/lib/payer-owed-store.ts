@@ -1,7 +1,7 @@
 import "server-only";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
-import { owedByPayer, splitReceivable, voucherProgrammeFor, type Receivable, type Received, type OwedSummary } from "./payer-owed";
+import { claimShares, owedByPayer, type Receivable, type Received, type OwedSummary } from "./payer-owed";
 
 /**
  * Loads what each payer owes: its own receivables from the fills, and what has actually arrived.
@@ -68,7 +68,10 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
         source: schema.claimPayments.source,
         claimBin: schema.claims.bin,
         claimPayer: schema.claims.pbmName,
+        claimRemit: schema.claims.remitCents,
         claimVoucher: schema.claims.evoucherCents,
+        claimVoucherMessage: schema.claims.evoucherMessageCents,
+        claimVoucherProgramme: schema.claims.evoucherProgramme,
       })
       .from(schema.claimPayments)
       .leftJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id))
@@ -85,7 +88,15 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
   const { cashPlanFor } = await import("./cash-plans");
 
   const receivables: Receivable[] = [];
+  const { SITE_STARTS_ON } = await import("./books-start");
   for (const f of fills) {
+    /*
+     * A fill from before the books begin is owed by nobody on this site, as its payments are already out of the books.
+     * Without this the payer page billed those fills and none of their money: measured on the cutover rehearsal, the
+     * dry run's $253,986.08 billed against $0.00 received the day the books moved to 1 October. The month-end AR report
+     * already holds to the same boundary (`receivablesAsAt`).
+     */
+    if (f.dateFilled < SITE_STARTS_ON) continue;
     // Once per fill, not once per payer: this loop runs over every fill the pharmacy has.
     const shares = payerShares(f);
     for (let i = 0; i < f.payers.length; i++) {
@@ -96,18 +107,20 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
        */
       const remit = shares[i]?.receivableCents ?? p.remitCents;
       /*
-       * A manufacturer voucher inside the remit is owed by its programme, not the plan (money map section 15). Without
-       * this, the programme's payment settled the plan's receivable — an unpaid plan looked paid — and a claim the plan
-       * will never pay any of (remit = voucher, as every RxLocal voucher is) sat "owed" by the plan for ever.
+       * A manufacturer programme's money inside the remit is owed by the programme, not the plan: a RedSail voucher, a
+       * Veridikal eVoucher with its $2.50, or a Veridikal denial conversion's whole net (`claimShares`). Without this, the
+       * programme's payment settled the plan's receivable — an unpaid plan looked paid — and a claim the plan will never
+       * pay any of sat "owed" by the plan for ever. A conversion's unpaid $0.50 is owed by nobody and is left out.
        */
-      const { planCents, voucherCents } = splitReceivable(remit, p.evoucherCents ?? 0);
+      const owes = claimShares({ remitCents: remit, evoucherCents: p.evoucherCents, evoucherMessageCents: p.evoucherMessageCents, evoucherProgramme: p.evoucherProgramme });
+      const planCents = owes.planCents;
       receivables.push({
         bin: p.bin,
         name: p.name ?? null,
         dateFilled: f.dateFilled,
         cents: planCents,
         claimId: p.claimId ?? null,
-        portion: "primary",
+        portion: "plan",
         /*
          * Asked of the plan register rather than taken off the fill. `Fill.cashPlan` is true when
          * the whole fill was cash-priced; a coordinated fill can carry one cash plan and one that
@@ -115,20 +128,22 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
          */
         cashPlan: cashPlanFor(p.bin, p.pcn, plans) !== null,
       });
-      if (voucherCents > 0) {
-        receivables.push({ bin: null, name: voucherProgrammeFor(p.bin), dateFilled: f.dateFilled, cents: voucherCents, cashPlan: false, claimId: p.claimId ?? null, portion: "secondary" });
+      if (owes.programme && owes.programmeCents > 0) {
+        receivables.push({ bin: null, name: owes.programme, dateFilled: f.dateFilled, cents: owes.programmeCents, cashPlan: false, claimId: p.claimId ?? null, portion: "programme" });
       }
     }
   }
 
   const received: Received[] = payments.map((p) => ({
     /*
-     * A voucher programme's payment on a claim with a voucher settles the voucher, never the plan; a plan's payment on
-     * the same claim settles the plan, as before. On a claim with no voucher, nothing changes.
+     * A programme's payment on a claim the programme owes part of settles the programme's share, never the plan; a plan's
+     * payment on the same claim settles the plan, as before. Matched to a claim, it settles that claim's programme part
+     * whichever programme it names (owedByPayer keys on claim and part), so a programme read from the column rather than
+     * the message cannot leave a paid share owed. Its own payer name decides only where it is not tied to one claim.
      */
-    ...(p.source === "copay_card" && (p.claimVoucher ?? 0) > 0
-      ? { bin: null, payer: voucherProgrammeFor(p.claimBin), portion: "secondary" as const }
-      : { bin: p.claimBin, payer: p.claimPayer ?? p.payer, portion: "primary" as const }),
+    ...(p.source === "copay_card" && claimShares({ remitCents: p.claimRemit, evoucherCents: p.claimVoucher, evoucherMessageCents: p.claimVoucherMessage, evoucherProgramme: p.claimVoucherProgramme }).programme !== null
+      ? { bin: null, payer: p.payer, portion: "programme" as const }
+      : { bin: p.claimBin, payer: p.claimPayer ?? p.payer, portion: "plan" as const }),
     /* The claim it settled: a payment settles that claim's own share and no other (payer-owed.ts). */
     claimId: p.claimId,
     cents: p.amountCents,

@@ -9,8 +9,8 @@ import { ageOutstanding, arReport, arReportText, arReportCsv } from "../src/lib/
  */
 const BIN = "999011";
 const AS_AT = "2026-10-31";
-const bill = (claimId: string, dateFilled: string, cents: number, over: Partial<Receivable> = {}): Receivable => ({ bin: BIN, name: "Test Plan", dateFilled, cents, cashPlan: false, claimId, portion: "primary", ...over });
-const paid = (claimId: string | null, cents: number, over: Partial<Received> = {}): Received => ({ bin: BIN, payer: "Test Plan", cents, receivedOn: "2026-10-10", matched: claimId !== null, claimId, portion: "primary", ...over });
+const bill = (claimId: string, dateFilled: string, cents: number, over: Partial<Receivable> = {}): Receivable => ({ bin: BIN, name: "Test Plan", dateFilled, cents, cashPlan: false, claimId, portion: "plan", ...over });
+const paid = (claimId: string | null, cents: number, over: Partial<Received> = {}): Received => ({ bin: BIN, payer: "Test Plan", cents, receivedOn: "2026-10-10", matched: claimId !== null, claimId, portion: "plan", ...over });
 
 describe("a payer that has part-paid, aged claim by claim", () => {
   const receivables = [bill("c1", "2026-09-01", 10000), bill("c2", "2026-09-20", 7000), bill("c3", "2026-10-15", 5000)];
@@ -55,8 +55,8 @@ describe("a payer that has part-paid, aged claim by claim", () => {
 
 describe("a voucher is a secondary share on the claim", () => {
   test("the programme's payment settles only the secondary share, the plan's only the primary", () => {
-    const r = [bill("c1", "2026-09-10", 81347), bill("c1", "2026-09-10", 10000, { bin: null, name: "Veridikal (eVoucher)", portion: "secondary" })];
-    const s = owedByPayer(r, [paid("c1", 10000, { bin: null, payer: "Veridikal (eVoucher)", portion: "secondary" })], AS_AT);
+    const r = [bill("c1", "2026-09-10", 81347), bill("c1", "2026-09-10", 10000, { bin: null, name: "Veridikal (eVoucher)", portion: "programme" })];
+    const s = owedByPayer(r, [paid("c1", 10000, { bin: null, payer: "Veridikal (eVoucher)", portion: "programme" })], AS_AT);
     const plan = s.lines.find((l) => l.bin === BIN)!;
     const programme = s.lines.find((l) => l.name === "Veridikal (eVoucher)")!;
     assert.equal(plan.outstandingCents, 81347);

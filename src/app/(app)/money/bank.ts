@@ -55,7 +55,7 @@ async function matchContext(): Promise<MatchContext> {
     postageBills,
     facilitatorPaid: [...facilitatorByDay].map(([on, cents]) => ({ on, cents })),
     payers: [...payers],
-    suppliers: sup.map((s) => ({ id: s.id, name: s.name })),
+    suppliers: sup.map((s) => ({ id: s.id, name: s.name, accountNumber: s.accountNumber ?? null })),
     vendors: ven.map((v) => ({ id: v.id, name: v.name })),
     unpaidBills: bills.map((b) => ({ id: b.id, vendorId: b.vendorId, vendorName: b.vendorId ? vendorName.get(b.vendorId) ?? null : null, amountCents: b.amountCents, invoiceDate: b.invoiceDate })),
     cardFeeBills,
