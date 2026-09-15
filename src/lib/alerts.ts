@@ -243,6 +243,42 @@ export async function alerts(): Promise<Alert[]> {
     });
   }
 
+  // ── Card money the register took with no batch on file ────────────
+  /*
+   * The register's card takings are checked every morning against the card batch received that day (register.ts). A day
+   * with takings and no batch is card money not in the cash account, and the only fix is forwarding the batch email —
+   * nothing arrives by itself. P-6 found three such days in September, $12,029.63. Soon rather than now: it is money
+   * already in the bank, missing only from the books.
+   */
+  try {
+    const check = s.pioneer_register_check ? (JSON.parse(s.pioneer_register_check) as { missingBatches?: { day: string; cents: number }[]; batchesDiffer?: { day: string }[] }) : null;
+    const missing = check?.missingBatches ?? [];
+    if (missing.length > 0) {
+      const cents = missing.reduce((n, m) => n + m.cents, 0);
+      out.push({
+        key: "card-batches-missing",
+        level: "soon",
+        title: `${missing.length} card batch${missing.length === 1 ? "" : "es"} never forwarded, $${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        why: `The register took card payments on ${missing.map((m) => `${fmt(m.day)} ($${(m.cents / 100).toFixed(2)})`).join(", ")} and no batch report for ${missing.length === 1 ? "that day" : "those days"} has reached the inbox, so that card money is not in the cash account. Forward the batch email${missing.length === 1 ? "" : "s"} for ${missing.length === 1 ? "it" : "them"}.`,
+        href: "/inbox",
+        action: "Open the inbox",
+      });
+    }
+    const differs = check?.batchesDiffer ?? [];
+    if (differs.length > 0) {
+      out.push({
+        key: "card-batches-differ",
+        level: "now",
+        title: `A card batch disagrees with the register on ${differs.map((d) => fmt(d.day)).join(", ")}`,
+        why: "The register's card takings and the batch received that day have matched to the cent on every day measured, so a difference is a batch misread or a card sale not settled.",
+        href: "/money",
+        action: "Look at it",
+      });
+    }
+  } catch {
+    /* A setting that will not parse is no reason to lose the rest of the list. */
+  }
+
   // ── The things that run themselves, when they stop ────────────────
   /*
    * A backup that failed is the only automation failure that belongs on this list.

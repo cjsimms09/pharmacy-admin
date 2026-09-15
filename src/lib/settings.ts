@@ -408,6 +408,10 @@ export const SETTING_KEYS = [
   // What PioneerRx says each plan is. Weekly, with the other reference data.
   "pioneer_pull_plan_types_on",
   "pioneer_pull_plan_types_result",
+  // The register's drawer deposits banked, and its card takings set against the card batches. See register.ts.
+  "pioneer_pull_register_on",
+  "pioneer_pull_register_result",
+  "pioneer_register_check",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;

@@ -33,7 +33,7 @@
  */
 import "dotenv/config";
 
-type Feed = "on-hand" | "claims" | "invoices" | "retail" | "suppliers" | "catalogue" | "plan-types";
+type Feed = "on-hand" | "claims" | "invoices" | "retail" | "register" | "suppliers" | "catalogue" | "plan-types";
 import type { DispensedRow, PayerSide } from "../src/lib/dispensed-export";
 
 async function main() {
@@ -62,6 +62,7 @@ async function main() {
         ...(s.pioneer_pull_claims_on === today ? [] : (["claims"] as Feed[])),
         ...(s.pioneer_pull_invoices_on === today ? [] : (["invoices"] as Feed[])),
         ...(s.pioneer_pull_retail_on === today ? [] : (["retail"] as Feed[])),
+        ...(s.pioneer_pull_register_on === today ? [] : (["register"] as Feed[])),
         // Monday, or never pulled. 238,952 catalogue rows is the heavy one and the owner said weekly
         // is enough unless it turns out to be free.
         ...(new Date().getDay() === 1 || !s.pioneer_pull_catalogue_on ? (["suppliers", "catalogue"] as Feed[]) : []),
@@ -123,6 +124,11 @@ async function main() {
         await setSetting("pioneer_pull_retail_on", today);
         await setSetting("pioneer_pull_retail_result", `${new Date().toISOString()}: ${r}`);
         console.log(`retail: ${r} (${Date.now() - started}ms)`);
+      } else if (feed === "register") {
+        const r = await pullRegister();
+        await setSetting("pioneer_pull_register_on", today);
+        await setSetting("pioneer_pull_register_result", `${new Date().toISOString()}: ${r}`);
+        console.log(`register: ${r} (${Date.now() - started}ms)`);
       } else if (feed === "suppliers") {
         const r = await pullSuppliers();
         await setSetting("pioneer_pull_suppliers_result", `${new Date().toISOString()}: ${r}`);
@@ -145,7 +151,7 @@ async function main() {
       }
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
-      await setSetting(feed === "on-hand" ? "pioneer_pull_on_hand_result" : feed === "claims" ? "pioneer_pull_claims_result" : feed === "invoices" ? "pioneer_pull_invoices_result" : feed === "retail" ? "pioneer_pull_retail_result" : feed === "suppliers" ? "pioneer_pull_suppliers_result" : feed === "plan-types" ? "pioneer_pull_plan_types_result" : "pioneer_pull_catalogue_result", `${new Date().toISOString()}: failed: ${why}`);
+      await setSetting(feed === "on-hand" ? "pioneer_pull_on_hand_result" : feed === "claims" ? "pioneer_pull_claims_result" : feed === "invoices" ? "pioneer_pull_invoices_result" : feed === "retail" ? "pioneer_pull_retail_result" : feed === "register" ? "pioneer_pull_register_result" : feed === "suppliers" ? "pioneer_pull_suppliers_result" : feed === "plan-types" ? "pioneer_pull_plan_types_result" : "pioneer_pull_catalogue_result", `${new Date().toISOString()}: failed: ${why}`);
       console.error(`${feed}: failed: ${why}`);
     }
   }
@@ -933,6 +939,64 @@ async function pullSuppliers(): Promise<string> {
  * 4 the payment against it, 5 a discount, 10 an account posting. 2 is Item — the front of shop —
  * and it is the only one taken here.
  */
+/**
+ * The register's day: each drawer day's cash and cheque deposit banked as a patient receipt, and its card takings set
+ * against the card batch received that day. The rules and why are in `src/lib/register.ts`.
+ *
+ * Totals only. The drawer summaries and the payments table are read by posting day and nothing that names a patient, a
+ * card holder or a cheque writer is selected.
+ */
+async function pullRegister(): Promise<string> {
+  const { query } = await import("../src/lib/pioneer-sql");
+  const drawers = await query(
+    `select convert(varchar(10), dr.PostedOn, 23) as day,
+            sum(isnull(s.CashDeposit, 0)) as cash_deposit, sum(isnull(s.CheckDeposit, 0)) as check_deposit,
+            sum(isnull(s.SignOnlyTotal, 0)) as sign_only, sum(isnull(s.ARTotal, 0)) as charged, sum(isnull(s.ARPaymentsPosted, 0)) as account_payments
+       from PointOfSale.Drawer dr
+       join PointOfSale.DrawerSummary s on s.DrawerSummaryID = dr.DrawerSummaryID
+      where dr.PostedOn >= '2026-09-01'
+      group by convert(varchar(10), dr.PostedOn, 23)`,
+    {},
+    1000,
+  );
+  const cards = await query(
+    `select convert(varchar(10), pay.PostingDate, 23) as day, -sum(pay.Amount) as card
+       from PointOfSale.Payment pay
+       join PointOfSale.SaleTransaction sale on sale.SaleTransactionID = pay.SaleTransactionID
+      where pay.PostingDate >= '2026-09-01' and pay.PaymentTypeEnum = 2 and pay.VoidedOn is null and sale.VoidedOn is null
+      group by convert(varchar(10), pay.PostingDate, 23)`,
+    {},
+    1000,
+  );
+  const cents = (v: unknown) => (v === null || v === undefined || v === "" ? 0 : Math.round(Number(v) * 100));
+  const byDay = new Map<string, import("../src/lib/register").RegisterDay>();
+  const dayOf = (day: string) => byDay.get(day) ?? byDay.set(day, { day, cashDepositCents: 0, checkDepositCents: 0, cardCents: 0, signatureOnlyCents: 0, chargedToAccountsCents: 0, accountPaymentsCents: 0 }).get(day)!;
+  for (const r of drawers.rows) {
+    const d = dayOf(String(r.day));
+    d.cashDepositCents += cents(r.cash_deposit);
+    d.checkDepositCents += cents(r.check_deposit);
+    d.signatureOnlyCents += cents(r.sign_only);
+    d.chargedToAccountsCents += cents(r.charged);
+    d.accountPaymentsCents += cents(r.account_payments);
+  }
+  for (const r of cards.rows) dayOf(String(r.day)).cardCents += cents(r.card);
+  const days = [...byDay.values()];
+  if (days.length === 0) return "the register posted nothing since 1 September";
+
+  const { bankRegisterDays } = await import("../src/lib/register-store");
+  const check = await bankRegisterDays(days, { userName: "the PioneerRx pull" });
+  const { setSetting } = await import("../src/lib/settings");
+  await setSetting("pioneer_register_check", JSON.stringify(check));
+  const $ = (c: number) => `${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return (
+    `${days.length} register days; ${check.banked} drawer deposits banked (${$(check.bankedCents)})` +
+    `${check.corrected ? `, ${check.corrected} corrected` : ""}${check.refused.length ? `, ${check.refused.length} refused as already banked` : ""}; ` +
+    `card takings agree with the card batch on ${check.batchesAgree} day${check.batchesAgree === 1 ? "" : "s"}` +
+    `${check.missingBatches.length ? `; no card batch on file for ${check.missingBatches.map((m) => `${m.day} (${$(m.cents)})`).join(", ")}` : ""}` +
+    `${check.batchesDiffer.length ? `; the batch differs from the register on ${check.batchesDiffer.map((m) => m.day).join(", ")}` : ""}`
+  );
+}
+
 async function pullRetail(): Promise<string> {
   const { query } = await import("../src/lib/pioneer-sql");
   const r = await query(
