@@ -213,6 +213,22 @@ correct. I asserted a fault in somebody else's work while owning my own, without
 effect of it would have been to make a drift that was mine alone look systemic. Worse than the nine
 dates, and found only because session 1 disputed it rather than accepting the company.
 
+## Found 15 September, daily check — session 1
+
+| Item | Money | State | Owner |
+|---|---|---|---|
+| **Brand book "losing $2,019.24" is a measurement fault.** Rexulti makes money on every September fill (1.033–1.040 of cost); Zepbound pens lose ~$30 on two ESI fills paid 97% of acquisition. Cause: primary+secondary pairs (Rexulti 335651, Zepbound 337199) are two claim rows each carrying the full cost, plus a reversed unsold Rexulti (337216). Found by session 2. | −$2,019.24 → ≈ −$37 | **told him not to act on it** | 1 |
+| **Below-cost totals were counted per claim row, not per fill.** $11,951.77 of September's $25,522.19 per-row below-cost sits on the 76 fills with two payer rows (2.6% of fills, 47% of the money). Every figure from the claim-remedy probes on 14 September is overstated by up to that. Nothing filed or shown from them. Router to be rebuilt on fills; COB revenue (which copay is final) is not knowable from row order alone and is not to be guessed. | up to $11,951.77 | not started | 1 |
+| **13 fills, $2,568.02, in PioneerRx and not in the site**, from 4–10 September (one $1,204.25 on the 4th). Not the day-behind timing gap — the copy and the reports both cover those days. `pioneer_claims_reconcile`. | $2,568.02 | **not diagnosed** | 1 |
+| **"$23,076.03 they have not sent"** on the McKesson chase line. All 11 deliveries are dated 14 September and McKesson invoices arrive the next day, so the true state is *expected, not yet arrived*. The sentence says more than one day supports — the eighth shape. Wants a grace day before it says "not sent". | $23,076.03 | not started | 1 |
+| Basis of reimbursement 20: no definition on this machine. Contracts (399 docs, 0 hits), PioneerRx (`Prescription.Claim.BasisOfReimbursementDetermination` is a bare column; its code tables cover reject codes only), and the feed all checked. Needs RxLocal/PioneerRx support or the NCPDP external code list. | $19,226.72 on 270 claims | waiting on an ask | him |
+| Two ParMed invoices a few dollars above PioneerRx's receiving (7491405516 +$1.57, 7491384103 +$4.83). The invoice is the record; likely a surcharge PioneerRx does not key. | $6.40 | noted, not chased | — |
+
+Fixed and deployed the same morning: the 8am PioneerRx pull had been running at 7pm the evening before
+(local hour, UTC date — `5782643`). This morning's pull was then run by hand; the copy is current to
+14 September. **The deploy was made while he was connected** (two sessions from 10.133.63.137) — the
+check printed "nobody on it" whatever it found, and that line was read instead of the output.
+
 ## Mine, not yet started
 
 This heading was deleted by accident on 14 September and restored the same day. I used it as the
