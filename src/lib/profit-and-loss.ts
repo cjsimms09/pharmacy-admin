@@ -576,7 +576,7 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
   absent("Rent and occupancy", "Rent and occupancy.");
   absent(
     "Card processing and bank fees",
-    "Card processing and bank fees — two to three per cent of everything taken on a card, and nobody sends an invoice for it.",
+    "Card processing fees — about five per cent of card takings in August. Global Payments' monthly statement books them when it is forwarded to the inbox; typing them on Spending as well counts them twice.",
   );
   /*
    * DIR fees are entered by hand, so their absence means "nobody has entered them yet" far more
@@ -738,7 +738,7 @@ export type SharedInputs = {
   /** Money received against fills, by the day it arrived, for the cash account. */
   payments: { source: string; receivedOn: string | null; amountCents: number; revenueCents: number | null }[];
   /** Per month: the bills on the basis asked for, the receipts entered, the rebate earned, and the driver's invoices where the pharmacy pays them. */
-  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; driverCents: number }>;
+  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; driverCents: number }>;
   /** The wholesalers' own ledgers: what cleared, when, and under which ACH. */
   statementLines: { supplier: string; invoiceNumber: string; netCents: number; clearingDate: string | null; checkNumber: string | null }[];
 };

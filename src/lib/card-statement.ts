@@ -15,12 +15,13 @@
  *   "GP Processing Fees", Global Payments' own charges — each with a subtotal.
  *   A Deposit Detail table: one row per batch, "000149 T $4,482.40 - $4,482.40 -", its batch date, and
  *   "ACH 08/01/2026 --- $4,482.40". The daily discount column is "-": nothing is held back from a
- *   deposit. Each batch reaches the bank whole, the next day, weekends included.
+ *   deposit. Each batch reaches the bank whole; on August's bank statement, two to four days after it closed.
  *   And one row "Fees T 08/31/2026 --- ($4,778.73)": the month's fees, taken by a single auto-debit.
  *
  * ── Where it goes in the books ──
  *
- * **Fees only.** An expense in the statement month, paid on the auto-debit date the statement prints.
+ * **Fees only.** An expense in the statement month, paid when the bank's fee debit shows it left — the month after:
+ * July's fees left on 3 August, though the statement prints the last day of the month beside them.
  *
  * **Never the deposits.** They are the same money as the daily card batch reports, which are already
  * banked as counter takings. They are read for one purpose: to check that every batch the processor
@@ -195,7 +196,7 @@ export function readCardStatement(text: string): CardStatementRead {
       says:
         `Card processing statement for ${iso(period[1])} to ${iso(period[2])}: ${money(totalFeesCents)} of fees on ${money(totalDepositsCents)} of card deposits ` +
         `(${rate.toFixed(2)}%) — ${money(passThroughCents)} passed through from the card networks and ${money(processorCents)} charged by Global Payments — ` +
-        `taken by auto-debit on ${iso(debit![1])}. ${depositRows.length} batches deposited.`,
+        `printed against ${iso(debit![1])} and taken by the bank the month after. ${depositRows.length} batches deposited.`,
     },
   };
 }

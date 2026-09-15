@@ -266,9 +266,7 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
    * to be taken as counted, and none of August's ten had a bill behind it (Session 2, money map G-POST-1).
    */
   if (meaning.kind === "postage" && ctx.postageBills) {
-    const out = -line.amountCents;
-    const near = (on: string) => Math.abs(Date.parse(`${on}T00:00:00Z`) - Date.parse(`${line.on}T00:00:00Z`)) <= 3 * 86_400_000;
-    if (ctx.postageBills.some((b) => b.amountCents === out && near(b.on))) {
+    if (postageBillFor(ctx.postageBills, line) >= 0) {
       return { kind: "already_counted", what: meaning.counterparty, where: meaning.alreadyCounted ?? "postage", why: meaning.says };
     }
     return {
@@ -447,13 +445,39 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
   return { kind: "unplaced", why: "a payment the site cannot tie to a bill or an invoice" };
 }
 
+/**
+ * The postage bill a card charge is, or -1: the same amount, confirmed on the day of the charge or up to three days
+ * before it (the card posts after the purchase), the closest first.
+ */
+export function postageBillFor(bills: { amountCents: number; on: string }[], line: BankLine): number {
+  const day = Date.parse(`${line.on}T00:00:00Z`);
+  let best = -1;
+  let bestGap = Infinity;
+  bills.forEach((b, i) => {
+    const gap = day - Date.parse(`${b.on}T00:00:00Z`);
+    if (b.amountCents === -line.amountCents && gap >= 0 && gap <= 3 * 86_400_000 && gap < bestGap) {
+      best = i;
+      bestGap = gap;
+    }
+  });
+  return best;
+}
+
 export function placeLines(lines: BankLine[], ctx: MatchContext): { line: BankLine; placement: Placement }[] {
   /* An open item is settled once: the first line that pays it takes it. */
   const bills = [...ctx.unpaidBills];
   const invoices = [...ctx.unpaidInvoices];
+  /*
+   * And a postage confirmation accounts for one charge. It did not: the bill was never used up, so three confirmations
+   * covered four $100 top-ups in September, and the one with no confirmation was called counted (Session 2, G-POST-1).
+   */
+  const postage = ctx.postageBills ? [...ctx.postageBills] : undefined;
   const out: { line: BankLine; placement: Placement }[] = [];
   for (const line of lines) {
-    const placement = placeLine(line, { ...ctx, unpaidBills: bills, unpaidInvoices: invoices });
+    const placement = placeLine(line, { ...ctx, unpaidBills: bills, unpaidInvoices: invoices, postageBills: postage });
+    if (postage && placement.kind === "already_counted" && readBankDescriptor(line.description, line.amountCents).kind === "postage") {
+      postage.splice(postageBillFor(postage, line), 1);
+    }
     if (placement.kind === "pays_bill") bills.splice(bills.findIndex((b) => b.id === placement.expenseId), 1);
     if (placement.kind === "pays_invoice") invoices.splice(invoices.findIndex((v) => v.id === placement.invoiceId), 1);
     out.push({ line, placement });
