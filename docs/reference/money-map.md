@@ -921,7 +921,19 @@ equal the deposit to the cent, which is that case.
 
 ### Gaps for this feed
 
-**G-835-1. A ProviderPay 835 for a direct payer, arriving by mail, SFTP or the intake drop, banks the deposit a second time.**
+**G-835-1. A ProviderPay 835 for a direct payer, arriving by mail, SFTP or the intake drop, banks the deposit a second time. — FIXED, d477ee4 (deployed).**
+Re-run on a fresh snapshot (17:49 UTC), in two parts.
+- **The door:** the real `importRemittance` with banking on, fed the one non-MTF 835 kept (the site's test
+  file) with its payer renamed in memory and its own trace each run. "ProviderPay": posted 2, **not banked**.
+  "MEDICARE TRANSACTION FACILITATOR": posted 2, **not banked**. A control, "SOME OTHER PLAN": posted 2,
+  **banked**, so the test can tell the difference.
+- **The gate's belt,** rebuilding August's 48 remittances as before and banking them straight through
+  `addCashReceipt`: the 15 amount-matched are now **refused** ($148,965.45), and so are the 20 HMA by
+  number. The 13 with no match would still pass the gate, but through the real door a ProviderPay 835 never
+  reaches it.
+
+Banked beside a report receipt: **$0.00**.
+The finding as first recorded:
 OBSERVATION: rehearsed with August's real posted remittances. 15 direct-payer remittances, **$148,965.45**, were
 banked beside the payer payment report's receipts for the same money.
 - The 835 names the payer "ProviderPay"; the report names "ARGUS HEALTH SYS" and the rest.
@@ -1018,7 +1030,16 @@ All 12 real files parse and **every one balances**: 25 payment lines, BPR total 
 
 ### Gaps for this feed
 
-**G-MTF-1. One facilitator receipt replaces the whole month's facilitator money on the cash account.**
+**G-MTF-1. One facilitator receipt replaces the whole month's facilitator money on the cash account. — (b) FIXED in d477ee4; (a) OPEN, A's.**
+Re-run on a fresh snapshot (17:49 UTC), with the bank reproduction following d477ee4 (facilitator-paid
+context):
+- the real 8 September MTF file through a banking door: posted 1, **not banked**; September line stays **$2,789.08**;
+- the mid-month bank export: all 5 MTF credits placed **already counted**, nothing banked; line stays **$2,789.08**.
+
+What remains is (a), the all-or-nothing stand-in in `profit-and-loss.ts`, owned by **A**. **Nothing banks a
+facilitator receipt automatically any more**, so only a facilitator receipt typed by hand on `/money` can
+still trigger it. It is open against A.
+The finding as first recorded:
 OBSERVATION: the account uses MTF payments only while the month holds no facilitator receipt, all or nothing
 (`profit-and-loss.ts` 1003). Rehearsed on September's real money:
 - **one MTF 835 through a banking door** made the line $5.36 instead of $2,789.08, **$2,783.72 short, with
@@ -1036,6 +1057,20 @@ Proposed fix: (a) replace all-or-nothing with per payment. An MTF payment stands
 holds it: the same trace (for an 835-banked receipt), or the same cents on the same day (for a bank line;
 August, 7 of 7). (b) An MTF 835 never banks, whatever door it comes through, since its money is already on
 the account through the stand-in. The same principle as G-835-1.
+
+**G-MTF-2. An MTF bank credit with no remittance for its day can confirm another payer's receipt.**
+OBSERVATION: at d477ee4, an MTF credit whose day's remittances do not equal it is placed `unplaced`, and
+`bank.ts` then matches every unplaced credit against all receipts in the window. Rehearsed: an MTF credit of
+$123.45 on 9/17, with no MTF remittance that day, **confirmed a Health Mart Atlas receipt of $123.45 from 9/16**.
+The real HMA bank line would then find its receipt claimed and stay unplaced. Money: $0.00 over. Links: both
+wrong.
+SHOULD BE: a credit the site has identified as the facilitator's is evidence about facilitator money only, as
+a card deposit is about card batches (G-CARD-11).
+DIFFERENCE: yes, rehearsed. It needs the same cents within 7 days. The case that reaches it is the facilitator
+credits with no file (August had 7 before the CLI started).
+Owner: `money/bank.ts` — **A**; `bank-statement.ts` — not in the table.
+Proposed fix: return a facilitator-specific kind from `placeLine`, and skip the receipt match for it, as
+56f0ce2 does for `card_deposit`.
 
 ### Not checked, said out loud
 
