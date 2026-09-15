@@ -8,7 +8,12 @@
 -- MERGE AND RUN ON 1 OCTOBER, NOT BEFORE. A migration runs on the next start after it is merged. Merged in September,
 -- it would take the dry run's own September money out of every report while the dry run still needs it. A date guard
 -- inside the SQL would be worse: run early, it would do nothing and still be marked applied, and never run again.
--- If another migration takes slot 0123 first, renumber this one at merge (see the Drizzle journal note in memory).
+-- At merge, two things in drizzle/meta/_journal.json, or a migration is skipped forever:
+--   * the slot: the next free number (0123 is session 1's, for payer position and fill total price);
+--   * the "when": greater than every entry already in the journal and no later than the moment of merging. A migration
+--     is applied only if its "when" is later than the last one applied, so a future "when" here would silently skip
+--     any migration written after it with an earlier time. The placeholder is 2026-10-01T00:00Z; reset it to the
+--     merge time if any journal entry is later.
 --
 -- The same rule as 0114, by the day the money arrived, and for the same reason (books-start.ts): money received in
 -- October is October's cash whatever fill it paid for.

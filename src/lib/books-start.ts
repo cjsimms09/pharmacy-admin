@@ -53,7 +53,7 @@
 /*
  * 1 October 2026. The owner, 15 September: "books start on 10/01 but we need to do a complete dry run this month to
  * troubleshoot EVERYTHING and make sure everything works starting 10/01". September 2026 was that dry run; its rows
- * are kept and matchable, and counted nowhere, by the same rule as the months before it. Migration 0123 re-flags the
+ * are kept and matchable, and counted nowhere, by the same rule as the months before it. Migration 0124 re-flags the
  * rows written while the date was 2026-09-01. Merged and run on 1 October, not before.
  */
 export const SITE_STARTS_ON = "2026-10-01";
