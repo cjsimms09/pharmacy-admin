@@ -556,8 +556,18 @@ async function importOneRemittance(
    * stops on the 5th, so a payment for a fill of 2 August is as unmatchable as one from May, and
    * calling it a failure would be as wrong.
    */
+  /*
+   * The later of the two, because each is wrong on its own.
+   *
+   * The oldest claim row alone calls August's payments matchable: 2,029 of them, against a month
+   * whose claims are a 78-fill test sample. The books' start alone would call a genuine September
+   * failure unmatchable if the claims export had not reached back that far. Measured against live
+   * data on 16 September 2026 before either was trusted — the wide version produced $149,798.52 of
+   * confident nonsense.
+   */
   const oldest = await db.query.claims.findFirst({ columns: { dateFilled: true }, orderBy: (c, { asc }) => asc(c.dateFilled) });
-  const oldestFill = oldest?.dateFilled ?? null;
+  const { SITE_STARTS_ON: booksFrom } = await import("./books-start");
+  const oldestFill = oldest?.dateFilled ? (oldest.dateFilled > booksFrom ? oldest.dateFilled : booksFrom) : null;
 
   const held = await db.query.claimPayments.findMany({ columns: { reference: true, rxNumber: true, amountCents: true } });
   /*

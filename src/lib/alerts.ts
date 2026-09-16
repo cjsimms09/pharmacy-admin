@@ -259,19 +259,42 @@ export async function alerts(): Promise<Alert[]> {
    * up, and this is what will say so out loud on the morning it arrives.
    */
   try {
-    const oldest = await db.query.claims.findFirst({ columns: { dateFilled: true }, orderBy: (c, { asc }) => asc(c.dateFilled) });
-    if (oldest) {
-      const stranded = await db.query.claimPayments.findMany({
-        where: (p, { and, isNull, gte, eq: is }) => and(isNull(p.claimId), gte(p.dateFilled, oldest.dateFilled), is(p.outOfBooks, false)),
+    /*
+     * Two things had to be narrowed before this could be trusted, and both were measured on the live
+     * data before it shipped. Written out because each one, left wide, produced a confident number
+     * that was wrong by a hundred and fifty thousand dollars or by ten payments.
+     *
+     * The floor is the day the books begin, not the oldest claim row. August's claims are a thin
+     * test sample of 78 fills, so "newer than the oldest claim on file" counted 2,029 August
+     * payments as failures: 1,934 payments and $149,798.52 of alarm, every cent of it the sample
+     * being thin rather than anything being wrong.
+     *
+     * And a payment is only stranded where the site holds NO claim on that prescription at all.
+     * Where it holds one and the payment still did not attach, the fill is here and its claim was
+     * reversed — recorded deliberately against no claim, with a note saying so. That is all ten of
+     * the September ones. Counting them would have made this fire on its first morning with nothing
+     * behind it, which is how an alert teaches the person reading it to skip the next one.
+     *
+     * With both narrowings: nought. The measurement is the point — an alert that has never been run
+     * against the real data is a guess about the real data.
+     */
+    const { SITE_STARTS_ON } = await import("./books-start");
+    {
+      const inBooks = await db.query.claimPayments.findMany({
+        where: (p, { and, isNull, gte, eq: is }) => and(isNull(p.claimId), gte(p.dateFilled, SITE_STARTS_ON), is(p.outOfBooks, false)),
         columns: { amountCents: true, payer: true, rxNumber: true },
       });
+      const known = new Set(
+        (await db.query.claims.findMany({ columns: { rxNumber: true } })).map((c) => c.rxNumber),
+      );
+      const stranded = inBooks.filter((p) => !known.has(p.rxNumber));
       if (stranded.length > 0) {
         const cents = stranded.reduce((n, p) => n + p.amountCents, 0);
         const payers = [...new Set(stranded.map((p) => p.payer ?? "an unnamed payer"))];
         out.push({
           key: "payments-stranded",
           level: "now",
-          title: `${stranded.length} payment${stranded.length === 1 ? "" : "s"} cannot be matched to a claim, ${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          title: `${stranded.length} payment${stranded.length === 1 ? "" : "s"} for a prescription this site has never seen, ${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
           why:
             `From ${payers.slice(0, 3).join(", ")}${payers.length > 3 ? ` and ${payers.length - 3} more` : ""}, for fills this site holds claims for. ` +
             `A payment for a fill older than the records cannot match and is not counted here; these can and did not, which means the prescription number, ` +
