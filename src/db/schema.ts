@@ -933,6 +933,16 @@ export const invoiceLines = sqliteTable(
      * halves cannot be told apart inside it. Null where the invoice does not divide its items.
      */
     controlled: integer("controlled", { mode: "boolean" }),
+    /**
+     * The schedule this line's drug is, and which source said so (migration 0127).
+     *
+     * `controlled` above asks only whether the line sits in the Schedule II half of an invoice that prints halves. This
+     * asks what the drug is: "schedule_2", "schedule_3_5" or "none", from the invoice's own sections, the FDA directory,
+     * or PioneerRx's receiving record — which is about the delivery and can only prove a negative. Null is "nobody could
+     * say", and must never be read as "not controlled". See line-schedule.ts.
+     */
+    deaSchedule: text("dea_schedule"),
+    deaScheduleFrom: text("dea_schedule_from"),
     createdAt: text("created_at").notNull().default(now()),
   },
   (t) => [

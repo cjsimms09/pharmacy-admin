@@ -1328,6 +1328,7 @@ export async function writeInvoiceLines(
     invoiceDate: inv?.invoiceDate ?? null,
     text,
     printedTotalCents: inv?.totalCents ?? null,
+    invoiceNumber: inv?.invoiceNumber ?? null,
   });
 
   /*
@@ -2518,7 +2519,7 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
   });
   if (text) await writeInvoiceLines(id, text);
 
-  await storeInvoiceLines(id, { supplier, supplierId: matched?.id ?? null, invoiceDate, text: text ?? "", printedTotalCents: totalCents });
+  await storeInvoiceLines(id, { supplier, supplierId: matched?.id ?? null, invoiceDate, text: text ?? "", printedTotalCents: totalCents, invoiceNumber });
 
   return { id, documentId, schedule, needsReview: schedule === "unknown" };
 }
@@ -2713,6 +2714,8 @@ export async function storeInvoiceLines(
     invoiceDate: string | null;
     text: string;
     printedTotalCents: number | null;
+    /** The supplier's own number, to find what PioneerRx recorded receiving against it. */
+    invoiceNumber?: string | null;
   },
 ): Promise<{ stored: number; unread: number; reconciles: boolean | null; readCents: number; shortCents?: number; shortNote?: string | null }> {
   const { parseInvoiceLines } = await import("./invoice-lines");
@@ -2795,6 +2798,20 @@ export async function storeInvoiceLines(
   }
 
   await db.delete(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId));
+  /*
+   * What each line's drug is, beside which half of the invoice it came on.
+   *
+   * `controlled` only ever answered "is this in the Schedule II half", and only IPD prints halves — so it is null on
+   * every McKesson line, which is "not said" and not "not controlled". The schedule is asked of the sources that can
+   * answer for a line (line-schedule.ts) and stays null where none of them can.
+   */
+  const { lineSchedule } = await import("./line-schedule");
+  const { ndcSchedules } = await import("./drug-directory-store");
+  const scheduleOf = await ndcSchedules();
+  const deliveryRow = meta.invoiceNumber
+    ? await db.query.pioneerPurchases.findFirst({ where: eq(schema.pioneerPurchases.invoiceNumber, meta.invoiceNumber), columns: { deaSchedules: true } })
+    : null;
+  const deliveryCodes = deliveryRow?.deaSchedules ? deliveryRow.deaSchedules.split(",") : null;
   const rows = parsed.lines.map((l) => ({
     id: newId(),
     invoiceId,
@@ -2813,7 +2830,10 @@ export async function storeInvoiceLines(
     rebated: l.rebated,
     // Which half of a combined invoice the line is on, so the Schedule II items are separable
     // inside the document as well as by the folder it is filed in. See invoice-lines.ts.
-    controlled: l.controlled ?? null,
+    ...(() => {
+      const said = lineSchedule({ sectionControlled: l.controlled, directoryCode: scheduleOf(l.ndc11), deliveryCodes });
+      return { controlled: said.controlled, deaSchedule: said.schedule, deaScheduleFrom: said.from };
+    })(),
   }));
   for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
   /*
