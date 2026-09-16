@@ -280,6 +280,40 @@ sending. Each needs somebody set up once:
 The alert and the money-waiting row are gone. An alert that repeats a request already refused costs
 the list the only thing it has.
 
+## Built 16 September — what we are expecting, and when a month is closed
+
+`/expected`, linked from Today. Everything somebody outside the building has to send, judged against
+its own **measured** rhythm rather than a cadence typed into a file: NADAC came back "100% of them on
+a Wednesday", the claims export daily bar Sunday, MTF's 835s daily. It sharpens as more arrive.
+
+Three rules keep it from crying wolf, all of them his words:
+
+- **Nothing is called overdue on a rhythm nobody measured.** To say a sender stopped is to say it
+  broke its own habit, and a habit typed into a file is not its habit. A declared cadence may say
+  "due", never "stopped". That is the general form of *"dont alert me we havent gotten an anda
+  invoice in 7 days"*.
+- **Invoices are judged by receipts, not by silence.** *"we are getting receipts from pioneer. so for
+  invoices it should use those for alerts.. but only on companies that are set to receive invoices";
+  "everything else we are usiong pioneer receipt as invoice".* One row each for ANDA, IPC, IPD,
+  McKesson and ParMed — exactly the five where `invoiceFromPioneer` is false — counted in deliveries
+  with no invoice behind them. No row at all for the rest. Nought outstanding is silent however long
+  they have been quiet, by construction rather than by a threshold.
+- **The early allowance is a share of the period.** Five days is right for a monthly statement; on
+  the card batch it meant the 14th's covered the 16th's run and the missing batch of the 15th
+  disappeared off the screen.
+
+**The month's close** is on the same page: `running` · `waiting on N` · `does not tie` · `closed`,
+and `before_books` for anything before 1 September. *"it should show month closed only once
+everything is done, money matches and everything lines up"* — every document on file with bank lines
+nothing explains is **not** closed, because saying so is a promise that the books balance.
+
+### Two things he should know
+
+| What | Note |
+|---|---|
+| **The monthly checklist was sending him to the wrong bank** | It said to fetch the operating statement "from Wells Fargo — as CSV or QFX". It is Emprise, and Emprise cannot export CSV, QFX or OFX at all, which is the whole reason that reader reads a scan. Corrected. Worth him confirming the split is as the site now has it: **Emprise** the operating account (scan only), **Wells Fargo / ProviderPay** the payer account whose history he downloads on the 1st. |
+| **Does a bank statement know its own month?** | Yes. `scanned-bank-solve.ts` takes the month from the statement's own header and refuses the file outright if it cannot read it, so a statement is filed under the right month by construction and never by upload date. |
+
 ## Mine, not yet started
 
 This heading was deleted by accident on 14 September and restored the same day. I used it as the
