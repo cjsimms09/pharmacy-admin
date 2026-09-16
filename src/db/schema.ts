@@ -1090,6 +1090,16 @@ export const supplierInvoices = sqliteTable(
      * on whichever one is wrong that month.
      */
     paidOn: text("paid_on"),
+    /**
+     * What this invoice's item lines are short by, where a half of it did not read (migration 0126).
+     *
+     * IPD sends the Schedule II items and everything else as two invoices in one PDF, each with its own subtotal. Each
+     * half is judged against its own subtotal and kept on its own merits, so one unreadable line costs its own half's
+     * completeness and nothing else. These say what is missing: the amount, how many lines, and which half in words.
+     */
+    linesShortCents: integer("lines_short_cents"),
+    linesShortCount: integer("lines_short_count"),
+    linesShortNote: text("lines_short_note"),
     receivedBy: text("received_by"),
     /** Anything that did not match — short counts, damage, a substitution. */
     receiptNote: text("receipt_note"),

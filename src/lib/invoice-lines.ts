@@ -65,6 +65,14 @@ export type LineParse = {
   sections: { controlled: boolean; printedCents: number; readCents: number; lines: number }[];
   /** Lines that looked like items but did not reconcile, kept verbatim so somebody can look. */
   unreadable: string[];
+  /**
+   * Lines that look like an item row and that no format claimed at all.
+   *
+   * Different from `unreadable`, which is a line this reader understood and then could not balance. These are the
+   * shapes it does not know, and counting them is what lets a short section say "$112.77 on 2 lines" rather than
+   * "$112.77 somewhere". A person can act on the first; the second is a puzzle.
+   */
+  unrecognised: string[];
   /** Sum of the extended amounts read, for checking against the invoice total. */
   totalCents: number;
   /**
@@ -216,13 +224,23 @@ const IPC_CREDIT = new RegExp(
  * about rather than assumed, because on one line of this very invoice the NDC column printed nine.
  * See `ndcFromRun`.
  */
+/*
+ * The run in front is eleven digits or more, not twelve.
+ *
+ * IPD prints the item number and the NDC run together, and on some lines prints no item number at all — the run is then
+ * the eleven digits of the NDC on its own. Demanding twelve dropped both such lines on invoice 1013225 ($112.77 of
+ * $1,310.68), and because the rest did not then add up to the printed total, nothing from that invoice was kept at all.
+ *
+ * The extension is optional here for the same reason it is on the named form below: IPD leaves it off some lines
+ * entirely, and where it does, the line's own arithmetic supplies it and the section subtotal proves it.
+ */
 const IPD = new RegExp(
-  String.raw`^(\d{12,})` + // item number and NDC, run together
+  String.raw`^(\d{11,})` + // item number and NDC, run together, or the NDC on its own
     String.raw`\s+(\d+)` + // quantity shipped
     String.raw`\s+(\d+)([A-Z]{2,6})` + // back-ordered quantity, then the unit of measure, run together
     String.raw`\s+(${MONEY})` + // unit price
     String.raw`\s+([\d.]+)\s*%?` + // discount, with or without its sign
-    String.raw`\s+(${MONEY})\s*$`, // extension
+    String.raw`(?:\s+(${MONEY}))?\s*$`, // extension, where it printed at all
 );
 
 /**
@@ -243,8 +261,18 @@ const IPD = new RegExp(
  * moves from the line to the section; it does not disappear.
  */
 const IPD_NAMED = new RegExp(
-  String.raw`^(\d{12,})` + // item number and NDC, run together
-    String.raw`([A-Za-z][^\d]{2,60}?)` + // the product name, run onto the digits
+  String.raw`^(\d{11,})` + // item number and NDC, run together
+    /*
+     * The name may carry digits of its own: "A500MG CAPLETS 50C" on invoice 1013225, where forbidding them cost the line
+     * and, with it, the whole invoice. What keeps this honest is not the name's shape but what must follow it — a quantity,
+     * a back-order quantity run onto a unit of measure, and a price — so the lazy match can only end where those begin.
+     */
+    /*
+     * The name may carry digits of its own: "A500MG CAPLETS 50C" on invoice 1013225, where forbidding them cost the line
+     * and, with it, every other line on that invoice. What keeps this honest is not the name's shape but what has to
+     * follow it: a quantity, a back-order quantity run onto a unit of measure, and a price.
+     */
+    String.raw`([A-Za-z][^\r\n]{2,60}?)` + // the product name, run onto the digits
     String.raw`\s+(\d+)` + // quantity shipped
     String.raw`\s+(\d+)([A-Z]{2,6})` + // back-ordered quantity and the unit of measure
     String.raw`\s+(${MONEY})` + // unit price
@@ -794,10 +822,24 @@ export function parseInvoiceLines(
   // A half left open — the last subtotal never printed, or the page it was on did not read — is
   // not silently treated as one kind or the other; those lines keep a null and say nothing.
   const totalCents = out.reduce((n, l) => n + l.extendedCents, 0);
+
+  /*
+   * What looked like an item row and was claimed by nothing.
+   *
+   * Until now such a line left no trace at all: it was not read, and it was not in `unreadable` either, so an invoice
+   * short by two lines could only say it was short by an amount. Counted here, a section that does not balance can name
+   * how many lines it is missing, which is the difference between a job somebody can do and a puzzle.
+   */
+  const looksLikeItem = new RegExp(String.raw`\d{11,}` + String.raw`[\s\S]*` + MONEY);
+  const claimedBy = [MCK, IPC, IPC_CREDIT, IPD, IPD_NAMED, PARMED];
+  const unrecognised = rows
+    .map((l: string) => l.trim())
+    .filter((l: string) => looksLikeItem.test(l) && !claimedBy.some((re) => re.test(l)) && !IPD_SUBTOTAL.test(l) && !/subtotal|invoice total|GLN:/i.test(l));
   return {
     lines: out,
     format,
     unreadable,
+    unrecognised,
     sections,
     totalCents,
     printedTotalCents,

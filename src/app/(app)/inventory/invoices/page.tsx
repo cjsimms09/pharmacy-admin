@@ -1895,10 +1895,23 @@ export default async function InvoicesPage({
                           )}
                           {/* How much of the invoice is held as numbers, so a blank total on a
                               product-by-product page traces back to this row. */}
+                          {/*
+                            Short by a named amount, which is a job somebody can do.
+
+                            IPD sends two invoices in one PDF and each half is judged on its own subtotal, so a half that
+                            could not be read no longer takes the other with it. What is missing is said here — the amount,
+                            the lines and which half — instead of the whole invoice reading "no item lines".
+                          */}
+                          {i.linesShortCents ? (
+                            <span className="badge badge-warn ml-1" title={i.linesShortNote ?? undefined}>
+                              short {money(i.linesShortCents)}
+                            </span>
+                          ) : null}
                           {i.linesRead !== null && (
                             <span className="mt-1 block text-[11px] text-ink-3">
                               {i.linesRead} line{i.linesRead === 1 ? "" : "s"} as numbers
                               {i.linesUnread ? `, ${i.linesUnread} not read` : ""}
+                              {i.linesShortNote ? ` — ${i.linesShortNote}` : ""}
                             </span>
                           )}
                         </td>
