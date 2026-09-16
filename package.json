@@ -17,7 +17,8 @@
     "deploy": "node scripts/deploy.mjs",
     "test": "node scripts/test.mjs",
     "check": "npm run typecheck && npm run test && npm run build",
-    "claude": "node scripts/claude-here.mjs"
+    "claude": "node scripts/claude-here.mjs",
+    "check:identifiers": "tsx scripts/check-identifiers.ts --all"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",
