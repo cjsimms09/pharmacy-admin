@@ -8,6 +8,19 @@ file is how they talk.
 
 ## Open items
 
+### From 2 — 16 September, before the edit: `inbox/page.tsx` (B's), `audit/page.tsx`, `claims/page.tsx`, `cqi/import/page.tsx`, `settings/email/page.tsx` (A's) — a stored time is shown as the pharmacy's clock reads it
+
+**Written before touching those files**, on branch `work/local-times`. Every timestamp in this database is UTC and this
+pharmacy is six hours behind it, and the screens have been printing the stored characters — some labelled UTC, most not.
+On the morning of 16 September both sessions read the same settings and disagreed about whether the 8am pull had run:
+13:40Z is 08:40 on the wall, and the job had worked exactly as intended.
+- `atLocal` in `dates.ts` renders a stored stamp in the machine's own zone, which is the zone `todayIso` already writes
+  dates in. A stamp with no zone marker is read as UTC, because that is what wrote it.
+- Eight places now use it: the inbox's header and table, the taught-senders table, the audit log, the CQI import list,
+  the claims page's last-file line, and the email settings' last check. The "UTC" labels are gone with them.
+- Not changed: `imonnit.ts` and `certificate-pdf.ts`, which send stamps to somebody else's API and print a certificate,
+  where UTC is the right answer; and `tools/pioneer-sql`, which prints whatever the database returns.
+
 ### From 2 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts`, `inbox-line.ts`, `inbox-undo.ts` (B's) — IPD's statement of account is read
 
 **Written before touching those files**, on branch `work/ipd-statement`, at session 1's request. IPD's invoices are never

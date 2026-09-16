@@ -1,4 +1,5 @@
 import React from "react";
+import { atLocal } from "@/lib/dates";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -1259,7 +1260,7 @@ export default async function ClaimsPage({
               <span className={`badge ${lastAgeDays !== null && lastAgeDays > 2.3 ? "badge-warn" : "badge-ok"}`}>
                 {lastAgeDays !== null && lastAgeDays < 1 ? "today" : `${Math.floor(lastAgeDays ?? 0)}d ago`}
               </span>{" "}
-              Last file <span className="font-mono">{lastImport.fileName}</span> received {lastImport.createdAt.slice(0, 16).replace("T", " ")}:{" "}
+              Last file <span className="font-mono">{lastImport.fileName}</span> received {atLocal(lastImport.createdAt)}:{" "}
               {lastImport.rowsRead.toLocaleString()} rows read, {lastImport.claimsAdded.toLocaleString()} paid claims added
               {lastImport.duplicates ? `, ${lastImport.duplicates} already held` : ""}
               {lastImport.skipped ? `, ${lastImport.skipped} set aside (${Object.entries(JSON.parse(lastImport.skipReasons || "{}") as Record<string, number>).map(([k, v]) => `${v} ${k}`).join(", ")})` : ""}

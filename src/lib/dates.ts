@@ -41,6 +41,26 @@ export function fmtLong(iso: string | null | undefined): string {
   return new Date(y, m - 1, d).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 }
 
+/**
+ * A stored timestamp as the clock on the pharmacy's wall reads it.
+ *
+ * Every timestamp in this database is UTC — `strftime('%Y-%m-%dT%H:%M:%fZ','now')` on every table — and this pharmacy is
+ * six hours behind it. Screens have been printing the stored characters, so "last checked 12:58" was the truth about
+ * Greenwich and five hours in the future here, and the reader has no way to tell which they are looking at. On the
+ * morning of 16 September both sessions read the same settings and disagreed about whether a scheduled job had run:
+ * 13:40Z was 08:40 on the wall, which was the job working exactly as intended.
+ *
+ * The dates in this database are the other way round — `todayIso` writes the local day — so only stamps go through here.
+ * A value with no zone marker is read as UTC, because that is what wrote it.
+ */
+export function atLocal(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const text = String(iso);
+  const d = new Date(/([Zz]|[+-]\d{2}:?\d{2})$/.test(text) ? text : `${text}Z`);
+  if (!Number.isFinite(d.getTime())) return text.replace("T", " ").slice(0, 16);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function monthName(m: number): string {
   return new Date(2000, m - 1, 1).toLocaleDateString("en-US", { month: "long" });
 }
