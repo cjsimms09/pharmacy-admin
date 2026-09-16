@@ -26,7 +26,7 @@ describe("searching the invoices", () => {
   });
 
   test("by the last few digits, which is what people actually remember", () => {
-    assert.equal(matchesText(invoice, "7111"), true);
+    assert.equal(matchesText(invoice, "0012"), true);
   });
 
   test("by a drug on it, which no invoice number would ever find", () => {
