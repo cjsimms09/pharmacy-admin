@@ -69,8 +69,8 @@ export type SetupInput = {
   plans: { total: number; decided: number; claimsUndecided: number };
   /** The newest shelf count, and how old it is in days. */
   shelf: { countedOn: string | null; ageDays: number | null };
-  /** Wholesalers on the register: whether each has a minimum and a rebate ladder on file. */
-  suppliers: { name: string; primary: boolean; hasMinimum: boolean; hasLadder: boolean; hasTermsPage: string }[];
+  /** Wholesalers on the register, and whether each has a rebate ladder on file. Order minimums are not asked for. */
+  suppliers: { name: string; primary: boolean; hasLadder: boolean; hasTermsPage: string }[];
   /** Standing monthly costs entered (payroll, rent, the loan). */
   standingCosts: number;
   /** Bills entered in the last ninety days. */
@@ -241,20 +241,32 @@ export function setupItems(input: SetupInput): SetupItem[] {
     area: "buying",
   });
 
-  for (const s of input.suppliers.filter((x) => !x.primary && !x.hasMinimum)) {
-    add({
-      key: `minimum-${s.name}`,
-      title: `Put ${s.name}'s order minimum on file`,
-      rank: "stops",
-      done: false,
-      why: "Without the minimum there is nothing for the add-on list to count towards, so that wholesaler gets no card on the Buying page.",
-      detail: "No minimum on file.",
-      href: s.hasTermsPage,
-      action: "Enter the minimum",
-      minutes: 2,
-      area: "buying",
-    });
-  }
+  /*
+   * ── Order minimums are not asked for ──
+   *
+   * This produced one "stops" item per wholesaler without a minimum — eleven of them — saying
+   * "Without the minimum there is nothing for the add-on list to count towards, so that wholesaler
+   * gets no card on the Buying page."
+   *
+   * Every part of that was wrong, and it had been wrong since before it was written.
+   *
+   * The owner, 8 September: "I don't want to set minimums.. more want system to decide next best
+   * things to order from that supplier based on days left on hand, price, etc." `fillToMinimums`
+   * has honoured that from the start — a supplier with no minimum gets its full ranked add-on list
+   * and says so in as many words: "no order minimum on file, so nothing is filled to a target: this
+   * is the next best to order here, ranked by days left on the shelf and by price against the
+   * field." The Buying page renders exactly that card. So the wholesaler was never missing from the
+   * page, and nothing was waiting on the figure.
+   *
+   * And the owner again, 16 September, asked directly whether the unset ones have no minimum or are
+   * simply not bought from: "for all the suppliers i havent set, there is no minimum." So an empty
+   * minimum is an answer — measured and none — and not a gap. There is nothing here to ask for.
+   *
+   * Eleven rows at the rank that means something is broken, demanding a figure that changes
+   * nothing, on a justification the code contradicts, against a decision he had already given.
+   * A wholesaler that does impose one is served by entering it on the supplier's terms page, which
+   * is where it has always gone.
+   */
 
   for (const s of input.suppliers.filter((x) => !x.hasLadder)) {
     add({
