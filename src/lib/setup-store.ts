@@ -56,7 +56,8 @@ async function loadSetup(): Promise<SetupItem[]> {
     const { feedsNow } = await import("./feeds");
     const { feeds } = await feedsNow();
     return feeds
-      .filter((f) => f.group === "arriving")
+      /* A row that reports a state of affairs is not a thing to go and do: see `informational` on Feed. */
+      .filter((f) => f.group === "arriving" && !f.informational)
       .map((f) => ({
         key: f.key,
         label: f.label.toLowerCase(),
