@@ -151,6 +151,19 @@ export function findIdentifiers(text: string, path = "", own: string[] = []): Fi
   return out;
 }
 
+/**
+ * Whether a file is bytes rather than text, and so nothing this rule can read.
+ *
+ * Here rather than in the runner because of how it failed there on 15 September. The test was written as
+ * `text.includes("\u0000")` with a real NUL byte in the source, which made git call the script itself binary; stripping
+ * the NUL left `includes("")`, true of every file, so the runner skipped all 1,123 tracked files and printed the same
+ * sentence it prints when the repository is clean. A check that cannot tell "found nothing" from "looked at nothing" is
+ * not a check, and the only way to know the difference is a case that makes it find something.
+ */
+export function looksBinary(text: string): boolean {
+  return text.includes("\u0000");
+}
+
 /** One line per finding, for a hook or a report. Empty when there is nothing to say. */
 export function sayFindings(path: string, findings: Finding[]): string[] {
   return findings.map((f) => `${path}:${f.line}  ${f.shape} "${f.what}" — ${f.why}`);

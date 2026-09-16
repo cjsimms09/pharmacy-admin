@@ -37,7 +37,7 @@ const line = (over: Partial<Parameters<typeof returnsDue>[0]["lines"][number]> =
   supplier: "McKesson",
   supplierId: "mck",
   invoiceId: "inv1",
-  invoiceNumber: "7656147106",
+  invoiceNumber: "7000000013",
   invoiceDate: "2026-08-20",
   quantity: 2,
   extendedCents: 4400,

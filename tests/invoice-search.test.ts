@@ -12,7 +12,7 @@ import { matchesText } from "../src/lib/invoices";
  */
 const invoice = {
   supplier: "MCKESSON",
-  invoiceNumber: "7656147111",
+  invoiceNumber: "7000000012",
   invoiceDate: "2026-09-04",
   receivedFrom: "invoices@mckesson.com",
   controlledItems: "70010-0029-01 AMPHET MIX SLT ERCP5MGGRAN100@ 720.00 X",
@@ -22,7 +22,7 @@ const invoice = {
 
 describe("searching the invoices", () => {
   test("by invoice number, in full", () => {
-    assert.equal(matchesText(invoice, "7656147111"), true);
+    assert.equal(matchesText(invoice, "7000000012"), true);
   });
 
   test("by the last few digits, which is what people actually remember", () => {

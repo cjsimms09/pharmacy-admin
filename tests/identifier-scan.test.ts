@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { findIdentifiers } from "../src/lib/identifier-scan";
+import { findIdentifiers, looksBinary } from "../src/lib/identifier-scan";
 
 /*
  * Every "real" value below is invented to have the right shape — the NPI and DEA carry correct check digits so the rule
@@ -64,6 +64,28 @@ describe("what it must not cry wolf over, or it will be turned off", () => {
 
   test("an NDC beside a prescription is allowed in a fixture, where both are invented by rule", () => {
     assert.deepEqual(shapes("Rx 990101 NDC 99999999901", "fixtures/copay-remit-redsail.txt"), []);
+  });
+});
+
+describe("the check can tell 'found nothing' from 'looked at nothing'", () => {
+  /*
+   * Session 1 broke the runner and it reported a clean repository: the binary test had been written with a real NUL
+   * byte, and removing the NUL left `includes("")`, which is true of every file. All 1,123 files were skipped and the
+   * sentence printed was the one that means "clean". Nothing in the suite noticed, because every case proved the rule
+   * FINDS things and none proved the runner LOOKS at anything.
+   */
+  test("a file of bytes is not read, and a file of text is", () => {
+    assert.equal(looksBinary("PNG\u0000\u0000IHDR"), true);
+    assert.equal(looksBinary("const invoiceNumber = \"7656141694\";"), false);
+    assert.equal(looksBinary(""), false, "an empty file is text, and the test that said otherwise skipped every file");
+  });
+
+  test("the shape a real file carries is found in it, not just in a bare token", () => {
+    /* What the runner hands the rule: a whole file's text. If this ever returns nothing, the runner is reading nothing. */
+    const file = ["/**", " * Read from the wholesaler's own ledger.", " */", "const example = \"7656141694\"; // the ACH CKACH07227740 covered it", "export const ok = true;"].join("\n");
+    const found = findIdentifiers(file, "src/lib/example.ts");
+    assert.deepEqual(found.map((f) => f.shape).sort(), ["ACH reference", "supplier invoice number"]);
+    assert.deepEqual(found.map((f) => f.line), [4, 4]);
   });
 });
 

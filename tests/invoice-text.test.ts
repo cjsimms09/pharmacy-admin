@@ -17,7 +17,7 @@ import { classifyInvoiceText } from "../src/lib/invoices";
  */
 
 const head = [
-  "Billing No.:7656147106",
+  "Billing No.:7000000013",
   "Billing Date:09/04/2026",
   "Invoice",
   "MCKESSON CORPORATION DC#8165Phone:  855/625-7385",
@@ -46,7 +46,7 @@ describe("an invoice with no controlled substances", () => {
   test("and its supplier, number and date are read off it", () => {
     const v = classifyInvoiceText(text);
     assert.match(v.supplier ?? "", /MCKESSON/i);
-    assert.equal(v.invoiceNumber, "7656147106");
+    assert.equal(v.invoiceNumber, "7000000013");
     assert.equal(v.invoiceDate, "2026-09-04");
   });
 });
