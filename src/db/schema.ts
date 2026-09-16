@@ -3146,6 +3146,23 @@ export const tempSensors = sqliteTable(
     maxTenthsF: integer("max_tenths_f").notNull().default(460),
     lastReadingAt: text("last_reading_at"),
     lastSyncAt: text("last_sync_at"),
+    /**
+     * The logger's calibration, which the annual vaccine storage attestation swears to.
+     *
+     * That attestation says "the data logger is within its calibration period" and nothing here
+     * held a certificate, an expiry or even the make of the logger — so the statement rested on
+     * somebody's memory of a piece of paper in a drawer. The CDC toolkit and the VFC programme
+     * both want a certified logger with a current traceable certificate, re-certified on the
+     * interval the certificate names, so the interval is what is kept: a date the site can check
+     * and warn about, with the certificate itself filed as a document.
+     *
+     * Null is "not recorded", never "not calibrated". The difference matters on an inspection.
+     */
+    model: text("model"),
+    serial: text("serial"),
+    calibratedOn: text("calibrated_on"),
+    calibrationExpiresOn: text("calibration_expires_on"),
+    calibrationDocumentId: text("calibration_document_id"),
     createdAt: text("created_at").notNull().default(now()),
     updatedAt: text("updated_at").notNull().default(now()),
   },
