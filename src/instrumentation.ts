@@ -294,6 +294,30 @@ export async function register() {
         .filter(Boolean)
         .join(", ");
       await setSetting("invoice_lines_backfill_result", `${new Date().toISOString()}: ${said}`);
+
+      /*
+       * And the same courtesy for the lines already read.
+       *
+       * The re-read above only takes invoices with no lines at all, which is the right rule for it —
+       * but it means a line read last week keeps whatever could be said about it last week. Two of
+       * the three sources that answer for a line arrive later than the reading: the FDA directory
+       * gains rows on every refresh, and a delivery is often booked into PioneerRx after its invoice
+       * has landed.
+       *
+       * On 16 September 2026 that had left 588 lines on file with one schedule between them, while
+       * the directory could answer for 83 of them and registered 48 as CII. The code was right and
+       * the rows were stale, so nothing but asking again would have moved them — and until they were
+       * asked, the check for a Schedule II line filed as ordinary was being run over silence and
+       * reported clean.
+       */
+      const { fillLineSchedules } = await import("./lib/line-schedule-backfill");
+      const f = await fillLineSchedules();
+      await setSetting(
+        "line_schedules_backfill_result",
+        `${new Date().toISOString()}: ${f.filled} of ${f.looked} unanswered lines answered${
+          f.filled ? ` (${Object.entries(f.bySource).map(([k, n]) => `${n} by ${k}`).join(", ")})` : ""
+        }; ${f.stillSilent} still cannot be answered by any source`,
+      );
     } catch {
       // Its result setting says what happened; a re-read that fails must never take the site down.
     }
