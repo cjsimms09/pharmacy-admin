@@ -239,6 +239,44 @@ export async function register() {
    * The page shows the date it was measured, so a machine left switched off for a week says so on
    * its face rather than presenting week-old counts as today's.
    */
+  /**
+   * Every invoice the rules can now read, read again — without anybody pressing anything.
+   *
+   * The readers improve. On 16 September IPD's rule learned that an eleven-digit run is a line, and each half of a
+   * mixed invoice began to be judged against its own printed subtotal. Neither did a thing for the invoices already
+   * filed: an invoice keeps whatever the reader of the day made of it, and the only way to re-read was a button on the
+   * invoices page. So a fix landed and the money stayed missing until somebody happened to press it — $1,310.68 of IPD
+   * on the morning this was written.
+   *
+   * Nightly, rules only. `allowModel` stays false: reading a page with the model costs money, and the owner's rule is
+   * that nothing spends on his behalf unless he presses it. The button keeps that job; this does the free half, which
+   * is the half that follows every reader improvement.
+   *
+   * Invoices that already have lines are untouched — `backfillInvoiceLines` selects only those with none.
+   */
+  const invoiceLinesTick = async () => {
+    try {
+      const { getSettings, setSetting } = await import("./lib/settings");
+      const s = await getSettings();
+      const { todayIso } = await import("./lib/dates");
+      const today = todayIso();
+      if (s.invoice_lines_backfill_on === today) return;
+      await setSetting("invoice_lines_backfill_on", today);
+      const { backfillInvoiceLines } = await import("./lib/invoices");
+      const r = await backfillInvoiceLines({ allowModel: false, user: { name: "the nightly re-read" } });
+      const said = [
+        `${r.linesRead} lines read off ${r.invoices} invoice${r.invoices === 1 ? "" : "s"}`,
+        r.unreconciled ? `${r.unreconciled} short of the printed total` : null,
+        r.unreadable ? `${r.unreadable} with no text to read` : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      await setSetting("invoice_lines_backfill_result", `${new Date().toISOString()}: ${said}`);
+    } catch {
+      // Its result setting says what happened; a re-read that fails must never take the site down.
+    }
+  };
+
   const dataHealthTick = async () => {
     try {
       const { getSettings, setSetting } = await import("./lib/settings");
@@ -378,6 +416,7 @@ export async function register() {
     await whenIdle("mail", tick);
     await whenIdle("sftp", sftpTick);
     await whenIdle("pioneer", pioneerTick);
+    await whenIdle("invoice-lines", invoiceLinesTick);
     await whenIdle("data-health", dataHealthTick);
     await whenIdle("backup", backupTick);
     await whenIdle("reminders", reminderTick);
