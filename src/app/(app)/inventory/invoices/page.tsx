@@ -590,6 +590,32 @@ export default async function InvoicesPage({
     );
   }
 
+  /**
+   * Says where the executed DEA Form 222 copy 3s are kept.
+   *
+   * The 1305.17 line is the one requirement the invoice archive cannot satisfy however well it does
+   * its own job, and it had no answer of any kind — so it was red permanently, which is how a person
+   * learns to stop reading the card it sits on. This records what the pharmacy does and nothing
+   * more: the site cannot see a binder or a CSOS account, so the line reports where they are, not
+   * that they are complete.
+   */
+  async function orderFormsKeptIn(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const where = String(fd.get("where") ?? "").trim();
+    await setSetting("order_forms_kept_in", where);
+    await audit({ action: "invoice.order-forms.location", userId: u.id, userName: u.name, details: where || "not said" });
+    revalidatePath("/inventory/invoices");
+    redirect(
+      "/inventory/invoices?ok=" +
+        encodeURIComponent(
+          where
+            ? `Recorded: the executed 222s are kept in ${where}. That is where they have to be producible from, and this stops asking.`
+            : "The order-form line will ask again until it is answered.",
+        ),
+    );
+  }
+
   async function send(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -2327,13 +2353,27 @@ export default async function InvoicesPage({
                 somewhere on it — the receipt setting at the top of this page, the sending address
                 behind an Edit on a supplier card — and the reading, fairly, was that there was no
                 way to fix any of them. A finding and its remedy belong in the same place.
+
+                Rendered on the presence of a `settle` rather than on the line being red. A decision
+                that can be made and never unmade is the worse half of clause 4: naming the system
+                turned this line green, which removed the only control that could change the answer
+                back. The form stays, showing what was said, so it can be corrected.
               */}
-              {canManage && c.state !== "ok" && c.settle?.kind === "receipt_kept_in" && (
+              {canManage && c.settle?.kind === "receipt_kept_in" && (
                 <form action={receiptKeptIn} className="mt-2 flex flex-wrap items-end gap-2 rounded-md border border-line bg-ground p-2">
                   <label className="text-xs text-ink-2">
                     <span className="block">Where receipt is actually recorded</span>
+                    {/*
+                      Named `where`, because that is what the action reads.
+
+                      This was `system`, and the action has always read `where` — so the button on
+                      this panel saved an empty string every time it was pressed, the setting stayed
+                      unset, and the line it promised to settle came back unchanged. The identical
+                      form at the top of this page uses `where` and works, which is why this went
+                      unnoticed: the control was not missing, it was silently doing nothing.
+                    */}
                     <input
-                      name="system"
+                      name="where"
                       className="field mt-1 w-64 py-1 text-xs"
                       defaultValue={c.settle.current}
                       placeholder="McKesson Connect"
@@ -2347,7 +2387,35 @@ export default async function InvoicesPage({
                 </form>
               )}
 
-              {canManage && c.state !== "ok" && c.settle?.kind === "supplier_address" && (
+              {canManage && c.settle?.kind === "order_forms_kept_in" && (
+                <form action={orderFormsKeptIn} className="mt-2 flex flex-wrap items-end gap-2 rounded-md border border-line bg-ground p-2">
+                  <label className="text-xs text-ink-2">
+                    <span className="block">Where the executed 222s are</span>
+                    <input
+                      name="where"
+                      className="field mt-1 w-64 py-1 text-xs"
+                      defaultValue={c.settle.current}
+                      placeholder="the CSOS system, or the 222 binder at the bench"
+                    />
+                  </label>
+                  <button className="btn btn-sm btn-primary">Save, and stop asking here</button>
+                  <span className="text-[11px] text-ink-3">
+                    This records where they are kept, not that they are complete — nothing here can see a binder. Leave
+                    it empty to put the line back to asking.
+                  </span>
+                </form>
+              )}
+
+              {/*
+                Shown whenever there is something to settle, not only when the line is red.
+
+                The capture line is deliberately "ok" — an invoice from an unregistered sender is
+                caught either way and an address only saves a press — and this was gated on
+                `state !== "ok"`, so the form it offers could never once appear. The fix named ANDA
+                and the control to fix it was rendered nowhere. A `settle` is only ever built when
+                there is something outstanding, so its presence is the right condition.
+              */}
+              {canManage && c.settle?.kind === "supplier_address" && (
                 <div className="mt-2 space-y-2 rounded-md border border-line bg-ground p-2">
                   {c.settle.suppliers.map((sup) => (
                     <form key={sup.id} action={supplierAddress} className="flex flex-wrap items-end gap-2">

@@ -25,6 +25,59 @@ The math has to be perfect — a wrong number that looks right is worse than no 
 
 ## Now
 
+### A. Stop the setup list nagging about things he does not have (16 September)
+
+> "these are all irrelevant, i dont have them or they arent relevant, need system to leave me
+> alone about them"
+
+Forty-five items, pasted from the setup list: an order minimum and a rebate ladder for eleven
+wholesalers each, a price file for eighteen, plus the Kansas Medicaid dispensing fee and ANDA's
+ladder. Most name suppliers he does not buy from on terms, or does not buy from at all.
+
+Two separate faults, and the second is the one that matters:
+
+1. **There is no way to say "not applicable".** Every one of these says *"something is wrong until
+   this is done"* and there is no third answer. A list that cannot be told it is wrong is a list
+   that only grows, and he stops reading it — which costs the items that are real.
+2. **It asks for a minimum and a ladder from suppliers who cannot have one.** A supplier whose
+   PioneerRx receipt is the invoice, or who is a manufacturer rather than a wholesaler, has no
+   order minimum to enter. The capture line on the compliance panel had exactly this fault and
+   was fixed by excluding `invoiceFromPioneer` suppliers; the setup list was never told.
+
+What it needs: a dismissal that survives the next import, per item, with the reason recorded and
+reversible — clause 4, "a one-press *this is wrong / this is settled / override*". Plus the
+supplier-shaped exclusions so most of these never appear. **Do not simply hide them**: the
+dismissed ones belong behind a count, so nothing silently disappears.
+
+**Question for him, and only one:** for the eleven wholesalers with no minimum — is it that there
+is no minimum, or that he does not buy from them at all? Those are different answers and the
+second one retires the supplier.
+
+### B. Vaccine storage: logger calibration, temperature records, the excursion plan (16 September)
+
+> "Review vaccine storage: logger calibration, temperature records and the excursion plan ... and
+> write and implement our policy for this"
+
+The standard, from the CDC Vaccine Storage and Handling Toolkit and the VFC programme: a certified
+digital data logger with a **current calibration certificate** (traceable, re-certified on the
+interval the certificate names), temperature recorded as the programme requires — VFC wants twice
+daily min/max readings on a paper or electronic log kept **three years** — and a **written routine
+for an out-of-range reading**: quarantine the stock, do not discard it, label it "do not use",
+call the manufacturer or the programme for a viability determination, and record what was decided.
+
+This is a policy the pharmacy performs, not a calculation, so the manual rule applies: *the manual
+is a standard, not a description* — nothing may be written that claims a practice nobody performs.
+
+**Cannot be started without his answers:**
+1. Does the pharmacy stock vaccines at all, and is it enrolled in VFC (which imposes the stricter
+   rules) or private stock only?
+2. What logger is in the unit, and when was it last calibrated — is there a certificate to file?
+3. Who is the primary and who is the backup vaccine coordinator? The plan needs two names.
+
+What the site can hold once those are answered: the certificate as a filed document with its
+expiry driving a reminder, the excursion plan as a written procedure, and each excursion as a
+record — reading, duration, what was quarantined, who was called, what they said, the outcome.
+
 ### 0. Two-payer fills: understood, fixed, and reconciled to the penny (9 September)
 
 The owner: "We need to make sure we really understand secondaries and how to reconcile. How much to

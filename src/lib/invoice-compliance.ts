@@ -41,6 +41,7 @@ export type Requirement = {
    */
   settle?:
     | { kind: "receipt_kept_in"; current: string }
+    | { kind: "order_forms_kept_in"; current: string }
     | { kind: "supplier_address"; suppliers: { id: string; name: string }[] };
 };
 
@@ -212,7 +213,23 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
    * substances, and a bill for bottles and vitamins needs none. It was only ever the count that
    * disagreed with it.
    */
-  const unreceipted = rows.filter((r) => !r.receivedOn && r.schedule !== "none").length;
+  /*
+   * Counted over the same rows the sentence below describes, which is where this went wrong.
+   *
+   * The narrowing above fixed the count and left the sentence behind it untouched, and the sentence
+   * divided by a different denominator: `rows.length - unreceipted` of `rows.length` — 54 invoices
+   * less the 13 controlled ones with no receipt — and printed "41 of 54 confirmed received". Not one
+   * invoice on this site has a receipt recorded against it. The true figure was nought, and the
+   * panel reported forty-one, because a shortfall counted over the controlled invoices was
+   * subtracted from a total counted over all of them.
+   *
+   * Two correct figures meeting, which is the costliest fault this system has: the arithmetic was
+   * right both times and no test could have failed. So the count and the sentence now read the same
+   * list, and the sentence names which list it is.
+   */
+  const asksFor = rows.filter((r) => r.schedule !== "none");
+  const receipted = asksFor.filter((r) => r.receivedOn).length;
+  const unreceipted = asksFor.length - receipted;
 
   out.push({
     key: "originals",
@@ -268,8 +285,10 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
         "together are the account of the order. Receipt can also be recorded against an invoice here where it is " +
         "useful, but nothing is asked for."
       : `The invoice records what was shipped. Whether it arrived, on what date and whether it matched is recorded ` +
-        `against the invoice here: ${rows.length - unreceipted} of ${rows.length} confirmed received, with the name of ` +
-        "whoever checked it in and a note where anything was short or damaged.",
+        `against the invoice here — ${receipted} of the ${asksFor.length} invoice${asksFor.length === 1 ? "" : "s"} ` +
+        `carrying controlled items ${receipted === 1 ? "has" : "have"} it, with the name of whoever checked it in and a ` +
+        "note where anything was short or damaged. The bills for bottles and vitamins are not counted here; this rule " +
+        "does not ask about them.",
     state: receiptElsewhere ? "ok" : unreceipted > 0 ? "attention" : "ok",
     fix: receiptElsewhere
       ? `Be able to produce ${receiptElsewhere}'s receipt history at the pharmacy during an inspection — printed or on ` +
@@ -289,20 +308,43 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
    * not invoices, they do not arrive by email, nothing here touches them, and they have a
    * retention rule of their own that no amount of good invoice filing satisfies.
    */
+  /*
+   * A line nobody could ever answer is a line that teaches the panel is decorative.
+   *
+   * This said "attention" permanently. It is correct that the system does not hold 222s and cannot
+   * be made to — but it offered no way to say what the pharmacy actually does, so the only possible
+   * reading after a week was that this panel has a red mark on it for ever and always will. That is
+   * how a person learns to skip the whole card, and the lines that can be acted on go with it.
+   *
+   * What settles it is the same shape as the receipt line: the pharmacy says once how Schedule II is
+   * ordered, and this reports that instead of asking again. It records his answer and nothing more —
+   * the site cannot see a filing cabinet or a CSOS account, so it never claims the copies are held,
+   * only where he says they are and what he has to be able to produce.
+   */
+  const orderForms = (s.order_forms_kept_in ?? "").trim();
+  const schedule2Held = rows.filter((r) => r.schedule === "schedule_2").length;
   out.push({
     key: "order-forms",
     citation: "21 CFR 1305.17(a), (c)",
     requires:
       "Copy 3 of every executed paper DEA Form 222 must be retained by the purchaser, with the number of packages " +
       "received and the date recorded on it, for at least two years. Electronic CSOS orders are retained electronically.",
-    how:
-      "Not held here, and not something invoice filing can satisfy. An order form is a different record from the " +
-      "invoice for the same goods, and this system holds the invoice.",
-    state: "attention",
-    fix:
-      "Keep paper 222s exactly as you do now. If you order Schedule II through CSOS instead, those records live in the " +
-      "CSOS system and this line does not apply to them.",
+    how: orderForms
+      ? `Schedule II is ordered through ${orderForms}, so that is where the order-form record is held. Not here: an ` +
+        "order form is a different record from the invoice for the same goods, and this system holds the invoice. " +
+        `${schedule2Held} invoice${schedule2Held === 1 ? "" : "s"} filed here carr${schedule2Held === 1 ? "ies" : "y"} ` +
+        "Schedule II items, and each one of those had an order form behind it."
+      : "Not held here, and not something invoice filing can satisfy. An order form is a different record from the " +
+        "invoice for the same goods, and this system holds the invoice.",
+    state: orderForms ? "ok" : "attention",
+    fix: orderForms
+      ? `Nothing to do here. Keep ${orderForms} as you do now, and be able to produce it at the pharmacy on request — ` +
+        "copy 3 of a paper 222 needs the number of packages received and the date written on it, and it has to survive " +
+        "two years. This line records where they are, not that they are complete."
+      : "Keep paper 222s exactly as you do now. If you order Schedule II through CSOS instead, those records live in the " +
+        "CSOS system and this line does not apply to them.",
     href: "/inventory/power-of-attorney",
+    settle: { kind: "order_forms_kept_in", current: orderForms },
   });
 
   // ── The feed itself ───────────────────────────────────────────────
@@ -333,6 +375,16 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
    */
   const settled = active.filter((x) => x.invoiceFromPioneer);
   const missing = active.filter((x) => !x.senderEmails.trim() && !x.invoiceFromPioneer);
+  /*
+   * Counted by what the sentence claims, not by subtraction.
+   *
+   * "recognised by the address they send from" was `active.length - settled.length`, which is every
+   * active supplier bar the settled ones — and that includes the ones with no address at all. It
+   * printed 5 while 4 had an address, because ANDA was counted as recognised by an address in the
+   * same breath as the fix line said ANDA has no address yet. The two sentences were about the same
+   * supplier and disagreed, and the number was the one that was wrong.
+   */
+  const recognised = active.filter((x) => !x.invoiceFromPioneer && x.senderEmails.trim()).length;
   out.push({
     key: "capture",
     citation: "Not a citation — the condition that makes the archive complete",
@@ -341,7 +393,7 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
       "either, and nothing about a well-kept archive reveals that it is missing one.",
     how:
       active.length > 0
-        ? `${active.length - settled.length} supplier${active.length - settled.length === 1 ? " is" : "s are"} recognised by the address they send from, ` +
+        ? `${recognised} supplier${recognised === 1 ? " is" : "s are"} recognised by the address they send from, ` +
           `and silence from one that used to write is reported. An invoice from an address nobody has registered is still ` +
           `recognised from its own page and raised in the Inbox for you to name the sender.` +
           /*
