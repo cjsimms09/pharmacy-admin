@@ -11,8 +11,8 @@ const complete: SetupInput = {
   plans: { total: 12, decided: 12, claimsUndecided: 0 },
   shelf: { countedOn: "2026-09-06", ageDays: 1 },
   suppliers: [
-    { name: "McKesson", primary: true, hasLadder: true, hasTermsPage: "/suppliers/1/terms" },
-    { name: "IPC", primary: false, hasLadder: true, hasTermsPage: "/suppliers/2/terms" },
+    { name: "McKesson", primary: true, hasLadder: true, trades: true, hasTermsPage: "/suppliers/1/terms" },
+    { name: "IPC", primary: false, hasLadder: true, trades: true, hasTermsPage: "/suppliers/2/terms" },
   ],
   standingCosts: 4,
   billsRecent: 20,
@@ -92,14 +92,35 @@ describe("the setup list", () => {
     const items = setupItems({
       ...complete,
       suppliers: [
-        { name: "McKesson", primary: true, hasLadder: false, hasTermsPage: "/suppliers/1/terms" },
-        { name: "IPD", primary: false, hasLadder: true, hasTermsPage: "/suppliers/3/terms" },
+        { name: "McKesson", primary: true, hasLadder: false, trades: true, hasTermsPage: "/suppliers/1/terms" },
+        { name: "IPD", primary: false, hasLadder: true, trades: true, hasTermsPage: "/suppliers/3/terms" },
       ],
     });
     assert.equal(items.some((i) => i.key.startsWith("minimum-")), false, "not for a secondary either");
     /* The rebate ladder is a different question and is still asked: it changes what a price compares as. */
     assert.equal(items.find((i) => i.key === "ladder-McKesson")?.rank, "sharpens");
     assert.equal(items.find((i) => i.key === "ladder-McKesson")?.href, "/suppliers/1/terms");
+  });
+
+  test("REGRESSION: a rebate ladder is asked for only where there are prices of theirs to compare", () => {
+    /*
+     * The row says their prices are compared gross and an order could go to the wrong wholesaler.
+     * True of a wholesaler whose catalogue is in the comparison; empty of one with no catalogue, no
+     * invoice and no delivery anywhere on the site.
+     *
+     * Measured 16 September 2026: fourteen of these were being asked for and eight were suppliers
+     * with nothing at all on file. The third row of this shape after the order minimums and the
+     * price files — an item asserting a consequence that cannot occur.
+     */
+    const items = setupItems({
+      ...complete,
+      suppliers: [
+        { name: "Tradesco", primary: false, hasLadder: false, trades: true, hasTermsPage: "/suppliers/1/terms" },
+        { name: "Quietco", primary: false, hasLadder: false, trades: false, hasTermsPage: "/suppliers/2/terms" },
+      ],
+    });
+    assert.equal(items.some((i) => i.key === "ladder-Tradesco"), true, "they trade, so the sentence is true of them");
+    assert.equal(items.some((i) => i.key === "ladder-Quietco"), false, "nothing of theirs is priced anywhere");
   });
 
   test("the report columns are counted, not guessed, and eight fills in ten is enough", () => {

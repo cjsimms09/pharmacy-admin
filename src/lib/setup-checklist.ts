@@ -70,7 +70,7 @@ export type SetupInput = {
   /** The newest shelf count, and how old it is in days. */
   shelf: { countedOn: string | null; ageDays: number | null };
   /** Wholesalers on the register, and whether each has a rebate ladder on file. Order minimums are not asked for. */
-  suppliers: { name: string; primary: boolean; hasLadder: boolean; hasTermsPage: string }[];
+  suppliers: { name: string; primary: boolean; hasLadder: boolean; hasTermsPage: string; /** Whether anything of theirs is on the site at all: a catalogue, an invoice or a delivery. A supplier with none has no prices to compare. */ trades: boolean }[];
   /** Standing monthly costs entered (payroll, rent, the loan). */
   standingCosts: number;
   /** Bills entered in the last ninety days. */
@@ -268,7 +268,26 @@ export function setupItems(input: SetupInput): SetupItem[] {
    * is where it has always gone.
    */
 
-  for (const s of input.suppliers.filter((x) => !x.hasLadder)) {
+  /*
+   * A ladder is asked for only where there are prices of theirs to compare.
+   *
+   * The row says: "Their prices are compared gross while the ladder is missing, which makes them
+   * look dearer than they are and can send an order to the wrong wholesaler." That is true, and
+   * worth acting on, for a wholesaler whose catalogue is in the comparison. It is empty of one with
+   * no catalogue, no invoice and no delivery on the whole site: there are no prices of theirs to
+   * compare, gross or net, so no order can be sent anywhere by the lack of a rate.
+   *
+   * Measured 16 September 2026: of the fourteen asked for, eight were suppliers with nothing at all
+   * on file — 0 catalogue items, 0 invoices, 0 deliveries — and every one of those eight is a
+   * supplier the owner has already said he buys from on their PioneerRx receipt. The other six
+   * trade, and for them the sentence is true and the row stays.
+   *
+   * The third row of this exact shape, after the order minimums and the price files: a list item
+   * asserting a consequence that cannot occur, kept alive by a condition that never asked whether
+   * it could. The condition is now the consequence itself. Nothing is hidden — a supplier that
+   * starts trading gets the row back on the next page load, because it is decided from the data.
+   */
+  for (const s of input.suppliers.filter((x) => !x.hasLadder && x.trades)) {
     add({
       key: `ladder-${s.name}`,
       title: `Enter ${s.name}'s rebate ladder`,
