@@ -303,6 +303,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               Not on a phone: Inbox is already in the bar above, and Compliance is one of the six words. Seven buttons
               wrapped to three rows there and pushed the scoreboard below the fold before a single figure showed.
             */}
+            {/*
+              On the phone as well as the desk. "What are we waiting on" is a question asked standing at the
+              counter with a wholesaler on the phone, and the answer being one press away is the point of it.
+            */}
+            <Link href="/expected" className="btn">What we&rsquo;re expecting</Link>
             <Link href="/inbox" className="btn hidden sm:inline-flex">Inbox</Link>
             <Link href="/settings/setup" className="btn hidden sm:inline-flex">Finish setting up</Link>
             <Link href="/compliance" className="btn hidden sm:inline-flex">Compliance</Link>
