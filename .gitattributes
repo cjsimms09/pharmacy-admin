@@ -1,2 +1,8 @@
 # Shell scripts run on Linux hosts (scripts/sftp-host-setup.sh); CRLF breaks them there.
 *.sh text eol=lf
+
+# Fixtures are byte-for-byte evidence: a test that alters one by string match must see the same bytes
+# everywhere. An IPD statement fixture committed with LF arrived as CRLF on another checkout, a test's
+# replacement matched nothing, and the case asserted a refusal that never happened — a guard reported
+# as working that was never reached (session 2, 16 September 2026).
+fixtures/** text eol=lf
