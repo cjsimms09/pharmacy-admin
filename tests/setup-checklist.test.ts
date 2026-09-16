@@ -21,7 +21,7 @@ const complete: SetupInput = {
   claims: { fills: 500, withBasis: 500 },
   directoryRows: 120_000,
   ksFeeEntered: true,
-  contracts: { total: 8, read: 8 },
+  contracts: { total: 8, read: 8, worthReading: 8, pagesLeft: 0, pagesRead: 40, modelStopped: false },
 };
 
 describe("the setup list", () => {
@@ -123,6 +123,41 @@ describe("the setup list", () => {
     assert.equal(items.some((i) => i.key === "ladder-Quietco"), false, "nothing of theirs is priced anywhere");
   });
 
+  test("REGRESSION: the contracts row counts the work, not the filenames", () => {
+    /*
+     * It said "219 of 406 read", which sounds over half done. Measured 16 September 2026: 29 of the
+     * 406 are documents the triage had already judged not to be contracts, and the 219 read average
+     * 3.9 pages against 30.6 for the ones left. By documents it read as 54% done; by pages it was
+     * 698 of 6,944.
+     */
+    const item = setupItems({
+      ...complete,
+      contracts: { total: 406, read: 219, worthReading: 377, pagesLeft: 6246, pagesRead: 698, modelStopped: false },
+    }).find((i) => i.key === "contracts")!;
+    assert.match(item.detail, /219 of 377 read/, "the ones judged not to be contracts are out of the denominator");
+    assert.match(item.detail, /158 left run to 6,246 pages, against 698/, "and the size is said, because the fraction hides it");
+    assert.match(item.detail, /29 more are not counted/);
+    assert.equal(item.done, false);
+  });
+
+  test("REGRESSION: it does not ask for work the model is currently refusing", () => {
+    /* Reading a contract costs money at the model, and the model stops at the monthly ceiling. */
+    const item = setupItems({
+      ...complete,
+      contracts: { total: 406, read: 219, worthReading: 377, pagesLeft: 6246, pagesRead: 698, modelStopped: true },
+    }).find((i) => i.key === "contracts")!;
+    assert.match(item.detail, /stopped at the monthly ceiling/);
+    assert.equal(item.action, "Raise the ceiling first", "the button must not promise what it cannot do");
+  });
+
+  test("every contract worth reading has been read, so the row is done", () => {
+    const item = setupItems({
+      ...complete,
+      contracts: { total: 50, read: 40, worthReading: 40, pagesLeft: 0, pagesRead: 300, modelStopped: false },
+    }).find((i) => i.key === "contracts")!;
+    assert.equal(item.done, true, "ten judged not contracts must not hold the row open for ever");
+  });
+
   test("the report columns are counted, not guessed, and eight fills in ten is enough", () => {
     assert.equal(setupItems({ ...complete, claims: { fills: 100, withBasis: 79 } }).find((i) => i.key === "basis-column")?.done, false);
     assert.equal(setupItems({ ...complete, claims: { fills: 100, withBasis: 80 } }).find((i) => i.key === "basis-column")?.done, true);
@@ -130,7 +165,7 @@ describe("the setup list", () => {
   });
 
   test("nothing is asked for that cannot be checked: no contracts on file, no contract item", () => {
-    assert.equal(setupItems({ ...complete, contracts: { total: 0, read: 0 } }).some((i) => i.key === "contracts"), false);
+    assert.equal(setupItems({ ...complete, contracts: { total: 0, read: 0, worthReading: 0, pagesLeft: 0, pagesRead: 0, modelStopped: false } }).some((i) => i.key === "contracts"), false);
     assert.equal(setupItems({ ...complete, identity: { missing: [] } }).some((i) => i.key === "identity"), false);
     const withGaps = setupItems({ ...complete, identity: { missing: ["the address"] } });
     assert.equal(withGaps.find((i) => i.key === "identity")?.detail, "Missing: the address.");

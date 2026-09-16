@@ -149,11 +149,40 @@ async function loadSetup(): Promise<SetupItem[]> {
 
   const directoryRows = await safe(async () => (await (await import("./drug-directory-store")).directoryStatus()).rows, 0);
 
-  const contracts = await safe(async () => {
-    const { db } = await import("@/db");
-    const docs = await db.query.contractDocs.findMany({ columns: { id: true, extractionState: true } });
-    return { total: docs.length, read: docs.filter((d) => d.extractionState === "done").length };
-  }, { total: 0, read: 0 });
+  const contracts = await safe(
+    async () => {
+      const { db } = await import("@/db");
+      const docs = await db.query.contractDocs.findMany({
+        columns: { id: true, extractionState: true, triage: true, pages: true },
+      });
+      /*
+       * A document the triage has judged not to be a contract is not work outstanding.
+       *
+       * It is in the folder, it will stay in the folder, and reading it would tell nobody anything
+       * — the site has already decided there is nothing in it. Counting it in the denominator of a
+       * row that asks him to read them makes the position look worse than it is, in a row that
+       * already makes it look better than it is by counting documents instead of pages.
+       */
+      const worth = docs.filter((d) => d.triage !== "not_relevant");
+      const read = worth.filter((d) => d.extractionState === "done");
+      const left = worth.filter((d) => d.extractionState !== "done");
+      const pages = (rows: typeof docs) => rows.reduce((n, d) => n + (d.pages ?? 0), 0);
+
+      /* Reading costs money at the model, and the model stops at the ceiling. */
+      const { monthlyCap } = await import("./ai-spend");
+      const cap = await monthlyCap().catch(() => ({ over: false }));
+
+      return {
+        total: docs.length,
+        read: read.length,
+        worthReading: worth.length,
+        pagesLeft: pages(left),
+        pagesRead: pages(read),
+        modelStopped: cap.over === true,
+      };
+    },
+    { total: 0, read: 0, worthReading: 0, pagesLeft: 0, pagesRead: 0, modelStopped: false },
+  );
 
   /* The details every printed Board form carries. A blank on a form is a finding. */
   const identityMissing: string[] = [];

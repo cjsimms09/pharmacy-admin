@@ -85,8 +85,16 @@ export type SetupInput = {
   directoryRows: number;
   /** The Kansas Medicaid dispensing fee, entered or not. */
   ksFeeEntered: boolean;
-  /** Contract documents: how many are in the folder, how many have been read. */
-  contracts: { total: number; read: number };
+  /**
+   * The contract folder, counted by the work rather than by the filename.
+   *
+   * "worthReading" leaves out the documents the triage has judged not to be contracts — reading one
+   * of those tells nobody anything, and a denominator that includes them flatters the position. The
+   * page figures are there because 219 documents at 3.9 pages and 187 at 30.6 are not the same job,
+   * and the fraction says they are. "modelStopped" because the button cannot work while the model
+   * is over its monthly ceiling.
+   */
+  contracts: { total: number; read: number; worthReading: number; pagesLeft: number; pagesRead: number; modelStopped: boolean };
 };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
@@ -208,16 +216,51 @@ export function setupItems(input: SetupInput): SetupItem[] {
     area: "claims",
   });
 
-  if (input.contracts.total > 0) {
+  /*
+   * ── The contracts, counted by the work rather than by the filename ──
+   *
+   * This said "219 of 406 read", which sounds a little over half done. Measured on 16 September
+   * 2026 it is nothing like half.
+   *
+   * Twenty-nine of the 406 are documents the triage has already judged not to be contracts at all.
+   * They are in the denominator of a row asking him to read them, and reading them would tell him
+   * nothing, because the site has already decided there is nothing in them.
+   *
+   * And the count hides the size. The 219 already read average 3.9 pages; the ones left average
+   * 30.6, and the 25 that failed average 51.8, one of them 256 pages. By documents it reads as 54%
+   * done. By pages it is 698 of 6,944 — about a tenth. The reader has done the short ones and left
+   * the long ones, which is exactly what one would expect and exactly what the fraction conceals.
+   * A number whose denominator flatters the position is the fault this file has carried three times
+   * this week; this is the fourth.
+   *
+   * The last part is the gate. Reading a contract costs money at the model, and the model stops at
+   * the monthly ceiling — which it has. Until that is raised, pressing the button on this row does
+   * nothing at all, and a row that asks for work the system will refuse teaches that the list lies.
+   */
+  if (input.contracts.worthReading > 0) {
+    const left = Math.max(0, input.contracts.worthReading - input.contracts.read);
+    const skipped = input.contracts.total - input.contracts.worthReading;
     add({
       key: "contracts",
       title: "Read the payer contracts in the folder",
       rank: "sharpens",
-      done: input.contracts.read >= input.contracts.total,
+      done: input.contracts.read >= input.contracts.worthReading,
       why: "A contract read once gives the site the rate it promised, so an underpayment is arithmetic against a document rather than a suspicion.",
-      detail: `${input.contracts.read} of ${input.contracts.total} read.`,
+      detail: [
+        `${input.contracts.read} of ${input.contracts.worthReading} read`,
+        left > 0 && input.contracts.pagesLeft > 0
+          ? `; the ${left} left run to ${input.contracts.pagesLeft.toLocaleString()} pages, against ${input.contracts.pagesRead.toLocaleString()} for the ones already done`
+          : "",
+        skipped > 0 ? `. ${skipped} more are not counted: the triage judged them not to be contracts` : "",
+        input.contracts.modelStopped
+          ? ". Claude has stopped at the monthly ceiling, so this cannot run until the ceiling is raised"
+          : "",
+        ".",
+      ]
+        .filter(Boolean)
+        .join(""),
       href: "/payers/contracts",
-      action: "Read them",
+      action: input.contracts.modelStopped ? "Raise the ceiling first" : "Read them",
       minutes: 20,
       area: "claims",
     });
