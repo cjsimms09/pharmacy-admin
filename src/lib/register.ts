@@ -14,8 +14,9 @@
  *
  *   cash deposit + cheque deposit   the drawers' takings for the bank, after change and paid-outs. Banked as one
  *                                   patient receipt per posting day, which is how the bank deposit is made up.
- *   card                            already banked from the emailed batch. Only checked here, never banked: the batch is
- *                                   the settlement record and banking both would count the card money twice.
+ *   card                            banked from the emailed batch where there is one, and checked against the register.
+ *                                   Where no batch was ever forwarded, the register banks it instead and says so —
+ *                                   `registerCardReceipt` below, and the batch replaces that receipt if it ever comes.
  *   Signature Only                  a pickup of a prescription already paid for. The owner, 15 September: "nothing is
  *                                   actually charged and they are normally for scripts that have already been paid
  *                                   for". Not money, never banked.
@@ -37,6 +38,46 @@ export type RegisterDay = {
 };
 
 export const REGISTER_PAYER = "Register cash and cheques";
+
+/*
+ * Shares a head with "Card batch" — the deposit gate compares payers on their first eight letters, so a batch that
+ * arrives later for a day this banked is refused by the gate as well as by the replacement below. Two doors, because
+ * this is card money and counting it twice is the fault that matters.
+ */
+export const REGISTER_CARD_PAYER = "Card batch, from the register";
+
+/**
+ * The card takings a day banks when no batch report was ever forwarded for it.
+ *
+ * ── Why this is allowed to bank at all ──
+ *
+ * The batch email is the settlement record and this is not it. But on all 8 September days where both exist, the
+ * register's card total equals the batch to the cent (P-6, 15 September 2026) — the terminal and the till are the same
+ * event recorded twice. Four days have no batch and never will: the owner, 16 September 2026, on 9/1, 9/2, 9/12 and
+ * 9/15 — "stop asking, not sending". Money taken at the counter and sitting in the bank was therefore absent from the
+ * books for ever, and the site's only response was to ask again every morning for an email nobody was going to send.
+ *
+ * So the register stands in, says in the receipt that it is standing in, and steps aside if the batch ever arrives
+ * (`card-batch-store.ts` replaces this receipt rather than adding beside it). What it must never do is make the batch
+ * unnecessary: the batch carries the card mix and the processor's own number, and this carries neither.
+ */
+export function registerCardReceipt(d: RegisterDay): { sourceKey: string; reference: string; amountCents: number; notes: string } | null {
+  if (d.cardCents <= 0) return null;
+  return {
+    sourceKey: `register-card|${d.day}`,
+    /*
+     * The day and the amount, because there is no batch number to use. Digits, and deliberately not the day alone:
+     * the drawer deposit for the same day is referenced by its digits, and the gate refuses a reference it has
+     * already banked before it ever looks at which feed asked.
+     */
+    reference: `${d.day.replace(/-/g, "")}-${d.cardCents}`,
+    amountCents: d.cardCents,
+    notes:
+      `Card takings at the counter on ${d.day}, from PioneerRx's drawer summary. No batch report for that day has ever ` +
+      `reached the inbox, so the register stands in for it: on every day both exist the two agree to the cent. Copays and ` +
+      `front of shop together, as the drawer does not split them, and the card mix is not known without the batch.`,
+  };
+}
 
 /** The receipt a register day banks, or null where the drawers took no cash or cheques for the bank. */
 export function registerReceipt(d: RegisterDay): { sourceKey: string; reference: string; amountCents: number; notes: string } | null {

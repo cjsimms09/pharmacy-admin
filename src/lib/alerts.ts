@@ -245,25 +245,21 @@ export async function alerts(): Promise<Alert[]> {
 
   // ── Card money the register took with no batch on file ────────────
   /*
-   * The register's card takings are checked every morning against the card batch received that day (register.ts). A day
-   * with takings and no batch is card money not in the cash account, and the only fix is forwarding the batch email —
-   * nothing arrives by itself. P-6 found three such days in September, $12,029.63. Soon rather than now: it is money
-   * already in the bank, missing only from the books.
+   * There is no alert here any more, and the absence is the point.
+   *
+   * This asked, every morning, for the card batch emails of 9/1, 9/2, 9/12 and 9/15 — $14,984.24 the register proved
+   * had been taken. The owner's answer on 16 September 2026 was "stop asking, not sending". An alert that repeats a
+   * request already refused costs the owner nothing to ignore and costs the list its authority, which is the only
+   * thing an alert list has. The money reaches the cash account without the email now: the register banks those days
+   * itself (`register.ts` `registerCardReceipt`), and a batch arriving later takes the receipt over rather than
+   * doubling it. Days resting on the register are still named in the morning pull's line and on the register's own
+   * reading; they are captured, not waiting.
+   *
+   * A batch that disagrees with the register stays, and stays "now": the two have never differed on any measured day,
+   * so a difference is a misread or a card sale that did not settle, and neither is answered by banking either figure.
    */
   try {
-    const check = s.pioneer_register_check ? (JSON.parse(s.pioneer_register_check) as { missingBatches?: { day: string; cents: number }[]; batchesDiffer?: { day: string }[] }) : null;
-    const missing = check?.missingBatches ?? [];
-    if (missing.length > 0) {
-      const cents = missing.reduce((n, m) => n + m.cents, 0);
-      out.push({
-        key: "card-batches-missing",
-        level: "soon",
-        title: `${missing.length} card batch${missing.length === 1 ? "" : "es"} never forwarded, $${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        why: `The register took card payments on ${missing.map((m) => `${fmt(m.day)} ($${(m.cents / 100).toFixed(2)})`).join(", ")} and no batch report for ${missing.length === 1 ? "that day" : "those days"} has reached the inbox, so that card money is not in the cash account. Forward the batch email${missing.length === 1 ? "" : "s"} for ${missing.length === 1 ? "it" : "them"}.`,
-        href: "/inbox",
-        action: "Open the inbox",
-      });
-    }
+    const check = s.pioneer_register_check ? (JSON.parse(s.pioneer_register_check) as { batchesDiffer?: { day: string }[] }) : null;
     const differs = check?.batchesDiffer ?? [];
     if (differs.length > 0) {
       out.push({

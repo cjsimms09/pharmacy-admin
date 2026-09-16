@@ -18,7 +18,6 @@ export async function moneyWaitingNow(): Promise<Waiting> {
 async function load(): Promise<Waiting> {
   const { todayIso } = await import("./dates");
   const { owedNow } = await import("./payer-owed-store");
-  const { getSettings } = await import("./settings");
   const today = todayIso();
 
   const owed = await owedNow();
@@ -57,27 +56,16 @@ async function load(): Promise<Waiting> {
   }));
 
   /*
-   * Card money taken at the register with no batch report on file. The batch is the only door for card takings
-   * (card-batch-store.ts), so until it is forwarded the money is in the bank and not in the books. Measured by the
-   * morning pull against PioneerRx's own register totals (register.ts).
+   * Card takings no longer wait on anybody.
+   *
+   * They were listed here because the batch report was the only door into the cash account, so a day whose batch was
+   * never forwarded was money in the bank and not in the books, and the settlement was a request to the owner. He
+   * refused it, for the four September days and for good — "stop asking, not sending" — and a list of things waiting
+   * on a person is worth nothing if it holds an item that person has declined. The register now banks those days
+   * itself (`register-store.ts`), so the money is in the books and there is nothing here to wait for. What remains
+   * unknown is the card mix, which only the batch carries and which no ledger needs.
    */
-  const s = await getSettings();
   const unbanked: WaitingInput["unbanked"] = [];
-  try {
-    const check = s.pioneer_register_check ? (JSON.parse(s.pioneer_register_check) as { missingBatches?: { day: string; cents: number }[] }) : null;
-    for (const m of check?.missingBatches ?? []) {
-      unbanked.push({
-        key: `card-batch|${m.day}`,
-        name: `Card takings of ${m.day}`,
-        cents: m.cents,
-        on: m.day,
-        settledBy: "Forward that day's card batch report to the inbox. It banks the money; nothing else does.",
-        href: "/inbox",
-      });
-    }
-  } catch {
-    /* A setting that will not parse is not a reason to lose the list. */
-  }
 
   return moneyWaiting({ pots, unbanked, today });
 }

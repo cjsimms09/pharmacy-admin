@@ -992,7 +992,8 @@ async function pullRegister(): Promise<string> {
     `${days.length} register days; ${check.banked} drawer deposits banked (${$(check.bankedCents)})` +
     `${check.corrected ? `, ${check.corrected} corrected` : ""}${check.refused.length ? `, ${check.refused.length} refused as already banked` : ""}; ` +
     `card takings agree with the card batch on ${check.batchesAgree} day${check.batchesAgree === 1 ? "" : "s"}` +
-    `${check.missingBatches.length ? `; no card batch on file for ${check.missingBatches.map((m) => `${m.day} (${$(m.cents)})`).join(", ")}` : ""}` +
+    `${check.cardsBanked ? `; ${check.cardsBanked} day${check.cardsBanked === 1 ? "" : "s"} of card takings banked from the register itself, no batch ever forwarded (${$(check.cardsBankedCents)})` : ""}` +
+    `${check.missingBatches.length ? `; days resting on the register: ${check.missingBatches.map((m) => `${m.day} (${$(m.cents)})`).join(", ")}` : ""}` +
     `${check.batchesDiffer.length ? `; the batch differs from the register on ${check.batchesDiffer.map((m) => m.day).join(", ")}` : ""}`
   );
 }

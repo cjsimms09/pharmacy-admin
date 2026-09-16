@@ -1,4 +1,5 @@
 import "server-only";
+import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { storeFile } from "./files";
@@ -64,6 +65,36 @@ export async function bankCardBatch(
       notes: `Received by email from ${input.from}`,
       uploadedBy: "mailbox-sweep",
     });
+  }
+
+  /*
+   * A day the register already banked hands its receipt over rather than gaining a second one.
+   *
+   * Where no batch was ever forwarded, `register-store.ts` banks the register's card takings for that day as a stand-in
+   * (`register-card|<day>`). If the batch turns up afterwards it is the better record — it carries the processor's own
+   * number and the card mix — but the money is the same money, and two receipts for it is the one outcome that must not
+   * happen. So the stand-in becomes this batch: same row, this key, this figure, and an audit line saying what changed.
+   * The deposit gate would refuse the second receipt anyway on amount, window and payer head, and that is the backstop
+   * rather than the mechanism, because it would leave the stand-in's wording standing over a batch that had arrived.
+   */
+  const standIn = await db.query.cashReceipts.findFirst({ where: (c, { eq }) => eq(c.sourceKey, `register-card|${b.closedOn}`) });
+  if (standIn) {
+    await db
+      .update(schema.cashReceipts)
+      .set({
+        sourceKey: `card-batch|${b.batchId}`,
+        reference: b.batchId,
+        amountCents: b.totalCents,
+        payer: "Card batch",
+        documentId,
+        notes: `Card takings at the counter — copays and front of shop together; the batch does not split them. ${b.byCard.map((c) => `${c.card} ${c.count}`).join(", ")}. Banked from the register until this batch arrived.`,
+      })
+      .where(eq(schema.cashReceipts.id, standIn.id));
+    const says =
+      `${b.says} The register had already banked ${b.closedOn}'s card takings for $${(standIn.amountCents / 100).toFixed(2)} with no batch on file; ` +
+      `that receipt is now this batch${standIn.amountCents === b.totalCents ? ", to the cent" : `, and the figure moves to $${(b.totalCents / 100).toFixed(2)}`}.`;
+    await audit({ action: "cash.card_batch_replaced_register", userName: by.userName, entity: "cash_receipt", entityId: standIn.id, details: says });
+    return { says, banked: false, refused: false };
   }
 
   const r = await addCashReceipt({
