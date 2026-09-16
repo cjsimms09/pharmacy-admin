@@ -138,14 +138,34 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
     cents: null,
   });
 
-  const outstanding = items.filter((i) => !i.done).length;
+  /*
+   * A month before the books began has nothing outstanding, because nothing was ever coming.
+   *
+   * On 16 September 2026 the morning list carried "August 2026: 3 things still to upload" at the
+   * top, at the level that means act today. August is before this pharmacy's books start, so no
+   * statement, no report and no count is ever going to arrive for it: the row could not be
+   * satisfied by any act available to anybody, and a row like that is how a person learns to scroll
+   * past the list it sits in. It reached that level because the checklist is always about the month
+   * just finished, and for the whole of September the month just finished is out of books.
+   *
+   * The items stay and say what they are — this is not hiding — but nothing is outstanding and no
+   * money is blocked, because neither is true.
+   */
+  const { monthIsOutOfBooks } = await import("./books-start");
+  const beforeBooks = monthIsOutOfBooks(month);
+  const outstanding = beforeBooks ? 0 : items.filter((i) => !i.done).length;
+  if (beforeBooks) {
+    for (const i of items) {
+      if (!i.done) i.says = "before the books begin — nothing is expected for this month";
+    }
+  }
   return {
     month,
     label: monthLabel(month),
     /* Worth the most first, then the ones with no figure. A list is read from the top. */
     items: items.sort((a, b) => Number(a.done) - Number(b.done) || (b.cents ?? -1) - (a.cents ?? -1)),
     outstanding,
-    blockedCents: items.filter((i) => !i.done).reduce((n, i) => n + (i.cents ?? 0), 0),
+    blockedCents: beforeBooks ? 0 : items.filter((i) => !i.done).reduce((n, i) => n + (i.cents ?? 0), 0),
   };
 }
 
