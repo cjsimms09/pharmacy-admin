@@ -25,6 +25,34 @@ The math has to be perfect — a wrong number that looks right is worse than no 
 
 ## Now
 
+### 0. Everything he asked for on the afternoon of 16 September, and where each stands
+
+He said it plainly: *"dont just drop what you are doing, everything I say needs to be fixed.. you
+need to be keeping track and make sure evrything gets done"*. So every ask from that afternoon is
+here with its state, and nothing leaves until it is done and measured.
+
+| His words | State |
+|---|---|
+| "redsail says they sent an 835 yesterday and received an error" | **Done.** Their file had arrived and been read. Chasing it found five silent doors — see `OPEN-ITEMS.md`, all five fixed and deployed. |
+| "make sure veridikal and redsail will be received, reconciled and sorted perfectly next time" | **Done as far as data allows.** Both Veridikal reports read end to end; RedSail's 835 read and banked; allocation to the programme rather than the plan fixed and tested. A *live* match still waits on a September-fill remittance (late October). |
+| "we should still be able to test our logic.. does our logic make snese" | **Done.** `tests/voucher-chain.test.ts` walks all three programmes claim-to-settlement, and `scripts/voucher-dry-run.ts` runs the real September claims through the real functions: 48 of 48 attach to the right claim, none wrongly, none ambiguous, none unmatched. It found and fixed a real gap — a coordinated fill was refused because the matcher was not told which row carries the voucher. |
+| "improve what to expect page, with a table that is easier to read" | **Done.** Status leads each row with a colour bar, four counts above the table, wrong in red. |
+| "needs to include everything we are expecting" | **Done.** Every mailbox route that has ever delivered now appears, so a feed nobody wrote down cannot be invisible. |
+| "are we getting Balance on hand daily?" | **Yes, measured.** Nine consecutive days of emails, 8–16 September; counts loaded on seven of them. On the page as a daily row. |
+| "also mckesson reports" | **All on the page.** Drill down daily (10 days), returns daily since the 11th, totals sheets daily since the 11th, AP transactions once (11th), rebate breakdown once (5th). The last two are too few to measure a rhythm from and say so rather than guess. |
+| "it should show month closed only once everything is done, money matches and everything lines up" | **Done.** Four states; "closed" needs every document in *and* every figure tying. |
+| "get rid of still to upload for august alert" | **Done**, in the checklist rather than the alert, so every reader is fixed. |
+
+**Still waiting on him, not on me:**
+
+- The **indication** for the 26.2 lb patient — Bactrim is right for some and wrong for others, and
+  the answer changes the recommendation entirely.
+- Confirm the bank split is as the site now has it: **Emprise** the operating account (a scan, no
+  CSV), **Wells Fargo / ProviderPay** the payer account he downloads on the 1st.
+- The fridge logger's **calibration expiry**; he gave the date, and no interval should be invented.
+- Every temperature sensor is typed `refrigerator`, including the room one, so the monthly log an
+  inspector reads prints "Room Temperature (refrigerator) · acceptable range 68.0F to 77.0F".
+
 ### A. Stop the setup list nagging about things he does not have (16 September)
 
 > "these are all irrelevant, i dont have them or they arent relevant, need system to leave me

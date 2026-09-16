@@ -34,6 +34,12 @@ export type ClaimCandidate = {
   ndc11: string | null;
   bin: string | null;
   remitCents: number | null;
+  /**
+   * Whether this claim carries a manufacturer voucher, and so could be the one a programme is paying.
+   *
+   * Only consulted for a payment from a voucher programme — see `fromProgramme` below.
+   */
+  carriesVoucher?: boolean;
 };
 
 export type RemittanceLine = {
@@ -44,6 +50,21 @@ export type RemittanceLine = {
   amountCents: number | null;
   /** The payer's BIN, where the remittance names one. */
   bin: string | null;
+  /**
+   * This money is a voucher programme's, so only a claim carrying a voucher can be the one it pays.
+   *
+   * Found by running the whole chain over September's real claims before a single programme payment
+   * for a September fill had arrived (`scripts/voucher-dry-run.ts`, 16 September 2026): of 53 voucher
+   * claims, 46 would have attached correctly, none wrongly, and 2 would have been refused as
+   * ambiguous — a fill billed to two payers, where RedSail's 835 names no BIN and neither claim was
+   * paid exactly the voucher amount.
+   *
+   * Both refusals were unnecessary, and that is the point. Only one of those two claims carries a
+   * voucher at all; the other is the coordinating payer's row, which no manufacturer programme is
+   * paying. The site already knew which was which and was not asking. It costs nothing to be wrong
+   * about — where it does not single one out, the answer is the refusal it would have given anyway.
+   */
+  fromProgramme?: boolean;
 };
 
 export type Choice = {
@@ -98,9 +119,18 @@ export function chooseClaimForRemittance(candidates: ClaimCandidate[], line: Rem
      * More than one claim on the same prescription, fill, day and drug means a fill billed to more
      * than one payer. The payer is what tells them apart, so ask which payer this money is from.
      */
-    const byBin = line.bin ? hits.filter((r) => digits(r.bin) === digits(line.bin)) : [];
+    /*
+     * A voucher programme pays a claim that carries a voucher, and never the other row of a
+     * coordinated fill. Asked before the BIN, because the BIN is often the one thing their file
+     * does not print.
+     */
+    const byVoucher = line.fromProgramme ? hits.filter((r) => r.carriesVoucher) : [];
+    if (byVoucher.length === 1) return { claim: byVoucher[0], ambiguous: null };
+
+    const from = byVoucher.length > 1 ? byVoucher : hits;
+    const byBin = line.bin ? from.filter((r) => digits(r.bin) === digits(line.bin)) : [];
     if (byBin.length === 1) return { claim: byBin[0], ambiguous: null };
-    const pool = byBin.length > 1 ? byBin : hits;
+    const pool = byBin.length > 1 ? byBin : from;
 
     const byAmount = line.amountCents === null ? [] : pool.filter((r) => r.remitCents === line.amountCents);
     if (byAmount.length === 1) return { claim: byAmount[0], ambiguous: null };

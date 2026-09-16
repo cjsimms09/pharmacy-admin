@@ -8,6 +8,7 @@ import type { LaterPayment } from "./fills";
 import { formatCents } from "./money";
 import { todayIso } from "./dates";
 import { isOutOfBooks } from "./books-start";
+import { isProgrammePayer } from "./payer-owed";
 
 /**
  * Money that reaches a claim after it was adjudicated.
@@ -76,7 +77,7 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
   if (!rx) throw new Error("A payment has to name the prescription it is for.");
   if (!Number.isFinite(p.amountCents) || p.amountCents === 0) throw new Error("Give the amount received.");
 
-  const { claim, onlyReversed, ambiguous } = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null, Math.round(p.amountCents), p.bin ?? null);
+  const { claim, onlyReversed, ambiguous } = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null, Math.round(p.amountCents), p.bin ?? null, p.source === "copay_card" || isProgrammePayer(p.payer));
   const id = newId();
   await db.insert(schema.claimPayments).values({
     id,
@@ -135,17 +136,28 @@ async function findClaim(
   ndc11: string | null,
   amountCents: number | null,
   bin: string | null,
+  /* True where the money is a voucher programme's, which narrows a coordinated fill to the row carrying the voucher. */
+  fromProgramme: boolean,
 ): Promise<{ claim: { id: string; fillNumber: number | null; dateFilled: string; ndc11: string | null } | null; onlyReversed: boolean; ambiguous: { count: number; why: string } | null }> {
   const all = await db.query.claims.findMany({
     where: eq(schema.claims.rxNumber, rxNumber),
-    columns: { id: true, fillNumber: true, dateFilled: true, ndc11: true, status: true, bin: true, remitCents: true },
+    columns: { id: true, fillNumber: true, dateFilled: true, ndc11: true, status: true, bin: true, remitCents: true, evoucherCents: true, evoucherMessageCents: true },
   });
   if (all.length === 0) return { claim: null, onlyReversed: false, ambiguous: null };
   const rows = all.filter((r) => r.status === "paid");
   if (rows.length === 0) return { claim: null, onlyReversed: true, ambiguous: null };
   const chosen = chooseClaimForRemittance(
-    rows.map((r) => ({ id: r.id, fillNumber: r.fillNumber, dateFilled: r.dateFilled, ndc11: r.ndc11, bin: r.bin, remitCents: r.remitCents })),
-    { fillNumber, dateFilled, ndc11, amountCents, bin },
+    rows.map((r) => ({
+      id: r.id,
+      fillNumber: r.fillNumber,
+      dateFilled: r.dateFilled,
+      ndc11: r.ndc11,
+      bin: r.bin,
+      remitCents: r.remitCents,
+      /* Which of a coordinated fill's two rows a manufacturer programme could be paying. */
+      carriesVoucher: (r.evoucherCents ?? 0) > 0 || (r.evoucherMessageCents ?? 0) > 0,
+    })),
+    { fillNumber, dateFilled, ndc11, amountCents, bin, fromProgramme },
   );
   return { claim: chosen.claim, onlyReversed: false, ambiguous: chosen.ambiguous };
 }
@@ -225,14 +237,14 @@ export async function laterPayments(): Promise<LaterPayment[]> {
  */
 export async function rematchMisattachedPayments(): Promise<{ looked: number; detached: number; moved: number }> {
   const rows = await db
-    .select({ id: schema.claimPayments.id, rxNumber: schema.claimPayments.rxNumber, fillNumber: schema.claimPayments.fillNumber, paidDate: schema.claimPayments.dateFilled, ndc11: schema.claimPayments.ndc11, amountCents: schema.claimPayments.amountCents, claimId: schema.claimPayments.claimId, claimDate: schema.claims.dateFilled })
+    .select({ id: schema.claimPayments.id, rxNumber: schema.claimPayments.rxNumber, fillNumber: schema.claimPayments.fillNumber, paidDate: schema.claimPayments.dateFilled, ndc11: schema.claimPayments.ndc11, amountCents: schema.claimPayments.amountCents, claimId: schema.claimPayments.claimId, claimDate: schema.claims.dateFilled, payer: schema.claimPayments.payer, source: schema.claimPayments.source })
     .from(schema.claimPayments)
     .innerJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id));
   const far = rows.filter((r) => r.paidDate && Math.abs(Date.parse(`${r.paidDate}T00:00:00Z`) - Date.parse(`${r.claimDate}T00:00:00Z`)) > 3 * 86_400_000);
   let detached = 0;
   let moved = 0;
   for (const p of far) {
-    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.paidDate, p.ndc11, p.amountCents, null);
+    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.paidDate, p.ndc11, p.amountCents, null, p.source === "copay_card" || isProgrammePayer(p.payer));
     const next = claim?.id ?? null;
     if (next === p.claimId) continue;
     await db.update(schema.claimPayments).set({ claimId: next }).where(eq(schema.claimPayments.id, p.id));
@@ -262,7 +274,7 @@ export async function matchOrphanPayments(): Promise<{ matched: number }> {
   for (const p of orphans) {
     // A payment waiting for its claim attaches to a paid one or keeps waiting; it never attaches to
     // a reversed claim, which would take the money out of every figure the moment it landed.
-    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11, p.amountCents, null);
+    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11, p.amountCents, null, p.source === "copay_card" || isProgrammePayer(p.payer));
     if (!claim) continue;
     await db.update(schema.claimPayments).set({ claimId: claim.id }).where(eq(schema.claimPayments.id, p.id));
     matched++;
