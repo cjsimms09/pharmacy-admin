@@ -314,6 +314,45 @@ nothing explains is **not** closed, because saying so is a promise that the book
 | **The monthly checklist was sending him to the wrong bank** | It said to fetch the operating statement "from Wells Fargo — as CSV or QFX". It is Emprise, and Emprise cannot export CSV, QFX or OFX at all, which is the whole reason that reader reads a scan. Corrected. Worth him confirming the split is as the site now has it: **Emprise** the operating account (scan only), **Wells Fargo / ProviderPay** the payer account whose history he downloads on the 1st. |
 | **Does a bank statement know its own month?** | Yes. `scanned-bank-solve.ts` takes the month from the statement's own header and refuses the file outright if it cannot read it, so a statement is filed under the right month by construction and never by upload date. |
 
+## 16 September, afternoon — five ways a document could arrive and not be there
+
+All five found in one chain, starting from *"redsail says they sent an 835 yesterday and received an
+error"*. Every one was silent: no error, no alert, no inbox line. Four are fixed and deployed; the
+fifth is a fault that had not fired yet.
+
+| What was wrong | How it showed | Fixed |
+|---|---|---|
+| **A sender's declared type could refuse a file.** Veridikal's two monthly reports, 15 Sept 21:04 and 21:08, both .xlsx declared `application/x-msexcel`. | Both dropped at the door, nothing stored, and every screen went on saying Veridikal had never sent anything. | The extension list, the size ceiling and the readers gate; a declared type never refuses on its own. `application/octet-stream` — "no idea what this is" — had always been accepted, so the least informative claim passed while a specific one was refused. |
+| **The mailbox swept only when the site was idle.** | No sweep for 80 minutes while he was using the site. Every document arrives through that sweep or the SFTP pull beside it, so both could be starved indefinitely by the pharmacy being open. | The three doors — mail, SFTP, PioneerRx — yield after 90 minutes of being starved. Housework still waits for a gap. |
+| **The sweep read only unread mail.** | He forwarded the Veridikal reports, they sat in Gmail, the sweep could not see them. Opening an email to check it sent is enough to hide it for ever. | Also fetches anything from the last three days, read or not. The message id has always been the real guard against double-reading. |
+| **A message from the mailbox's own address was dropped without a word.** | His forward is "from self" where the pharmacy address *is* the mailbox. No inbox line, no reason. | Right for a reminder coming back, wrong for a forward, and the attachment tells them apart: a reminder carries none and a forwarded report carries one. |
+| **Nothing said when a sender was turned away.** | Two refusals sat among forty inbox lines; found only because he asked about a different supplier. | An alert at "now". It is the one failure in the chain where the fault is certainly here, and nobody outside will chase it. |
+
+### Not yet fired, and would have fired in October
+
+OBSERVATION: a voucher programme's payment settles the programme's share and never the plan's, and
+the store decided which by the payment's **source** — only `copay_card` counted. RedSail's first
+remittance (15 Sept, SFTP, 46 payments, $2,011.64) imported as `plan`, payer "RedSail Technologies
+LLC", while the receivable is raised under "RedSail Technologies (RAS copay voucher)".
+
+SHOULD BE: money from a voucher programme settles the voucher, and the plan goes on owing its own
+share until the plan pays it. A remittance names its payer; that is what it is for.
+
+DIFFERENCE: for a September fill, every such payment would have settled the **plan's** receivable —
+plan showing paid when it had paid nothing, voucher line owed for ever, both wrong on one claim with
+every figure adding up. Harmless so far only because all 46 were April and May fills against books
+that begin 1 September. Fixed: `isProgrammePayer` asks the payer, not the door. Three tests.
+
+### Still open from this chain
+
+- **The two Veridikal reports have not been read yet.** Forwarded, and the sweep that can see them is
+  deployed. Until one is read end to end, the claim "Veridikal will come in automatically next time"
+  is proved only as far as the door.
+- **His four questions, unanswered:** can we reconcile Veridikal and RedSail against the claims as we
+  hold them; does AR adjust properly; do we allocate to the right payer; and do we know what is still
+  expected from another payer. The third has just been fixed and tested. The other three need
+  measuring before anything is claimed.
+
 ## Mine, not yet started
 
 This heading was deleted by accident on 14 September and restored the same day. I used it as the
