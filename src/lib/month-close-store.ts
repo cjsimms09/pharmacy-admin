@@ -20,6 +20,10 @@ import { judgeClose, endOf, type CloseCheck, type MonthClose } from "./month-clo
  * file is a statement filed under the right month by construction.
  */
 export async function monthClose(month: string, today: string): Promise<MonthClose> {
+  /* Nothing to read for a month from before the books began, and nothing to ask of it. */
+  const { monthIsOutOfBooks } = await import("./books-start");
+  if (monthIsOutOfBooks(month)) return judgeClose({ month, today, checks: [] });
+
   const { monthlyChecklist } = await import("./monthly-checklist");
   const list = await monthlyChecklist(month);
 

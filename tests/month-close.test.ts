@@ -20,6 +20,20 @@ describe("when a month may be called closed", () => {
    * matches and everything lines up". Three conditions, and the gap between the first and the last is
    * the reason this exists.
    */
+  test("a month from before the books began is not waiting on anything", () => {
+    /*
+     * The fault this file exists to prevent, very nearly shipped inside it. The month being closed is
+     * the one just finished, so on any day in September that is August — and these books begin on
+     * 1 September 2026. August has no statement, no sales month and no count, and never will, so the
+     * card would have read "waiting on 5" every day until October: a permanent red mark on a screen
+     * whose whole argument is that it never carries one.
+     */
+    const r = judgeClose({ month: "2026-08", today: "2026-09-16", checks: [doc(false), doc(false, "System Sales Summary")] });
+    assert.equal(r.state, "before_books");
+    assert.equal(r.documentsOutstanding, 0);
+    assert.match(r.says, /nothing to close/);
+  });
+
   test("a month still running is not incomplete, it is running", () => {
     const r = judgeClose({ month: "2026-09", today: "2026-09-16", checks: [doc(false)] });
     assert.equal(r.state, "running");

@@ -22,6 +22,8 @@
  * Pure: `month-close-store.ts` reads the data.
  */
 
+import { SITE_STARTS_ON, monthIsOutOfBooks } from "./books-start";
+
 export type CloseCheck = {
   key: string;
   name: string;
@@ -32,7 +34,7 @@ export type CloseCheck = {
   gate: "document" | "money";
 };
 
-export type CloseState = "running" | "waiting_on_documents" | "money_does_not_tie" | "closed";
+export type CloseState = "before_books" | "running" | "waiting_on_documents" | "money_does_not_tie" | "closed";
 
 export type MonthClose = {
   month: string;
@@ -57,6 +59,24 @@ export function judgeClose(input: { month: string; today: string; checks: CloseC
   const moneyOutstanding = money.filter((c) => !c.done).length;
   const base = { month, checks, documentsOutstanding, moneyOutstanding };
 
+  /*
+   * A month from before the books began cannot be closed, and must not sit red waiting to be.
+   *
+   * This is the fault the rest of this file exists to avoid, and it very nearly shipped inside it.
+   * The month being closed is the one just finished, so on any day in September that is August —
+   * and these books begin on 1 September 2026 (`books-start.ts`). August has no statement, no sales
+   * month and no count, and never will, so the card would have read "waiting on 5" every day until
+   * October: a permanent red mark on a screen whose whole argument is that it does not carry one.
+   */
+  if (monthIsOutOfBooks(month)) {
+    return {
+      ...base,
+      state: "before_books",
+      documentsOutstanding: 0,
+      moneyOutstanding: 0,
+      says: `${month} is before these books begin (${SITE_STARTS_ON}), so there is nothing to close. The first month this closes is ${SITE_STARTS_ON.slice(0, 7)}.`,
+    };
+  }
   if (today <= endOf(month)) {
     return {
       ...base,

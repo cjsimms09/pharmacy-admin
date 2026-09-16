@@ -154,9 +154,11 @@ function MonthCard({ close }: { close: Awaited<ReturnType<typeof closeNow>> }) {
       ? { label: "closed", cls: "badge-ok" }
       : close.state === "running"
         ? { label: "still running", cls: "" }
-        : close.state === "waiting_on_documents"
-          ? { label: `waiting on ${close.documentsOutstanding}`, cls: "badge-warn" }
-          : { label: "does not tie", cls: "badge-warn" };
+        : close.state === "before_books"
+          ? { label: "before the books", cls: "" }
+          : close.state === "waiting_on_documents"
+            ? { label: `waiting on ${close.documentsOutstanding}`, cls: "badge-warn" }
+            : { label: "does not tie", cls: "badge-warn" };
   const stripe = close.state === "closed" ? "border-l-accent" : close.state === "money_does_not_tie" ? "border-l-crit" : "border-l-line";
   const money = close.checks.filter((c) => c.gate === "money");
   const docs = close.checks.filter((c) => c.gate === "document");
