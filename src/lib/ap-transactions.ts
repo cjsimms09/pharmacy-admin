@@ -18,7 +18,7 @@
  * reaches an account as a cost. It carries the three facts an invoice cannot:
  *
  *   the due date     — when McKesson will take it.
- *   the check number — every invoice sharing "CKACH07227740" was taken as ONE debit. This is the
+ *   the check number — every invoice sharing "CKACH00000001" was taken as ONE debit. This is the
  *                      key that makes a bank line matchable: no bank line will ever equal one
  *                      invoice, and until now there was no way to know which invoices made it up.
  *   whether it cleared — "Closed - Cleared" with a clearing date, against "Open - Pending Approval".
@@ -26,7 +26,7 @@
  * ── The discount, and a thing worth knowing ──
  *
  * Each row carries a gross, a 2% cash discount, and a net. The net is what leaves the bank — and it
- * is also exactly what the invoice PDF prints as its total. Invoice 7657345037 is $13,263.58 gross,
+ * is also exactly what the invoice PDF prints as its total. Invoice 7000000005 is $13,263.58 gross,
  * $265.27 discount, $12,998.31 net, and the site has held $12,998.31 for it since it arrived. So
  * the books were already on the net figure and no discount is missing from them. Worth stating
  * plainly, because the printed statement shows the gross first and reads as though the site were

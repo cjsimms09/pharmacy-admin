@@ -186,7 +186,7 @@ export type MatchContext = {
    * What each wholesaler's own ledger says cleared, and under which reference.
    *
    * The one thing that lets a single bank debit be tied to the invoices inside it. McKesson's
-   * ACH07172717 is twenty-seven invoices; no amount of matching by value will ever find them.
+   * ACH00000002 is twenty-seven invoices; no amount of matching by value will ever find them.
    */
   settled?: { supplier: string; invoiceNumber: string; checkNumber: string | null; netCents: number }[];
   /**

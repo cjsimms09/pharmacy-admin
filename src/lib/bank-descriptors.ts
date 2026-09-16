@@ -9,7 +9,7 @@
  * amount and the counterparty's name in its description. That is the right rule and it answers
  * almost none of these lines, because the money does not arrive or leave one invoice at a time:
  *
- *   MCKESSON DRUG/AUTO ACH ACH07172717 — $121,429.15, which is twenty-seven invoices taken
+ *   MCKESSON DRUG/AUTO ACH ACH00000002 — $121,429.15, which is twenty-seven invoices taken
  *                                        together. No invoice will ever equal it.
  *   HRTLAND PMT SYST TXNS/FEES         — on BOTH sides. Deposits are the card takings; the debits
  *                                        are the card fees, which every month's account has been
@@ -133,7 +133,7 @@ const RULES: Rule[] = [
     /*
      * Their ACH number, which is their own check number with the CK taken off.
      *
-     * The bank prints ACH07172717; the accounts-payable report calls the same payment CKACH07172717.
+     * The bank prints ACH00000002; the accounts-payable report calls the same payment CKACH00000002.
      * That is an exact tie between one bank debit and the twenty-seven invoices inside it, and it
      * removes every guess about amounts.
      */
@@ -141,9 +141,9 @@ const RULES: Rule[] = [
       /*
        * The scan's letters are undone BEFORE the digits are counted, not after.
        *
-       * "ACHO71886O5" is how it renders ACH07188605. Matching first and correcting afterwards read
+       * "ACHO71886O5" is how it renders ACH00000003. Matching first and correcting afterwards read
        * the leading O as no digit at all and then put a zero back in front of it, giving
-       * CKACH007188605 — a reference that matches nothing, from a line that was perfectly readable.
+       * CKACH00000003 — a reference that matches nothing, from a line that was perfectly readable.
        */
       const squashed = d.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
       const m = /ACH([0-9OQIL]{8})/.exec(squashed);

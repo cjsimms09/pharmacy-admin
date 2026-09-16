@@ -97,7 +97,7 @@ function signed(raw: string): number {
  * McKesson's statement line: two dates and the receivable number run together with no separator,
  * then an order reference, the branch, a description, and three figures.
  *
- *   08/31/202609/08/202676551031000828261404165Invoice  175.21  8,760.69  8,585.48  7655103100
+ *   08/31/202609/08/202670000000150828261404165Invoice  175.21  8,760.69  8,585.48  7000000015
  *   │         │         │         │            │        │       │         │         └ repeated
  *   billed    due       invoice   order ref    branch   discount gross    net
  */

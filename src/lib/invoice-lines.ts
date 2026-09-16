@@ -103,7 +103,7 @@ const MCK = new RegExp(
   /*
    * And a third: a fourteen-digit GTIN, unhyphenated, with spaces before the item number.
    *
-   * McKesson prints it for a device sold through the pharmacy counter. On invoice 7657944598, 15
+   * McKesson prints it for a device sold through the pharmacy counter. On invoice 7000000008, 15
    * September: "00357599835002   299-2394975096819   2EA FREESTYLE LIBRE 2 PLUS SENSOR   103.92 R
    * 81.94   163.88". The pattern knew only the two hyphenated shapes, so it failed on the first
    * character; no other format claimed the line either, so it vanished without being counted as

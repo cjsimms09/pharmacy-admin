@@ -1862,7 +1862,7 @@ async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
      * Where the reader read lines and they did not add up to the total, none were kept — the reader
      * refuses all of them rather than store a partial invoice. That is a reader to fix, not a
      * document to replace, and calling it a scan sent the owner looking for a readable copy of a PDF
-     * that was perfectly readable: McKesson 7657944598, 15 September, 56 lines read, $163.88 short
+     * that was perfectly readable: McKesson 7000000008, 15 September, 56 lines read, $163.88 short
      * because one line carried a fourteen-digit GTIN no pattern knew.
      *
      * Where nothing was recognised at all it is either a scan or a layout the reader has never seen.

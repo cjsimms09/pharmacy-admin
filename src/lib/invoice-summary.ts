@@ -21,7 +21,7 @@ import { moneyCents } from "./payer-payments";
  *   Supplier: Invoice Date Between 9/1/2026 and 9/7/2026
  *   McKesson                             ← the supplier, alone on a line
  *   Invoice Date,Invoice Number,Reference Number,Invoice Total,Preferred Cost for Profit,Status
- *   9/1/2026,7655391467,,$6.99,$6.99,Closed Aug 31 2026 11:05PM
+ *   9/1/2026,7000000014,,$6.99,$6.99,Closed Aug 31 2026 11:05PM
  *   …
  *   Printed On: 9/7/2026,Page 1 of 2    ← page furniture, and then the whole header again
  *   …

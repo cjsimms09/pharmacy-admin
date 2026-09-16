@@ -1691,7 +1691,7 @@ export default async function InvoicesPage({
             <input
               name="q"
               defaultValue={sp.q}
-              placeholder="7656147111, oxycodone, an NDC"
+              placeholder="7000000012, oxycodone, an NDC"
               className="field mt-1"
             />
           </label>

@@ -40,7 +40,7 @@ export default async function FindPage({ searchParams }: { searchParams: Promise
             name="q"
             defaultValue={query}
             autoFocus
-            placeholder="Nicole, CPR, C-250, oxycodone, recall, 7656147111"
+            placeholder="Nicole, CPR, C-250, oxycodone, recall, 7000000012"
             className="field max-w-lg"
             aria-label="Find anything"
           />
