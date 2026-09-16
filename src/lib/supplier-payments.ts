@@ -105,14 +105,25 @@ export async function recordSupplierPayment(input: NewSupplierPayment, user: { n
         columns: { id: true, supplier: true, invoiceNumber: true, totalCents: true, paidOn: true },
       })
     : [];
-  const check = checkAllocations({
-    invoices,
-    allocations: input.allocations,
-    allocatedAlready: Object.fromEntries(await allocatedAlready(invoiceIds)),
-    paidOn: input.paidOn,
-    paymentCents: input.amountCents,
-    acceptDifference: input.acceptDifference ?? false,
-  });
+  /*
+   * A payment that names no invoice this site holds is still a payment.
+   *
+   * IPD's statement settles invoices older than the invoice feed: on the owner's own statement, all 14 of them. The
+   * money moved and the credit that moved it has to be banked, so the payment is written with nothing against it rather
+   * than refused — its cost reaches no month, which is right, because those invoices were never counted either. Only a
+   * document that says so may do this: `acceptDifference` is how the caller says the difference is accounted for.
+   */
+  const namesNothing = input.allocations.length === 0 && (input.acceptDifference ?? false);
+  const check = namesNothing
+    ? ({ ok: true, supplier: input.supplier, allocatedCents: 0, differenceCents: input.amountCents } as const)
+    : checkAllocations({
+        invoices,
+        allocations: input.allocations,
+        allocatedAlready: Object.fromEntries(await allocatedAlready(invoiceIds)),
+        paidOn: input.paidOn,
+        paymentCents: input.amountCents,
+        acceptDifference: input.acceptDifference ?? false,
+      });
   if (!check.ok) return check;
 
   const paymentId = newId();

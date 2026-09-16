@@ -924,6 +924,17 @@ export async function importRecognised(
       const r = await bookCardStatement({ text: pdfText(buf), documentId: filed?.documentId ?? null }, { userName: ctx.userName ?? "mailbox-sweep" });
       routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
       imported = !r.refused;
+    } else if (cls.kind === "ipd_statement") {
+      /*
+       * IPD's statement of account: a payment per settlement with what it put against each invoice, and the Aytu credit
+       * that paid them banked on the memo's own day. No revenue — the top-off is revenue per fill when the memo itself
+       * is read. Before the vendor-bill rule, as the other forwarded statements are.
+       */
+      const { fileIpdStatement } = await import("./ipd-statement-store");
+      const { pdfText } = await import("./pdf-text");
+      const r = await fileIpdStatement({ text: pdfText(buf), documentId: filed?.documentId ?? null, fileName }, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined });
+      routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
+      imported = !r.refused && (r.payments > 0 || r.banked > 0);
     } else if (cls.kind === "accesshealth_payment") {
       /*
        * Health Mart Atlas's itemised EFT. Claim payments only, revenue nought, never banked: the payer payment report
