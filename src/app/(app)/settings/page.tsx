@@ -7,7 +7,7 @@ import { requireManager, createUser } from "@/lib/auth";
 import { getSettings, setSetting, SETTING_KEYS, type SettingKey } from "@/lib/settings";
 import { audit } from "@/lib/audit";
 import { apiKeyHint, clearApiKey, saveApiKey, testConnection, hasApiKey, DEFAULT_MODEL } from "@/lib/ai";
-import { spend, rates, dollars, monthlyCap, DEFAULT_RATE_IN, DEFAULT_RATE_OUT } from "@/lib/ai-spend";
+import { spend, rates, dollars, monthlyCap, ratesLookWrong, DEFAULT_RATE_IN, DEFAULT_RATE_OUT } from "@/lib/ai-spend";
 import { logo, saveLogo, clearLogo } from "@/lib/branding";
 import { fmt } from "@/lib/dates";
 import { Hub } from "@/components/hub";
@@ -388,6 +388,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 {used.since ? ` since ${fmt(used.since.slice(0, 10))}` : ""} — {used.tokensIn.toLocaleString("en-US")} tokens
                 in, {used.tokensOut.toLocaleString("en-US")} out, at ${rate.in} and ${rate.out} per million.
               </p>
+              {/*
+                A total that counts the cheap half and calls itself the total is worse than no total.
+                See `ratesLookWrong`: output priced at zero hid $87.04 of a $145.69 month.
+              */}
+              {ratesLookWrong(rate, used.tokensOut).wrong && (
+                <Notice kind="warn">{ratesLookWrong(rate, used.tokensOut).says}</Notice>
+              )}
               <div className="overflow-x-auto">
               <table className="table mt-2">
                 <thead><tr><th>What</th><th className="text-right">Calls</th><th className="text-right">Tokens</th><th className="text-right">Cost</th></tr></thead>

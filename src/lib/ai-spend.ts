@@ -57,6 +57,37 @@ export async function rates(): Promise<Rates> {
   };
 }
 
+/**
+ * Whether the rates on file can be believed, and what they hide when they cannot.
+ *
+ * Found 16 September 2026 while working out what raising the ceiling would cost. `ai_price_out` is
+ * the string "0" on this pharmacy's settings, which the reader above honours deliberately — an
+ * explicit zero is somebody's decision, and only a typed figure may set a rate to zero.
+ *
+ * But no model gives its output away, and output is the expensive half: 3.48M output tokens in the
+ * last thirty-one days, which at the published Opus rate is $87.04. So the site has been reporting
+ * **$58.65** for a month that cost **$145.69** — counting the cheap half and calling it the total.
+ * Every ceiling, every "what is this spending" figure and every decision about whether to read
+ * another hundred contracts rests on that number.
+ *
+ * Not corrected automatically. The real rate is on his invoice and nowhere in this building, and a
+ * figure this system invented would be the same fault again wearing a better number. What it does is
+ * refuse to be quiet about it: the rate is reported as unbelievable, with what it would come to at
+ * the published rate, so the decision is his with the size of it in front of him.
+ */
+export function ratesLookWrong(r: Rates, tokensOut: number): { wrong: boolean; says: string | null } {
+  if (r.out > 0) return { wrong: false, says: null };
+  const atPublished = (tokensOut / 1_000_000) * DEFAULT_RATE_OUT;
+  return {
+    wrong: true,
+    says:
+      `Output is priced at $0 per million, so every figure here counts only what was sent and nothing that came back. ` +
+      `No model gives its output away, and output is the dearer half. The ${(tokensOut / 1_000_000).toFixed(2)}M output tokens in this period ` +
+      `are counted as free; at the published rate for ${r.model} they are ${dollars(atPublished)}. ` +
+      `Put the rates from the Anthropic invoice on this page and every cost on the site becomes true at once.`,
+  };
+}
+
 export function costOf(tokensIn: number, tokensOut: number, r: Rates): number {
   return (tokensIn * r.in) / 1_000_000 + (tokensOut * r.out) / 1_000_000;
 }
