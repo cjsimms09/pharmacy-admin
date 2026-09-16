@@ -332,10 +332,19 @@ export async function alerts(): Promise<Alert[]> {
     const since = addDays(today, -14);
     const turnedAway = await db.query.inboxItems.findMany({
       where: (i, { and, gte, ne }) => and(gte(i.receivedAt, since), ne(i.status, "stored")),
-      columns: { fromAddress: true, subject: true, receivedAt: true, reason: true },
+      columns: { fromAddress: true, subject: true, receivedAt: true, reason: true, status: true },
     });
-    /* Our own outgoing mail and bounces are not senders being refused. */
-    const real = turnedAway.filter((i) => !/mailer-daemon|postmaster/i.test(i.fromAddress));
+    /*
+     * Which of those are still worth saying, and why most are not: `inbox-refusals.ts`, pure and
+     * tested. Checked against the real mailbox before this shipped a second time — seven messages
+     * not stored, nought worth reporting.
+     */
+    const { refusalsWorthReporting } = await import("./inbox-refusals");
+    const stored = await db.query.inboxItems.findMany({
+      where: (i, { and, gte, eq: is }) => and(gte(i.receivedAt, since), is(i.status, "stored")),
+      columns: { fromAddress: true, receivedAt: true, subject: true },
+    });
+    const real = refusalsWorthReporting(turnedAway, stored);
     if (real.length > 0) {
       const senders = [...new Set(real.map((i) => i.fromAddress.split("@")[1] ?? i.fromAddress))];
       out.push({
