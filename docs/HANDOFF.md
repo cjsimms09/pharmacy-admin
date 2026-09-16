@@ -405,7 +405,7 @@ B: if this cuts across the recogniser you are building, move it; the tests come 
 **Owed to 2 and B, and written after the fact rather than before, which is the order this file exists to prevent.**
 
 **`src/lib/invoice-lines.ts` (2's), `3ed700d`..next commit.** The McKesson pattern gains a third code shape: a
-fourteen-digit GTIN, unhyphenated, with spaces before the item number. McKesson invoice 7657944598 (15 September,
+fourteen-digit GTIN, unhyphenated, with spaces before the item number. McKesson invoice 7000000008 (15 September,
 $10,044.80) printed one — `00357599835002   299-2394975096819   2EA FREESTYLE LIBRE 2 PLUS SENSOR   103.92 R
 81.94   163.88` — the pattern failed on its first character, no format claimed the line so it was not counted as
 unreadable, the other 56 came to $163.88 under the total, and the all-or-nothing rule refused all of them. The
@@ -419,7 +419,7 @@ have item lines that equal PioneerRx's booked-in totals to the cent ($123.36, $7
 the invoice total and on no item line — a charge, not goods. `overbilledCents` appears to take invoice total less
 booked-in total. Worth separating goods billed above what arrived (lines > receipt) from charges that are not goods
 (total > lines = receipt). Also: the no-lines alert explains itself as "usually a scan" even where `lines_unread` is
-non-zero — 7657944598 had 56 lines read and refused, not a scan.
+non-zero — 7000000008 had 56 lines read and refused, not a scan.
 
 **`src/lib/autoroute.ts` (B's), `36e7604`, 14 September.** New `RouteKind` `empty_report` for a scheduled report
 whose whole content is a no-data marker ("No Data", 12 bytes, the Sunday 13 September claims report). Checked after
