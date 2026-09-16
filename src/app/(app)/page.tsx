@@ -21,6 +21,7 @@ import { mailHealth } from "@/lib/mail-health";
 import { pendingUpdates } from "@/lib/updates";
 import { moneyPosition } from "@/lib/money-position";
 import { moneyFound } from "@/lib/money-found";
+import { moneyWaitingNow } from "@/lib/money-waiting-store";
 import { booksFor } from "@/lib/ledger-store";
 import { parsePeriod } from "@/lib/ledger";
 import { contractClocksDue } from "@/lib/contract-docs";
@@ -396,6 +397,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       */}
       <Suspense fallback={<Pending title="Worth the most this morning" note="Weighing what is worth the most…" />}>
         <WorthTheMost />
+      </Suspense>
+
+      {/*
+        Money already earned and waiting on somebody, which is a different question from the list above.
+        "Worth the most" is money to go and make; this is money the pharmacy has made and not been paid.
+        Three lines and the total, because the whole list is a page of its own.
+      */}
+      <Suspense fallback={<Pending title="Money waiting" note="Adding up what is owed…" />}>
+        <MoneyWaiting />
       </Suspense>
 
       {/*
@@ -1112,6 +1122,43 @@ function Pending({ title, note, tall = false }: { title: string; note: string; t
           <div key={i} className={`card animate-pulse motion-reduce:animate-none ${tall ? "h-28" : "h-32"}`} />
         ))}
       </div>
+    </section>
+  );
+}
+
+/**
+ * Money earned and not yet paid: the three largest pots, and what each is waiting for.
+ *
+ * Streamed like the others, and silent where nothing is waiting. The full list is /payers/waiting; this is the glance
+ * that says whether anything needs chasing before the day starts.
+ */
+async function MoneyWaiting() {
+  const waiting = await moneyWaitingNow().catch(() => null);
+  if (!waiting || waiting.rows.length === 0) return null;
+  return (
+    <section className="mb-6">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold">Money waiting on somebody</h2>
+        <span className="text-xs text-ink-3">
+          {formatCents(waiting.totalCents)} in all ·{" "}
+          <Link href="/payers/waiting" className="text-accent underline">all {waiting.rows.length}</Link>
+        </span>
+      </div>
+      <ol className="grid gap-3 lg:grid-cols-3">
+        {waiting.rows.slice(0, 3).map((r) => (
+          <li key={r.key} className="card flex flex-col">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="min-w-0 truncate text-sm font-medium">{r.name}</span>
+              <span className="whitespace-nowrap text-lg font-semibold tabular-nums text-ink">{formatCents(r.cents)}</span>
+            </div>
+            <p className="mt-1 flex-1 text-xs text-ink-2">{r.settles}</p>
+            <div className="mt-2 flex items-center gap-2">
+              <Link href={r.href} className="btn btn-sm">Open it</Link>
+              {r.neverAnything && <span className="text-[11px] text-ink-3">nothing has ever arrived</span>}
+            </div>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

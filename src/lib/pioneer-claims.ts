@@ -49,11 +49,23 @@
  *                                   zero on 66 of 67 and the amount in EvoucherAmountFromMessage, equal to Veridikal's
  *                                   own report on all 67.
  * The message is read for this and dropped: it carries the patient's remaining benefit, which the site does not keep.
+ *
+ * ── Veridikal's two programmes, told apart by the message and not by the money ──
+ *
+ * A denial conversion is a claim a plan refused that a manufacturer paid instead: the whole net is Veridikal's, the plan
+ * owes nothing, and Veridikal pays the ingredient cost plus a $2.00 fee against a claim carrying a $2.50 one (P-5).
+ * An ordinary eVoucher sits beside a plan that did pay, and Veridikal owes the message amount plus $2.50.
+ *
+ * Reading them off the amounts — the message equalling the net — was the first rule, and it is not safe: a message
+ * amount is not always the applied voucher. Measured 16 September 2026 on June–September's 415 claims carrying a
+ * message, the wording is exact: "RelayHealth is primary payer" is on all 28 conversions and on none of the 122
+ * eVouchers. So the wording decides, and the amounts are left to say what they say.
  */
-export function voucherProgrammeFromMessage(message: string | null | undefined): "RedSail" | "Veridikal" | null {
+export function voucherProgrammeFromMessage(message: string | null | undefined): "RedSail" | "Veridikal" | "Veridikal conversion" | null {
   const t = (message ?? "").trim();
   if (!t) return null;
-  if (/relayhealth/i.test(t) || /\bthe mf[rg] of\b[\s\S]*\bpaid\b/i.test(t)) return "Veridikal";
+  const veridikal = /relayhealth/i.test(t) || /\bthe mf[rg] of\b[\s\S]*\bpaid\b/i.test(t);
+  if (veridikal) return /relay\s*health\s+is\s+primary\s+payer/i.test(t) ? "Veridikal conversion" : "Veridikal";
   if (/\bHAS PROVIDED A\b/i.test(t)) return "RedSail";
   return null;
 }

@@ -82,6 +82,13 @@ export const NAV: NavGroup[] = [
     blurb: "Every dispensing and what it made; claims paid under the Kansas floor; the payers and their contracts.",
     items: [
       { href: "/claims", label: "Claims", blurb: "Every dispensing, what it made, and what is still owed on it", gated: true },
+      /*
+       * The one question the payer table cannot answer: what is my money doing this morning.
+       *
+       * Listed rather than hidden, and second, because it is the page somebody opens on a phone between patients. The
+       * payer table underneath it is forty lines and answers "what does each owe"; this answers "who do I chase".
+       */
+      { href: "/payers/waiting", label: "Money waiting", blurb: "Earned and not yet paid, largest first, with the document that would settle each one", gated: true },
       { href: "/claims/floor", label: "Kansas floor", blurb: "Claims paid under NADAC plus the fee, the plans the floor reaches, and the appeals filed", gated: true },
       { href: "/payers", label: "Payers and contracts", blurb: "Every BIN we bill, its contract read once, its appeal route and its 835 routing", gated: true },
       { href: "/payers/performance", label: "Who pays best", blurb: "Every plan ranked by what it actually pays", gated: true, hidden: true },

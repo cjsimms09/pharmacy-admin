@@ -263,9 +263,15 @@ describe("who ran a claim's copay voucher, from its message", () => {
   test("RedSail's switch wording", () => {
     assert.equal(voucherProgrammeFromMessage(": NOVO NORDISK HAS PROVIDED A $99.99 VOUCHER TOWARDS THE PATIENT COPAY. PLEASE NOTIFY PATIENT"), "RedSail");
   });
-  test("Veridikal's RelayHealth wording, eVoucher and denial conversion", () => {
+  test("Veridikal's RelayHealth wording, and a denial conversion told apart by it", () => {
+    /*
+     * Measured 16 September 2026 across June–September's 415 claims carrying a message: "RelayHealth is primary payer"
+     * is on all 28 conversions and none of the 122 eVouchers. The amounts do not separate them — a message amount is
+     * not always the applied voucher — so the wording decides.
+     */
     assert.equal(voucherProgrammeFromMessage("Lilly, the mfr of MOUNJARO 5 MG/0.5 ML PEN paid 150.00 toward your copay. $1650.00 out of $1950.00 in benefits remaining."), "Veridikal");
-    assert.equal(voucherProgrammeFromMessage("Lilly, the mfg of ZEPBOUND 10 MG/0.5 ML PEN, paid $671.36 toward your prescription. RelayHealth is primary payer."), "Veridikal");
+    assert.equal(voucherProgrammeFromMessage("Lilly, the mfg of ZEPBOUND 10 MG/0.5 ML PEN, paid $671.36 toward your prescription. RelayHealth is primary payer."), "Veridikal conversion");
+    assert.equal(voucherProgrammeFromMessage("Maker, the mfr of EXAMPLE, paid $10.00 toward your prescription. Relay Health is primary payer."), "Veridikal conversion", "however the switch spaces its own name");
   });
   test("no message, no programme", () => {
     assert.equal(voucherProgrammeFromMessage(null), null);
