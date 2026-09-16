@@ -1580,6 +1580,56 @@ export async function allFills(range?: { from?: string; to?: string }) {
   return held(`fills:${from}:${to}`, () => loadFills(from, to));
 }
 
+/*
+ * The columns a fill is built from — twenty-two of the claims table's forty-two.
+ *
+ * This read every column and used half of them. It is the reading almost every page in the site
+ * sits on, and it covers a 400-day window by default, so the other twenty were carried out of the
+ * database and thrown away on the first page of every morning.
+ *
+ * Measured on a scratch database at the scale the owner is sending — 30,000 claims across a year:
+ * 1,614 ms for every column against 848 ms for these, and the whole of it blocks the web server,
+ * because the connection is serialized and no page is served while a query runs.
+ *
+ * Kept as a list rather than left implicit so that adding a field to the mapping below without
+ * adding it here fails the typecheck rather than silently reading `undefined`.
+ */
+const FILL_COLUMNS = {
+  id: true,
+  rxNumber: true,
+  fillNumber: true,
+  dateFilled: true,
+  ndc11: true,
+  itemName: true,
+  bin: true,
+  pcn: true,
+  groupNumber: true,
+  pbmName: true,
+  payerLabel: true,
+  quantityThousandths: true,
+  remitCents: true,
+  copayCents: true,
+  patientTotalCents: true,
+  acquisitionCents: true,
+  grossProfitCents: true,
+  expectedFacilitatorCents: true,
+  cashPlan: true,
+  onAccount: true,
+  status: true,
+  reversalKey: true,
+  /*
+   * Added to A's list by the merge, because the loader has gained two things since the branch was opened: it selects a
+   * fill collected in the window as well as one filled in it, and it drops the claims of a test import. A column list
+   * that misses one of those does not read less — it reads wrong.
+   */
+  completedAt: true,
+  soldOn: true,
+  importId: true,
+  evoucherCents: true,
+  evoucherMessageCents: true,
+  evoucherProgramme: true,
+} as const;
+
 async function loadFills(from: string, to: string) {
   /*
    * A fill is in the window if it was filled in it OR collected in it, and the two are not the same
@@ -1622,6 +1672,12 @@ async function loadFills(from: string, to: string) {
   const rows = (
     await db.query.claims.findMany({
       where: or(inWindow(schema.claims.dateFilled), inWindow(schema.claims.completedAt), inWindow(schema.claims.soldOn)),
+      /*
+       * Only the columns the fills are built from (A, PR #28). This was `select *` on the widest read in the site: every
+       * page that shows money goes through it, and it was carrying the whole row — the stored report text included — to
+       * use a third of it.
+       */
+      columns: FILL_COLUMNS,
     })
   ).filter((c) => !testImports.some((t) => t.id === c.importId));
   const { groupIntoFills } = await import("./fills");

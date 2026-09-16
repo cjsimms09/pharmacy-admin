@@ -154,6 +154,16 @@ const PAYER_CLAIM_COLUMNS = {
   onAccount: true,
   reversalKey: true,
   networkId: true,
+  /*
+   * The day it was collected, in both its columns. Revenue has followed the sale rather than the fill since 9 September,
+   * after this list was written, and the two callers here group by it: without them every fill reads as never sold.
+   */
+  completedAt: true,
+  soldOn: true,
+  /* The voucher fields, so a programme's share of a claim is the programme's here too (payer-owed.ts claimShares). */
+  evoucherCents: true,
+  evoucherMessageCents: true,
+  evoucherProgramme: true,
 } as const;
 
 const nameOf = (f: Fill): string => f.payers.map((p) => p.name ?? p.bin ?? "unnamed").join(" + ");
