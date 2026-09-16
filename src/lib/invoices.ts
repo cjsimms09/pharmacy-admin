@@ -1390,7 +1390,7 @@ async function storeModelInvoiceLines(
   invoiceId: string,
   inv: SupplierInvoice,
   read: import("./ai").ReadInvoiceLinesT,
-): Promise<{ stored: number; unread: number; reconciles: boolean | null; readCents: number }> {
+): Promise<{ stored: number; unread: number; reconciles: boolean | null; readCents: number; shortCents?: number; shortNote?: string | null }> {
   const { ndc11: toNdc11 } = await import("./invoice-lines");
   const good: typeof read.lines = [];
   let unread = read.unreadable.length;
@@ -2714,7 +2714,7 @@ export async function storeInvoiceLines(
     text: string;
     printedTotalCents: number | null;
   },
-): Promise<{ stored: number; unread: number; reconciles: boolean | null; readCents: number }> {
+): Promise<{ stored: number; unread: number; reconciles: boolean | null; readCents: number; shortCents?: number; shortNote?: string | null }> {
   const { parseInvoiceLines } = await import("./invoice-lines");
   if (!meta.text || meta.text.length < 200) return { stored: 0, unread: 0, reconciles: null, readCents: 0 };
   // Item lines add up to the goods, not to the amount due: shipping and tax are on the invoice and
@@ -2733,7 +2733,32 @@ export async function storeInvoiceLines(
     await ndcPackages(),
   );
   if (parsed.lines.length === 0) return { stored: 0, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: 0 };
-  if (parsed.reconciles === false) return { stored: 0, unread: parsed.lines.length + parsed.unreadable.length, reconciles: false, readCents: parsed.totalCents };
+  /*
+   * Each half of the invoice is judged against its own printed subtotal, and kept on its own merits.
+   *
+   * The owner, 16 September: "ipd sends controlled and non controlled items in same document, they are different
+   * invoices but in the same pdf". The rule used to be all or nothing against the whole document, and on IPD 1013225
+   * that threw away a Schedule II half that read perfectly and proved against its own subtotal — because the
+   * non-controlled half was $112.77 short on two lines of a shape this reader did not know. The DEA asks about the half
+   * that was discarded, and the pharmacist saw "no item lines" on an invoice whose controlled half was complete.
+   *
+   * So: a half that balances is kept whole. A half that does not is kept too, with what it is short by recorded on the
+   * invoice — the amount, the number of lines, and which half — so the figure is short by a NAMED amount rather than
+   * absent, and nothing is invented to fill the gap. Refusing to guess is not the same as discarding what was read.
+   *
+   * An invoice that prints no sections is one section: the whole of it, against its printed total, as before.
+   */
+  const halves = parsed.sections.length
+    ? parsed.sections.map((s) => ({ printedCents: s.printedCents, readCents: s.readCents, lines: s.lines, what: s.controlled ? "the Schedule II half" : "the non-controlled half" }))
+    : [{ printedCents: parsed.printedTotalCents, readCents: parsed.totalCents, lines: parsed.lines.length, what: "the invoice" }];
+  const short = halves.filter((h) => h.printedCents !== null && h.readCents !== h.printedCents);
+  const shortCents = short.reduce((n, h) => n + ((h.printedCents ?? 0) - h.readCents), 0);
+  /* How many lines are missing, where the reader can say: the shapes it did not claim at all (`unrecognised`). */
+  const shortLines = parsed.unrecognised.length + parsed.unreadable.length;
+  const shortNote = short.length
+    ? short.map((h) => `${h.what} is short ${money((h.printedCents ?? 0) - h.readCents)}`).join(", ") +
+      (shortLines ? ` on ${shortLines} line${shortLines === 1 ? "" : "s"} the reader could not read` : "")
+    : null;
 
   /*
    * What is already on this invoice, and whether this read has earned the right to replace it.
@@ -2803,10 +2828,24 @@ export async function storeInvoiceLines(
    */
   await db
     .update(schema.supplierInvoices)
-    .set({ linesRead: rows.length, linesUnread: parsed.unreadable.length })
+    .set({
+      linesRead: rows.length,
+      linesUnread: parsed.unreadable.length,
+      /* What a half of this invoice did not read, in the same write as the lines it did, so the two cannot disagree. */
+      linesShortCents: shortCents || null,
+      linesShortCount: shortCents ? shortLines || null : null,
+      linesShortNote: shortNote,
+    })
     .where(eq(schema.supplierInvoices.id, invoiceId));
 
-  return { stored: rows.length, unread: parsed.unreadable.length, reconciles: parsed.reconciles, readCents: parsed.totalCents };
+  return {
+    stored: rows.length,
+    unread: parsed.unreadable.length,
+    reconciles: parsed.reconciles,
+    readCents: parsed.totalCents,
+    shortCents,
+    shortNote,
+  };
 }
 
 /**
