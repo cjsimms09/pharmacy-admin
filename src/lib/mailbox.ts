@@ -759,20 +759,48 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
 
             const file = new File([new Uint8Array(buf)], fileName, { type: att.contentType || "application/octet-stream" });
             const stored = await storeFile(file, { allowReportTypes: true });
-            const docId = newId();
-            await db.insert(schema.documents).values({
-              id: docId,
-              category: asStatement ? "supplier_statement" : "report",
-              title: asStatement ? `${supplierName} ${kindWord}${subject ? ` — ${subject}` : ""}` : subject || fileName,
-              fileName,
-              mimeType: stored.mimeType,
-              sizeBytes: stored.sizeBytes,
-              sha256: stored.sha256,
-              storageKey: stored.storageKey,
-              inboxItemId: itemId,
-              notes: `Received by email from ${from}`,
-              uploadedBy: ctx.userId ?? "mailbox-sweep",
+            /*
+             * The same bytes are filed once, however many messages carry them.
+             *
+             * Found by session 2 on 16 September 2026, hours after the sweep was changed to read mail
+             * that had already been opened: 34 documents categorised as an invoice with no invoice
+             * record, every one byte-identical to a document that had one, 22 of them stored that
+             * morning. The invoice-level dedupe held, so the archive is right and no money moved —
+             * but the documents piled up behind it, and this is the drawer a DEA inspector counts.
+             * Twenty-one documents sat in the Schedule II drawer for seven invoices. Separation was
+             * never breached; the first question would still have been why there are three times as
+             * many records as invoices.
+             *
+             * Not the same message twice: the message id has always stopped that, a few hundred lines
+             * above. These are different messages carrying identical bytes — the same invoice emailed
+             * twice, a report forwarded, a supplier copying two addresses — and `documents.sha256`
+             * has been written since the table existed without ever once being read here. What
+             * exposed it was mine: the sweep that now reads already-opened mail took in fifty-five
+             * messages at once, and the copies among them arrived together instead of one a week.
+             *
+             * The inbox line is still written, because a second message really did arrive and that is
+             * a fact about the mailbox. It simply points at the document already on file.
+             */
+            const twin = await db.query.documents.findFirst({
+              where: (d, { eq: is }) => is(d.sha256, stored.sha256),
+              columns: { id: true },
             });
+            const docId = twin?.id ?? newId();
+            if (!twin) {
+              await db.insert(schema.documents).values({
+                id: docId,
+                category: asStatement ? "supplier_statement" : "report",
+                title: asStatement ? `${supplierName} ${kindWord}${subject ? ` — ${subject}` : ""}` : subject || fileName,
+                fileName,
+                mimeType: stored.mimeType,
+                sizeBytes: stored.sizeBytes,
+                sha256: stored.sha256,
+                storageKey: stored.storageKey,
+                inboxItemId: itemId,
+                notes: `Received by email from ${from}`,
+                uploadedBy: ctx.userId ?? "mailbox-sweep",
+              });
+            }
             // ── Auto-import ────────────────────────────────────────
             // The attachment is filed as a document either way. If it is also recognisable as a
             // report the site knows how to read, load it now so a scheduled report becomes
