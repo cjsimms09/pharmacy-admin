@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { section } from "./support/fixtures";
 import { readFile } from "node:fs/promises";
 import { readEftNotice, looksLikeEftNotice, HEALTH_MART_ATLAS } from "../src/lib/health-mart-eft";
 
@@ -130,7 +131,7 @@ describe("the same money down two roads", () => {
 
   test("the portal report's import goes through the same function, so there is one gate", async () => {
     const payments = await readFile("src/lib/payer-payments-store.ts", "utf8");
-    const imp = payments.slice(payments.indexOf("export async function importPayerPayments"), payments.indexOf("export type Banking"));
+    const imp = section(payments, "export async function importPayerPayments", "export type Banking");
     assert.match(imp, /bankPayerPayments\(/);
     assert.doesNotMatch(imp, /addCashReceipt\(/);
   });
