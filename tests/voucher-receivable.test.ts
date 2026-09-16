@@ -33,7 +33,7 @@ describe("who owes what on a claim with a programme's money in it", () => {
   });
 
   test("a Veridikal denial conversion: the plan on the claim owes nothing, Veridikal the net less $0.50, which nobody pays", () => {
-    const s = claimShares({ remitCents: 67136, evoucherCents: 0, evoucherMessageCents: 67136, evoucherProgramme: "Veridikal" });
+    const s = claimShares({ remitCents: 67136, evoucherCents: 0, evoucherMessageCents: 67136, evoucherProgramme: "Veridikal conversion" });
     assert.deepEqual(s, { kind: "veridikal_conversion", planCents: 0, programme: CONVERSION, programmeCents: 67086, unpaidFeeCents: 50, from: "programme" });
   });
 
@@ -42,7 +42,7 @@ describe("who owes what on a claim with a programme's money in it", () => {
       { remitCents: 5000, evoucherCents: 0 },
       { remitCents: 91347, evoucherCents: 10000, evoucherProgramme: "RedSail" },
       { remitCents: 22250, evoucherCents: 0, evoucherMessageCents: 10000, evoucherProgramme: "Veridikal" },
-      { remitCents: 67136, evoucherCents: 0, evoucherMessageCents: 67136, evoucherProgramme: "Veridikal" },
+      { remitCents: 67136, evoucherCents: 0, evoucherMessageCents: 67136, evoucherProgramme: "Veridikal conversion" },
       { remitCents: 4000, evoucherCents: 6000, evoucherProgramme: "RedSail" },
       { remitCents: 10000, evoucherCents: 0, evoucherMessageCents: 9900, evoucherProgramme: "Veridikal" },
       { remitCents: 30, evoucherCents: 0, evoucherMessageCents: 30, evoucherProgramme: "Veridikal" },
@@ -85,6 +85,29 @@ describe("a claim whose voucher message has not been read", () => {
     assert.equal(claimShares({ remitCents: 22250, evoucherCents: 10000, evoucherProgramme: "Veridikal" }).kind, "veridikal_evoucher");
   });
 
+  test("a claim that says it is a conversion is one, whatever the amounts look like", () => {
+    /* The pull writes "Veridikal conversion" where the message names RelayHealth as the primary payer. */
+    const s = claimShares({ remitCents: 67136, evoucherCents: 0, evoucherMessageCents: 20000, evoucherProgramme: "Veridikal conversion" });
+    assert.equal(s.kind, "veridikal_conversion");
+    assert.equal(s.planCents, 0);
+    assert.equal(s.from, "programme");
+  });
+
+  test("a claim that says eVoucher is not read as a conversion, however much the message covers", () => {
+    /*
+     * P-2 measured one Veridikal claim in forty whose message equals the net while the plan really paid $412.89 of it.
+     * Read as a conversion, the plan would owe nothing and its payment would look like an overpayment.
+     */
+    const s = claimShares({ remitCents: 49174, evoucherCents: 0, evoucherMessageCents: 49174, evoucherProgramme: "Veridikal" });
+    assert.equal(s.kind, "veridikal_evoucher");
+    assert.equal(s.programme, "Veridikal (eVoucher)");
+    assert.equal(s.unpaidFeeCents, 0, "an eVoucher leaves nothing unpaid; only a conversion does");
+  });
+
+  test("with nothing read, the whole net still looks like a conversion and is treated as one", () => {
+    assert.equal(claimShares({ remitCents: 67136, evoucherCents: 0, evoucherMessageCents: 67136 }).kind, "veridikal_conversion");
+  });
+
   test("the old rule, by BIN, is gone: a RedSail voucher on a plan's BIN is RedSail's", () => {
     assert.equal(claimShares({ remitCents: 91347, evoucherCents: 10000 }).programme, COPAY_PAYER);
   });
@@ -118,7 +141,7 @@ describe("how much of a Veridikal row the claim already carries, which is not ne
   });
 
   test("a conversion of $150.00 with its $2.00 fee, on the claim it belongs to, adds nothing and is $0.50 short of the net", () => {
-    const claim = { remitCents: 15250, evoucherCents: 0, evoucherMessageCents: 15250, evoucherProgramme: "Veridikal" };
+    const claim = { remitCents: 15250, evoucherCents: 0, evoucherMessageCents: 15250, evoucherProgramme: "Veridikal conversion" };
     const carried = carriedForVeridikalRow("denial_conversion", { paymentCents: 15000, thirdPartyDueCents: null }, claim);
     assert.equal(carried, 15250);
     assert.equal(revenue(15200, carried), 0);
@@ -133,7 +156,7 @@ describe("how much of a Veridikal row the claim already carries, which is not ne
 
 describe("who a programme's payment settles", () => {
   const ev = claimShares({ remitCents: 22250, evoucherCents: 0, evoucherMessageCents: 10000, evoucherProgramme: "Veridikal" });
-  const conv = claimShares({ remitCents: 67136, evoucherCents: 0, evoucherMessageCents: 67136, evoucherProgramme: "Veridikal" });
+  const conv = claimShares({ remitCents: 67136, evoucherCents: 0, evoucherMessageCents: 67136, evoucherProgramme: "Veridikal conversion" });
   const receivables: Receivable[] = [
     { bin: PLAN_BIN, name: "Test Plan", dateFilled: DAY, cents: ev.planCents, cashPlan: false },
     { bin: null, name: ev.programme, dateFilled: DAY, cents: ev.programmeCents, cashPlan: false },
