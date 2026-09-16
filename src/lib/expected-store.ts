@@ -520,6 +520,43 @@ async function load(today: string): Promise<ExpectedNow> {
     },
   ];
 
+  /*
+   * Everything else that has ever actually arrived, so the page cannot be quietly incomplete.
+   *
+   * The owner: "needs to include everything we are expecting". The hand-written catalogue above is
+   * the only way to list a document nobody has ever sent — a list built from arrivals could never
+   * contain one — but it has the opposite blind spot, and it is mine: a feed I did not think to
+   * write down is invisible here however faithfully it arrives, and its silence would be invisible
+   * too. So every mailbox route that has delivered and is not already covered gets a row of its own,
+   * judged by its own measured rhythm like everything else.
+   *
+   * The two lists together are the whole answer: what we know to expect, and what turns up.
+   */
+  const covered = new Set([
+    "on_hand", "rx_transactions", "card_batch", "purchase_drilldown", "pioneer_catalog", "supplier_catalog", "nadac",
+    "accrual_sales", "ipd_statement", "veridikal_report", "card_statement", "invoice", "remittance_835", "payer_payments",
+    "accesshealth_payment", "copay_remit", "rxrescue_credit", "rebate_report", "sales_by_payment", "mck_returns", "claims",
+    /* Not documents the pharmacy waits on: its own outgoing mail, replies, and reports that ran empty. */
+    "training_reply", "not_for_filing", "unrecognised", "empty_report", "return_policy", "postage",
+  ]);
+  const { kindWords } = await import("./inbox-line");
+  for (const [key, v] of byRoute) {
+    if (!key || covered.has(key) || v.n === 0) continue;
+    list.push({
+      key: `route:${key}`,
+      label: kindWords(key) ?? key.replace(/_/g, " "),
+      from: "the mailbox",
+      whyItMatters: "Arriving, and not on the list of things this page was told to expect — so it is listed from what actually comes in.",
+      cadence: { kind: "on_event", says: "as it comes" },
+      graceDays: 0,
+      lastAt: v.at,
+      everCount: v.n,
+      expected: true,
+      arrivals: daysByRoute.get(key) ?? [],
+      href: "/inbox",
+    });
+  }
+
   const rows = judgeAll(list, today);
   return { readAt: new Date().toISOString(), rows, summary: expectedSummary(rows) };
 }

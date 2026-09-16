@@ -51,29 +51,29 @@ const GROUPS: { state: ExpectedState; title: string; blurb: string }[] = [
   { state: "not_expected", title: "Not expected", blurb: "the pharmacy does not receive these" },
 ];
 
-const CHIP: Record<ExpectedState, { label: string; cls: string }> = {
-  overdue: { label: "Chase", cls: "badge-crit" },
-  due_now: { label: "Due", cls: "badge-warn" },
-  never_arrived: { label: "Never", cls: "badge-warn" },
-  arriving: { label: "On time", cls: "badge-ok" },
-  not_yet_due: { label: "Not started", cls: "badge-muted" },
-  not_expected: { label: "n/a", cls: "badge-muted" },
+const CHIP: Record<ExpectedState, { label: string; badge: string; stripe: string }> = {
+  overdue: { label: "Wrong", badge: "badge-crit", stripe: "bg-crit" },
+  due_now: { label: "Due", badge: "badge-warn", stripe: "bg-warn" },
+  never_arrived: { label: "Never", badge: "badge-warn", stripe: "bg-warn" },
+  arriving: { label: "On time", badge: "badge-ok", stripe: "bg-accent" },
+  not_yet_due: { label: "Not yet", badge: "badge-muted", stripe: "bg-line" },
+  not_expected: { label: "n/a", badge: "badge-muted", stripe: "bg-line" },
 };
 
 export default async function ExpectedPage() {
   await requireUser();
   const [{ rows, summary, readAt }, close] = await Promise.all([expectedNow(), closeNow()]);
   const now = new Date();
-  const needsYou = rows.filter((r) => r.state === "overdue" || r.state === "due_now" || r.state === "never_arrived");
+  const wrong = rows.filter((r) => r.state === "overdue").length;
+  const due = rows.filter((r) => r.state === "due_now").length;
+  const never = rows.filter((r) => r.state === "never_arrived").length;
 
   return (
     <>
       <PageHeader
         title="What we're expecting"
         subtitle={
-          needsYou.length === 0
-            ? "Everything is arriving. Nothing needs chasing."
-            : `${needsYou.length} of ${rows.length} need something; the rest are arriving.`
+          wrong === 0 ? `Nothing is wrong. ${rows.length} things tracked.` : `${wrong} wrong, out of ${rows.length} tracked.`
         }
         actions={
           <>
@@ -90,12 +90,12 @@ export default async function ExpectedPage() {
         <table className="table min-w-[820px]">
           <thead>
             <tr>
-              <th className="w-[34%]">Document</th>
-              <th className="w-[15%]">From</th>
+              <th className="w-[92px]">Status</th>
+              <th className="w-[32%]">Document</th>
+              <th className="w-[14%]">From</th>
               <th className="w-[17%]">How often</th>
-              <th className="w-[13%]">Last received</th>
-              <th className="w-[13%]">Next expected</th>
-              <th className="w-[8%] text-right">Status</th>
+              <th className="w-[12%]">Last received</th>
+              <th className="w-[12%]">Next expected</th>
             </tr>
           </thead>
           <tbody>
@@ -132,11 +132,31 @@ export default async function ExpectedPage() {
   );
 }
 
+function Count({ n, label, tone, big }: { n: number; label: string; tone: "crit" | "warn" | "ok"; big?: boolean }) {
+  const colour = tone === "crit" ? "text-crit" : tone === "warn" ? "text-warn" : "text-ink-3";
+  return (
+    <div className="rounded-lg border border-line bg-surface px-4 py-2">
+      <span className={`block tabular-nums font-semibold ${big ? "text-3xl" : "text-2xl"} ${n > 0 ? colour : "text-ink-3"}`}>{n}</span>
+      <span className="block text-xs text-ink-2">{label}</span>
+    </div>
+  );
+}
+
 function Row({ r, now }: { r: Judged; now: Date }) {
   const chip = CHIP[r.state];
   const last = r.lastAt ? r.lastAt.slice(0, 10) : null;
   return (
     <tr className="align-top">
+      {/*
+        Status first, with a colour bar, because this page exists to make a problem obvious and the
+        last column on the right is the last place a reader looks.
+      */}
+      <td>
+        <span className="flex items-center gap-2">
+          <span className={`inline-block h-4 w-1 rounded-sm ${chip.stripe}`} aria-hidden />
+          <span className={`badge ${chip.badge}`}>{chip.label}</span>
+        </span>
+      </td>
       <td>
         <Link href={r.href} className="font-medium text-ink hover:underline">
           {r.label}
@@ -166,9 +186,6 @@ function Row({ r, now }: { r: Judged; now: Date }) {
       </td>
       <td className="num text-xs text-ink-2">
         {r.nextDueOn ? fmt(r.nextDueOn) : <span className="text-ink-3">—</span>}
-      </td>
-      <td className="text-right">
-        <span className={`badge ${chip.cls}`}>{chip.label}</span>
       </td>
     </tr>
   );

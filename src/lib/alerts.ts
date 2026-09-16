@@ -243,6 +243,49 @@ export async function alerts(): Promise<Alert[]> {
     });
   }
 
+  // ── Money that arrived for a fill this site holds, and found no claim ──
+  /*
+   * The check that makes "it will match next time" something the site proves rather than something
+   * I said.
+   *
+   * A remittance for a fill older than any claim on file cannot match and is not a fault — RedSail's
+   * first file was forty-four April and May fills, Veridikal's two were June and July, and these
+   * books begin on 1 September. That is why the unmatched count alone has never been worth an alert.
+   *
+   * A payment for a fill the site *does* hold and cannot place is a different animal entirely. It
+   * means the prescription number, the fill date, the NDC or the BIN disagree between the payer's
+   * file and the claim — and until somebody looks, that claim goes on being owed by a payer that has
+   * already paid it. The first September remittance is the one that will say whether the keys line
+   * up, and this is what will say so out loud on the morning it arrives.
+   */
+  try {
+    const oldest = await db.query.claims.findFirst({ columns: { dateFilled: true }, orderBy: (c, { asc }) => asc(c.dateFilled) });
+    if (oldest) {
+      const stranded = await db.query.claimPayments.findMany({
+        where: (p, { and, isNull, gte, eq: is }) => and(isNull(p.claimId), gte(p.dateFilled, oldest.dateFilled), is(p.outOfBooks, false)),
+        columns: { amountCents: true, payer: true, rxNumber: true },
+      });
+      if (stranded.length > 0) {
+        const cents = stranded.reduce((n, p) => n + p.amountCents, 0);
+        const payers = [...new Set(stranded.map((p) => p.payer ?? "an unnamed payer"))];
+        out.push({
+          key: "payments-stranded",
+          level: "now",
+          title: `${stranded.length} payment${stranded.length === 1 ? "" : "s"} cannot be matched to a claim, ${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          why:
+            `From ${payers.slice(0, 3).join(", ")}${payers.length > 3 ? ` and ${payers.length - 3} more` : ""}, for fills this site holds claims for. ` +
+            `A payment for a fill older than the records cannot match and is not counted here; these can and did not, which means the prescription number, ` +
+            `the fill date, the drug or the BIN disagrees between their file and the claim. Until it is looked at, those claims go on being owed by a payer that has already paid.`,
+          href: "/claims",
+          action: "Look at them",
+        });
+      }
+    }
+  } catch (e) {
+    /* Never worth taking the morning list down for. */
+    void e;
+  }
+
   // ── A sender wrote and this turned them away ──────────────────────
   /*
    * The alert that would have caught the Veridikal refusal the same night.
