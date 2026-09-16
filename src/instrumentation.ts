@@ -188,30 +188,16 @@ export async function register() {
    */
   const warmTick = async () => {
     try {
-      const { warmHeld } = await import("./lib/warm");
-      const { isIdle } = await import("./lib/activity");
+      const { warmHeld, heapState } = await import("./lib/warm");
+      const { secondsSinceRequest } = await import("./lib/activity");
       /*
-       * Each step checks the site is still idle before it starts — by the SAME measure that let the
-       * warm-up start at all, not a looser one.
-       *
-       * This was `isIdle(5)` inside a job that `whenIdle` only starts after `IDLE_SECONDS` (90) of
-       * quiet: two answers to one question, and they drifted. Once running, the warm-up kept
-       * going step after step so long as five seconds had passed since the last page — and one
-       * step (the product ledger, 45,906 rows; the books; drug profit) blocks the whole server for
-       * up to twelve seconds, because every libsql call holds the event loop.
-       *
-       * On 15 September that was the login that "never works". Every press of Sign in succeeded —
-       * thirteen `login.success` rows in two minutes, the password right each time — but he pressed
-       * about every thirteen seconds, each five-second gap let the next heavy step start, and his
-       * next press landed inside it. The sign-in page itself measured 0.2s on one request and 12s on
-       * the next; the page it redirects to never arrived before he pressed again, and each press
-       * cancelled the navigation before it. Worst straight after a restart, when nothing is cached
-       * and every step does real work — which is when he comes back to log in.
-       *
-       * With the same ninety seconds, anybody using the site stops the warm-up at the next step and
-       * it does not resume until they have been gone a minute and a half.
+       * Asked before every step, because both halves of the answer move while this runs: somebody
+       * arrives, and the step before allocated. The policy is `warm-policy.ts` — the day's readings
+       * warm in an ordinary gap, a page a click deeper waits for a real lull, and a process near
+       * its heap ceiling warms nothing at all, because warming into a nearly full heap is what cost
+       * the counter its page.
        */
-      await warmHeld(() => isIdle(IDLE_SECONDS));
+      await warmHeld(() => heapState(secondsSinceRequest()));
     } catch {
       // A reading that fails to warm is computed by its next reader.
     }

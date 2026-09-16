@@ -23,14 +23,29 @@ import { isIdle } from "../src/lib/activity";
 const src = (p: string) => readFile(p, "utf8");
 
 describe("the warm-up gets out of the way of a person by the same measure that let it start", () => {
-  test("REGRESSION: the per-step check uses IDLE_SECONDS, not a shorter number of its own", async () => {
+  test("REGRESSION: the per-step check is never shorter than the one that let the warm-up start", async () => {
+    /*
+     * Pinned as the property rather than as one spelling of it. The guard was `isIdle(IDLE_SECONDS)` inline; since A's
+     * warm policy (PR #26) it is the policy's own GAP_SECONDS, asked before every step along with the heap. What must
+     * stay true either way is that the between-steps question is not a looser one than the question that started it —
+     * five seconds there is what let a heavy step begin between two of his presses.
+     */
     const text = await src("src/instrumentation.ts");
     const warm = text.slice(text.indexOf("const warmTick"), text.indexOf("const publicAccessTick"));
-    // The call line only — the comment above it quotes the old `isIdle(5)` on purpose.
     const call = warm.split(/\r?\n/).find((l) => /^\s*await warmHeld\(/.test(l));
     assert.ok(call, "could not find the warm-up call");
-    assert.doesNotMatch(call, /isIdle\(\s*\d+\s*\)/, "the warm-up checks idleness with a literal number again — use IDLE_SECONDS");
-    assert.match(call, /isIdle\(IDLE_SECONDS\)/);
+    assert.doesNotMatch(call, /isIdle\(\s*\d+\s*\)/, "the warm-up checks idleness with a literal number again");
+
+    const started = (await src("src/instrumentation.ts")).match(/const IDLE_SECONDS = (\d+);/);
+    assert.ok(started, "IDLE_SECONDS is no longer declared as a plain number");
+    if (/isIdle\(IDLE_SECONDS\)/.test(call)) return; // The inline spelling still satisfies it.
+
+    const { GAP_SECONDS, LULL_SECONDS } = await import("../src/lib/warm-policy");
+    assert.ok(
+      GAP_SECONDS >= Number(started[1]),
+      `the warm policy lets a step start after ${GAP_SECONDS}s while the warm-up itself waits ${started[1]}s — that gap is the sign-in stall`,
+    );
+    assert.ok(LULL_SECONDS >= GAP_SECONDS, "a deeper page's lull must not be shorter than an ordinary gap");
   });
 
   test("and IDLE_SECONDS is long enough to outlast a person between clicks", async () => {
