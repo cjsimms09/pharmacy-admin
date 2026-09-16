@@ -150,6 +150,28 @@ export async function savePayerLink(
  */
 export type LearnedFrom = { key: ClaimKey; payer: string };
 
+/**
+ * Whether a name on a remittance is somebody moving money for a plan, rather than the plan itself.
+ *
+ * The check that stopped this feature being worse than not having it. Written, deployed, and then
+ * asked — before the nightly pass had run once — what it would actually teach against the live data.
+ * The answer was one link: a BIN belongs to "Health Mart Atlas".
+ *
+ * Health Mart Atlas does not owe this pharmacy anything. It is the PSAO the money travels through,
+ * and its own payment report names the real plan in a sentence beside the figure — Caremark, Prime
+ * Therapeutics, MedImpact. Every payer name on file today is one of these: ProviderPay, Health Mart
+ * Atlas, RedSail, the Medicare facilitator. So a learner that trusted the payer field would have
+ * quietly renamed unidentified claims after their courier, and a wrong name that looks settled is
+ * worse than an honest blank — the blank gets asked about.
+ *
+ * So today this learns nothing, which is the true answer, and it starts learning the day a plan
+ * sends its own 835 under its own name. That is the shape the owner asked for: "the system needs to
+ * learn" — from evidence, and not from whatever string happens to be in a field.
+ */
+export function routesMoneyForOthers(payer: string): boolean {
+  return /provider\s*pay|health\s*mart|access\s*health|redsail|veridikal|transaction\s*facilit|rxrescue|aytu|psao/i.test(payer);
+}
+
 export function linksToLearn(
   paid: { key: ClaimKey; payer: string | null }[],
   existing: Pick<PayerLinkRow, "bin" | "pcn" | "groupNumber" | "contractId">[],
@@ -158,6 +180,8 @@ export function linksToLearn(
   for (const p of paid) {
     const name = (p.payer ?? "").trim();
     if (!name) continue;
+    /* A courier is not a payer. See `routesMoneyForOthers`, and what asking the live data cost to find out. */
+    if (routesMoneyForOthers(name)) continue;
     /* The same rule `savePayerLink` enforces: a key with nothing in it would match every claim. */
     if (!norm(p.key.bin) && !norm(p.key.groupNumber) && !norm(p.key.contractId)) continue;
     /* Already known, however it was learned. */
@@ -220,6 +244,7 @@ export async function learnLinksFromRemittances(): Promise<{ learned: number; co
       pbmName: schema.claims.pbmName,
       matchMethod: schema.claims.matchMethod,
       payer: schema.claimPayments.payer,
+      source: schema.claimPayments.source,
       claimId: schema.claimPayments.claimId,
     })
     .from(schema.claimPayments)
@@ -230,7 +255,11 @@ export async function learnLinksFromRemittances(): Promise<{ learned: number; co
    * names the payer that paid, which is not always the plan the claim was billed to, and overwriting
    * a working name with it would lose more than it found.
    */
-  const unnamed = rows.filter((r) => !(r.pbmName ?? "").trim() || r.matchMethod === "unresolved" || r.matchMethod === "none");
+  const unnamed = rows.filter(
+    (r) =>
+      /* A facilitator's or programme's payment names the route, never the plan. */
+      r.source === "plan" && (!(r.pbmName ?? "").trim() || r.matchMethod === "unresolved" || r.matchMethod === "none"),
+  );
   const existing = await allPayerLinks();
   const { learn, conflicting } = linksToLearn(
     unnamed.map((r) => ({ key: { bin: r.bin, pcn: r.pcn, groupNumber: r.groupNumber, contractId: r.contractId }, payer: r.payer })),

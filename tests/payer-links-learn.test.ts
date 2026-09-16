@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { linksToLearn, type ClaimKey, type PayerLinkRow } from "../src/lib/payer-links";
+import { linksToLearn, routesMoneyForOthers, type ClaimKey, type PayerLinkRow } from "../src/lib/payer-links";
 
 /**
  * What a remittance teaches the site about who a BIN belongs to.
@@ -57,5 +57,37 @@ describe("learning a payer from the remittances that paid it", () => {
   test("the same key spelled differently is one key", () => {
     const { learn } = linksToLearn([{ key: key({ bin: " 610014 " }), payer: "MedImpact" }, { key: key({ bin: "610014" }), payer: "MedImpact" }], []);
     assert.equal(learn.length, 1);
+  });
+});
+
+describe("the courier is never mistaken for the payer", () => {
+  /*
+   * The check that stopped this feature being worse than not having it. Written, deployed, and then
+   * asked — before the nightly pass had run once — what it would teach against the live data. The
+   * answer was one link: a BIN belongs to "Health Mart Atlas", which is the PSAO the money travels
+   * through and owes this pharmacy nothing. A wrong name that looks settled is worse than a blank,
+   * because the blank gets asked about.
+   */
+  test("every payer name on file today is a route, not a plan", () => {
+    for (const courier of ["ProviderPay", "Health Mart Atlas", "RedSail Technologies LLC", "MEDICARE TRANSACTION FACILITATOR", "Veridikal (eVoucher)", "AccessHealth"]) {
+      assert.equal(routesMoneyForOthers(courier), true, courier);
+    }
+  });
+
+  test("a plan paying under its own name is not a route", () => {
+    for (const plan of ["Caremark", "Express Scripts", "MedImpact", "Prime Therapeutics", "OptumRx", "Humana", "Kansas Medicaid"]) {
+      assert.equal(routesMoneyForOthers(plan), false, plan);
+    }
+  });
+
+  test("a courier's payment teaches nothing, so today it learns nothing at all", () => {
+    const { learn } = linksToLearn([{ key: key(), payer: "Health Mart Atlas" }, { key: key({ bin: "004336" }), payer: "ProviderPay" }], []);
+    assert.deepEqual(learn, [], "which is the true answer until a plan sends its own 835");
+  });
+
+  test("and the day a plan does send one, it learns", () => {
+    const { learn } = linksToLearn([{ key: key(), payer: "MedImpact" }], []);
+    assert.equal(learn.length, 1);
+    assert.equal(learn[0].payer, "MedImpact");
   });
 });
