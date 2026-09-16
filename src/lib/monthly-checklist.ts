@@ -99,7 +99,17 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
     name: "Bank statement for the operating account",
     why:
       "The only independent record of what actually happened to the money. Without it every cash figure is what a feed said rather than what the bank did.",
-    from: "Wells Fargo — as CSV or QFX rather than the PDF, which arrives as a scan and reads badly",
+    /*
+     * Emprise, and a scan.
+     *
+     * This said "Wells Fargo — as CSV or QFX rather than the PDF", and both halves were wrong. The
+     * operating statement is Emprise's (`scanned-bank-statement.ts`), Emprise cannot export CSV, QFX
+     * or OFX at all (the owner, 15 September 2026, and the whole reason that reader reads a scan),
+     * and Wells Fargo is the ProviderPay account, which is a different account holding different
+     * money. An instruction that sends him to the wrong bank for a format that does not exist is
+     * worse than no instruction.
+     */
+    from: "Emprise — the scanned PDF, which is the only form it comes in",
     done: lines.length > 0,
     says: lines.length > 0 ? `${lines.length} lines read` : "nothing is reconciled against the bank",
     cents: null,

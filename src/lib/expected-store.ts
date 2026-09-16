@@ -114,7 +114,7 @@ async function load(today: string): Promise<ExpectedNow> {
   const { invoicesStillOwed } = await import("./invoices");
   const owed = (await invoicesStillOwed()).filter((o) => !o.receiptIsTheInvoice && o.received > 0);
 
-  const [claimDays, onHandDays, bankDays, nadacDays, catalogueDays, plan835Days, cardBatchDays, mtf, mtfDays] = await Promise.all([
+  const [claimDays, onHandDays, bankDays, nadacDays, catalogueDays, plan835Days, cardBatchDays, mtf, mtfDays, wells, wellsDays] = await Promise.all([
     daysOf("select distinct date_filled as d from claims where date_filled is not null order by d desc limit 60"),
     daysOf("select distinct counted_on as d from on_hand_imports where counted_on is not null order by d desc limit 60"),
     daysOf('select distinct substr("on", 1, 10) as d from bank_lines where "on" is not null order by d desc limit 60'),
@@ -124,6 +124,13 @@ async function load(today: string): Promise<ExpectedNow> {
     daysOf("select distinct received_on as d from cash_receipts where source_key like 'card-batch|%' and received_on is not null order by d desc limit 60"),
     c.execute("select max(received_on) as at, count(*) as n from claim_payments where source = 'mtf'"),
     daysOf("select distinct received_on as d from claim_payments where source = 'mtf' and received_on is not null order by d desc limit 60"),
+    /*
+     * The Wells Fargo / ProviderPay account history, found the same way the monthly checklist finds
+     * it — by the portal's own file name. Nobody sends this one: he downloads it on the first of the
+     * month, so the arrival that counts is the day it was filed here.
+     */
+    c.execute("select max(uploaded_at) as at, count(*) as n from documents where file_name like '%ransaction%istory%'"),
+    daysOf("select distinct substr(uploaded_at, 1, 10) as d from documents where file_name like '%ransaction%istory%' order by d desc limit 60"),
   ]);
 
   const t = {
@@ -252,6 +259,22 @@ async function load(today: string): Promise<ExpectedNow> {
       note: "Not expected before the month closes. September's is due in the first week of October.",
       arrivals: bankDays,
       href: "/money/bank",
+    },
+    {
+      key: "wells_fargo_account",
+      label: "Wells Fargo / ProviderPay account history",
+      from: "the ProviderPay portal — fetched by hand, nobody sends it",
+      whyItMatters:
+        "What each payer paid in and what was swept across to the operating account. It is what proves the deposits on the bank statement are the payments on the report and not more money.",
+      /* The owner, 16 September 2026: "wells fargo report that we manually get on first of month". */
+      cadence: { kind: "monthly", dayOfMonth: 1 },
+      graceDays: 5,
+      lastAt: str(wells.rows[0]?.at),
+      everCount: num(wells.rows[0]?.n),
+      expected: true,
+      note: "Nothing will ever arrive by itself here: it is downloaded from the portal, so this row is a reminder rather than a chase.",
+      arrivals: wellsDays,
+      href: "/money",
     },
     {
       key: "sales",
