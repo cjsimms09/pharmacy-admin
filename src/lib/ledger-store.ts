@@ -1,6 +1,6 @@
 import "server-only";
 import { accountsFor, accountMonths, type MonthlyPL } from "./profit-and-loss";
-import { combineMonths, scriptCounts, pace, basisGap, periodOf, periodsBack, type Period, type PeriodPL, type ScriptCounts, type Pace, type BasisGap } from "./ledger";
+import { combineMonths, scriptCounts, pace, basisGap, periodOf, periodsBack, isOpenPeriod, type Period, type PeriodPL, type ScriptCounts, type Pace, type BasisGap } from "./ledger";
 import { countedTwiceOver, feedsInTheBooks, booksBalance, basisDifference, type CountedTwice, type Feed, type BasisDifference } from "./books-check";
 import { todayIso } from "./dates";
 
@@ -45,7 +45,16 @@ export type Books = {
 
 export async function booksFor(period: Period, today = todayIso()): Promise<Books> {
   const { held } = await import("./held");
-  return held(`books:${period.key}:${today}`, () => loadBooks(period, today));
+  /*
+   * The day goes in the key only where the day changes the answer.
+   *
+   * A month in progress accrues its standing costs by the day, so its account really is a different
+   * figure tomorrow and must not be served from yesterday. A closed month is not, and dating its key
+   * added an entry a day to a cache that removed nothing — one whole period graph per period per
+   * day, none of them ever read again.
+   */
+  const key = isOpenPeriod(period, today) ? `books:${period.key}:${today}` : `books:${period.key}`;
+  return held(key, () => loadBooks(period, today));
 }
 
 async function loadBooks(period: Period, today: string): Promise<Books> {

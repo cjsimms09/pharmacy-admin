@@ -122,6 +122,23 @@ export function previousPeriod(p: Period): Period {
   return periodOf(p.kind, previousMonth(p.months[0]));
 }
 
+/**
+ * Whether the clock can still change this period's account.
+ *
+ * A month in progress carries the share of its standing costs the days so far are owed — payroll of
+ * thirty thousand is ten thousand by the tenth — so its account is a different figure tomorrow with
+ * no new data at all. A month that has closed carries the whole amount and reads the same on any
+ * day: `shareOfMonth` returns the full month once today is past it, and the cash basis's `paidCents`
+ * likewise, so nothing in a closed month moves with the calendar.
+ *
+ * Which decides whether the day belongs in a cache key. It does for an open period. For a closed
+ * one it is dead weight, and it was adding an entry a day to a cache that removed nothing — one
+ * whole period graph per period per day, on a machine left running for weeks.
+ */
+export function isOpenPeriod(period: Period, today: string): boolean {
+  return period.months[period.months.length - 1] >= today.slice(0, 7);
+}
+
 /** The period one step earlier and one later, for the page's arrows. */
 export function neighbours(p: Period): { before: Period; after: Period } {
   return { before: periodOf(p.kind, previousMonth(p.months[0])), after: periodOf(p.kind, nextMonth(p.months[p.months.length - 1])) };
