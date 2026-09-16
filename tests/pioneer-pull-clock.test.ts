@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { section } from "./support/fixtures";
 import { readFile } from "node:fs/promises";
 
 /**
@@ -23,8 +24,8 @@ describe("the pull and the guard that starts it use the pharmacy's own day", () 
   test("REGRESSION: neither decides 'today' from the UTC date", async () => {
     for (const file of ["src/instrumentation.ts", "scripts/pioneer-pull.ts"]) {
       const text = await src(file);
-      const block = file.endsWith("instrumentation.ts") ? text.slice(text.indexOf("const pioneerTick"), text.indexOf("const runAll")) : text.slice(0, text.indexOf("const due"));
-      assert.ok(block.length > 0, `${file}: could not find the block that decides the day`);
+      /* Either marker missing means this is no longer looking at the block that decides the day, and `section` says so. */
+      const block = file.endsWith("instrumentation.ts") ? section(text, "const pioneerTick", "const runAll") : text.slice(0, text.indexOf("const due"));
       assert.doesNotMatch(block, /const today = new Date\(\)\.toISOString\(\)/, `${file} decides today on the UTC date again`);
       assert.match(block, /const today = todayIso\(\)/, `${file} should take today from todayIso(), the local date`);
     }

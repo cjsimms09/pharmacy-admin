@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { section } from "./support/fixtures";
 import { readFile } from "node:fs/promises";
 import { readCardBatch, looksLikeCardBatch, cellsOf } from "../src/lib/card-batch";
 
@@ -126,7 +127,8 @@ describe("where the money goes", () => {
 
   test("the accrual account does not read cash receipts, so a batch cannot double its revenue", async () => {
     const pl = await readFile("src/lib/profit-and-loss.ts", "utf8");
-    const accrual = pl.slice(pl.indexOf('label: "Third-party remittance"') - 2000, pl.indexOf("const banked = i.receipts"));
+    /* `section` refuses if either marker has been renamed, rather than leaving this looking at some other part of the file. */
+    const accrual = section(pl, 'label: "Third-party remittance"', "const banked = i.receipts");
     assert.doesNotMatch(accrual, /i\.receipts/, "the accrual branch has started reading cash receipts — card batches would double counter revenue");
   });
 

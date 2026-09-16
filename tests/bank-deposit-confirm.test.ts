@@ -1,5 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { section } from "./support/fixtures";
 import { readFile } from "node:fs/promises";
 import { gateDeposit, matchHeldDeposit, type HeldForBank } from "../src/lib/deposit-gate";
 import { placeLine } from "../src/lib/bank-statement";
@@ -148,8 +149,7 @@ describe("card takings have one door: the card batch report", () => {
 
   test("REGRESSION: bank.ts never banks a card deposit", async () => {
     const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
-    const branch = text.slice(text.indexOf(`placement.kind === "card_deposit") {`), text.indexOf(`placement.kind === "deposit") {`, text.indexOf(`placement.kind === "card_deposit") {`)));
-    assert.ok(branch.length > 0);
+    const branch = section(text, `placement.kind === "card_deposit") {`, `placement.kind === "deposit") {`);
     assert.doesNotMatch(branch, /addCashReceipt/);
   });
 
@@ -164,7 +164,7 @@ describe("card takings have one door: the card batch report", () => {
   test("REGRESSION: the form asks before typing money a feed already banked", async () => {
     /* G-CARD-8, H1. */
     const text = await readFile("src/app/(app)/money/page.tsx", "utf8");
-    const action = text.slice(text.indexOf("async function bankIt"), text.indexOf("async function unbank"));
+    const action = section(text, "async function bankIt", "async function unbank");
     assert.ok(action.indexOf("automaticReceiptsLike(") > 0 && action.indexOf("automaticReceiptsLike(") < action.indexOf("addCashReceipt("));
     assert.doesNotMatch(text, /A deposit here is banked with the form above/);
   });

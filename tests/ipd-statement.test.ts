@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
+import { fixture, mutate as alter } from "./support/fixtures";
 import { looksLikeIpdStatement, readIpdStatement } from "../src/lib/ipd-statement";
 
 /*
@@ -8,18 +8,11 @@ import { looksLikeIpdStatement, readIpdStatement } from "../src/lib/ipd-statemen
  * Two settlements, each an Aytu credit memo offset against a set of invoices, and one invoice paid across both of them.
  */
 /*
- * Line endings normalised, and every alteration proved to have happened.
- *
- * The fixture is committed with LF and `core.autocrlf` gives it CRLF on a fresh checkout, so a case that alters it by a
- * string holding "\n" matched nothing there and left the statement valid — the reader then returned ok, and the case
- * asserting a refusal failed against an empty string. It passed here and failed for session 1 on the same commit. A
- * fixture edit that quietly does nothing proves nothing, so `mutate` refuses rather than testing the untouched file.
+ * Read and altered through `tests/support/fixtures.ts`, which normalises line endings and refuses an alteration that
+ * matches nothing — the fault this file found on 15 September, when a case proved a guard it never reached.
  */
-const text = fs.readFileSync("fixtures/ipd-statement.txt", "utf8").replace(/\r\n/g, "\n");
-const mutate = (from: string, to: string): string => {
-  if (!text.includes(from)) throw new Error(`the fixture does not contain "${from.slice(0, 40)}", so this case would test the unaltered statement`);
-  return text.replace(from, to);
-};
+const text = fixture("fixtures/ipd-statement.txt");
+const mutate = (from: string, to: string) => alter(text, from, to);
 
 describe("reading IPD's statement of account", () => {
   const read = readIpdStatement(text);
