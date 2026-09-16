@@ -40,6 +40,20 @@ export type SetupItem = {
   minutes: number;
   /** Which part of the business it belongs to, for grouping. */
   area: "connections" | "buying" | "claims" | "money" | "compliance";
+  /**
+   * Set aside by the pharmacy as not applying to it, with the reason and who said so.
+   *
+   * A third answer, and the one the list never had. Every item says "something is wrong until this
+   * is done", which is true of a missing order minimum and untrue of an order minimum for a
+   * wholesaler he does not buy from — and with no way to say the second, forty-five of those
+   * accumulated. The cost is not the noise. It is that the list stops being read, and the items
+   * that do stop something go unread with them.
+   *
+   * It is emphatically not `done`: nothing was completed and no check passed. A dismissed item is
+   * shown on the page behind its own count and comes back with one press, because a decision that
+   * cannot be undone is the worse half of "nothing ships without the means to correct it".
+   */
+  notApplicable?: { reason: string; at: string; by: string } | null;
 };
 
 export type SetupInput = {
@@ -333,21 +347,45 @@ export function setupItems(input: SetupInput): SetupItem[] {
 
 const RANK_ORDER: Record<SetupRank, number> = { stops: 0, sharpens: 1, later: 2 };
 
-/** The list as the page shows it: what is left first, by rank then by how quick it is. */
-export function ranked(items: SetupItem[]): { left: SetupItem[]; done: SetupItem[]; minutesLeft: number; progress: number } {
+/**
+ * The list as the page shows it: what is left first, by rank then by how quick it is.
+ *
+ * Three piles, not two. An item set aside is neither left nor done — calling it done would claim a
+ * check passed, and leaving it in `left` is the thing he asked to stop. It gets its own pile, its
+ * own count, and a press that puts it back.
+ *
+ * `progress` counts the dismissed as settled, because they are: they are questions with an answer,
+ * and a bar that can never reach the end while a wholesaler he does not use has no rebate ladder
+ * is a bar that measures the wrong thing.
+ */
+export function ranked(items: SetupItem[]): {
+  left: SetupItem[];
+  done: SetupItem[];
+  notApplicable: SetupItem[];
+  minutesLeft: number;
+  progress: number;
+} {
+  const notApplicable = items.filter((i) => !i.done && i.notApplicable).sort((a, b) => a.title.localeCompare(b.title));
   const left = items
-    .filter((i) => !i.done)
+    .filter((i) => !i.done && !i.notApplicable)
     .sort((a, b) => RANK_ORDER[a.rank] - RANK_ORDER[b.rank] || a.minutes - b.minutes || a.title.localeCompare(b.title));
   const done = items.filter((i) => i.done);
   return {
     left,
     done,
+    notApplicable,
     minutesLeft: left.reduce((n, i) => n + i.minutes, 0),
-    progress: items.length === 0 ? 1 : done.length / items.length,
+    progress: items.length === 0 ? 1 : (done.length + notApplicable.length) / items.length,
   };
 }
 
-/** How many of the things that stop something are still open — the figure Today leads with. */
+/**
+ * How many of the things that stop something are still open — the figure Today leads with.
+ *
+ * Set-aside items are not counted. That number is the one that makes him open the list, so it has
+ * to mean "things that stop something and that you have not already answered"; counting answered
+ * ones would put the badge permanently on a number he cannot move.
+ */
 export function stopsCount(items: SetupItem[]): number {
-  return items.filter((i) => !i.done && i.rank === "stops").length;
+  return items.filter((i) => !i.done && !i.notApplicable && i.rank === "stops").length;
 }

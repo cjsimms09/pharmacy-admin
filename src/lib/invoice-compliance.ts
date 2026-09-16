@@ -154,14 +154,31 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
    * anything. Records that exist only on a disk that fails are records the pharmacy cannot produce,
    * and "the computer died" is not a defence anybody has ever succeeded with.
    */
-  const backupDir = (s.backup_destination ?? "").trim();
-  const secondary = [(s.backup_destination_2 ?? "").trim(), (s.backup_destination_3 ?? "").trim()]
-    .filter(Boolean)
-    .join(" and ");
-  const sameDisk =
-    !backupDir || path.resolve(backupDir).startsWith(path.resolve(path.dirname(localStore)));
-  const ranAt = s.backup_last_run ? Date.parse(s.backup_last_run) : NaN;
+  /*
+   * Asked of the backup system rather than of one setting, because the two disagreed.
+   *
+   * This read `backup_destination` and called an empty one "not configured", and reported: "No
+   * backup destination is set. Everything here exists on one disk." Every word of that was false.
+   * `backupStatus()` treats an empty primary as "use the application's own backups folder", which
+   * is what it has always done — so on 16 September 2026 there were fourteen archives on disk, the
+   * newest 113.6 MB and fourteen hours old, verified at 86 tables and 597,496 rows, with a second
+   * copy in OneDrive and a restore rehearsed on 4 September that came back intact.
+   *
+   * Two definitions of where backups go, one in the system that writes them and one in the panel
+   * that judges them — the same fault as the receipt count, and worse in its direction: it told him
+   * his records existed in one place when they did not, which is the sentence that makes somebody
+   * stop trusting the panel the day they discover it is wrong. There is now one definition, and
+   * this reads it.
+   */
+  const { backupStatus } = await import("./backup");
+  const backup = await backupStatus().catch(() => null);
+  const backupDir = backup?.destination ?? "";
+  const secondary = [backup?.destination2 ?? "", backup?.destination3 ?? ""].filter(Boolean).join(" and ");
+  const sameDisk = backup?.onSameDisk ?? true;
+  const ranAt = backup?.lastRun ? Date.parse(backup.lastRun) : NaN;
   const backupStale = !Number.isFinite(ranAt) || (Date.now() - ranAt) / 3_600_000 > 50;
+  const archives = backup?.existing.length ?? 0;
+  const newest = backup?.existing[0] ?? null;
 
   out.push({
     key: "survival",
@@ -170,19 +187,25 @@ export async function invoiceCompliance(): Promise<Requirement[]> {
       "A record the pharmacy cannot produce is a record it does not have, whatever the reason. Two copies, in places " +
       "that do not fail together.",
     how: backupDir
-      ? `Every invoice is included in the verified daily backup to ${backupDir}${secondary ? `, and copied to ${secondary}` : ""}.`
+      ? `Every invoice is included in the verified daily backup to ${backupDir}${secondary ? `, and copied to ${secondary}` : ""}. ` +
+        (archives > 0
+          ? `${archives} archive${archives === 1 ? "" : "s"} on file, the newest ${newest ? `${newest.takenAt.slice(0, 10)} at ${Math.round(newest.sizeBytes / 1e6)} MB` : "unread"}. `
+          : "No archive has been written yet. ") +
+        (backup?.lastResult ? `Last run: ${backup.lastResult}` : "")
       : "Backups are not configured, so these records exist in one place only.",
-    state: !backupDir || sameDisk || !secondary || backupStale ? "attention" : "ok",
-    fix:
-      !backupDir
-        ? "No backup destination is set. Everything here exists on one disk."
-        : sameDisk
-          ? "Backups are written to the application's own data folder, on the same disk as the records they protect. A failed drive takes both."
-          : !secondary
-            ? "There is one copy of each backup. That covers this computer dying; it does not cover the backup drive dying, or a fire."
-            : backupStale
-              ? "No backup has completed in the last two days."
-              : undefined,
+    /*
+     * Judged on whether a second copy exists somewhere that does not fail with the first, which is
+     * what the requirement above actually says. A primary inside the data folder is not a failure
+     * when a verified copy also goes off this machine — it was reported as one, permanently.
+     */
+    state: !backupDir || (sameDisk && !secondary) || backupStale ? "attention" : "ok",
+    fix: !backupDir
+      ? "No backup destination is set. Everything here exists on one disk."
+      : backupStale
+        ? "No backup has completed in the last two days."
+        : sameDisk && !secondary
+          ? "Backups are written to the application's own data folder, on the same disk as the records they protect, and there is nowhere else. A failed drive takes both."
+          : undefined,
     href: "/settings/backups",
   });
 

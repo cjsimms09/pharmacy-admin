@@ -17,10 +17,31 @@ async function safe<T>(f: () => Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-export async function setupNow(): Promise<{ items: SetupItem[]; left: SetupItem[]; done: SetupItem[]; minutesLeft: number; progress: number; stops: number }> {
+export async function setupNow(): Promise<{
+  items: SetupItem[];
+  left: SetupItem[];
+  done: SetupItem[];
+  notApplicable: SetupItem[];
+  minutesLeft: number;
+  progress: number;
+  stops: number;
+}> {
   const { held } = await import("./held");
-  const items = await held("setup", loadSetup);
-  return { items, ...ranked(items), stops: stopsCount(items) };
+  const { dismissals } = await import("./setup-dismissals");
+  /*
+   * The items are cached; what he has said about them is not.
+   *
+   * Reading the dismissals inside `held` would mean pressing "does not apply" and watching the item
+   * sit there until the cache expired — the exact experience of a control that does nothing, which
+   * this list has form for. The table is one small row per answer, so it is read every time and
+   * applied to the cached items afterwards.
+   */
+  const [items, said] = await Promise.all([held("setup", loadSetup), dismissals()]);
+  const marked = items.map((i) => {
+    const d = said.get(i.key);
+    return d ? { ...i, notApplicable: { reason: d.reason, at: d.at, by: d.by } } : i;
+  });
+  return { items: marked, ...ranked(marked), stops: stopsCount(marked) };
 }
 
 async function loadSetup(): Promise<SetupItem[]> {
@@ -35,7 +56,8 @@ async function loadSetup(): Promise<SetupItem[]> {
     const { feedsNow } = await import("./feeds");
     const { feeds } = await feedsNow();
     return feeds
-      .filter((f) => f.group === "arriving")
+      /* A row that reports a state of affairs is not a thing to go and do: see `informational` on Feed. */
+      .filter((f) => f.group === "arriving" && !f.informational)
       .map((f) => ({
         key: f.key,
         label: f.label.toLowerCase(),

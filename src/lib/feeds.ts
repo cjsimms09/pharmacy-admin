@@ -44,6 +44,14 @@ export type Feed = {
   /** The live check against the outside, when one was run. */
   probe: { ok: boolean; says: string } | null;
   href: string;
+  /**
+   * A row that reports a state of affairs rather than a thing to go and do.
+   *
+   * The setup list turns every feed that is not arriving into "Get <label> arriving", which is the
+   * right sentence for a feed that has stopped and nonsense for a row that exists to say no feed is
+   * expected. Flagged rather than special-cased by key, so the next one of these is free.
+   */
+  informational?: boolean;
 };
 
 type Client = { execute: (sql: string, args?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> };
@@ -110,7 +118,7 @@ async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds
   // ── Supplier catalogues, one row per supplier on the register ──
   {
     const [sups, imports, counts] = await Promise.all([
-      db.query.suppliers.findMany({ columns: { name: true, catalogName: true, primarySupplier: true } }),
+      db.query.suppliers.findMany({ columns: { name: true, catalogName: true, primarySupplier: true, active: true } }),
       c.execute("select supplier, max(created_at) as at, max(priced_on) as priced from supplier_imports group by supplier"),
       c.execute("select supplier, count(*) as n, sum(case when item_number is null or item_number = '' then 0 else 1 end) as numbered, sum(case when awp_cents is null then 0 else 1 end) as with_awp from supplier_items group by supplier"),
     ]);
@@ -118,25 +126,87 @@ async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds
     const nBy = new Map(counts.rows.map((r) => [String(r.supplier).trim().toLowerCase(), num(r.n)]));
     const numberedBy = new Map(counts.rows.map((r) => [String(r.supplier).trim().toLowerCase(), num(r.numbered)]));
     const awpBy = new Map(counts.rows.map((r) => [String(r.supplier).trim().toLowerCase(), num(r.with_awp)]));
-    const names = sups.length ? sups.map((x) => ({ name: x.name, key: (x.catalogName ?? x.name).trim().toLowerCase(), primary: x.primarySupplier })) : [...lastBy.keys()].map((k) => ({ name: k, key: k, primary: false }));
+    /*
+     * A supplier is looked up by either of the names it goes by, and a row exists only where a
+     * price file is actually expected.
+     *
+     * Two faults, found together on 16 September 2026 while counting what the site asks the owner
+     * for. Eighteen feed rows said "No price file has arrived for this supplier".
+     *
+     * The first was costly. This keyed the lookup on `catalogName ?? name` — one name, chosen — and
+     * McKesson's row carries the catalogue name "Mck" while the importer files its rows under
+     * "McKesson". So the primary wholesaler's catalogue, 44,306 items imported three times, the
+     * largest on the site, was reported as never having arrived. The register's own resolver has
+     * always known a supplier by both names; this is the one place that picked one. It now matches
+     * on either, which is what `rebate-rates` and `suppliers-registry` do.
+     *
+     * The second was noise, which is its own cost: he reads this list, and a list mostly made of
+     * rows that will never change is a list he stops reading. Seven of the eighteen were suppliers
+     * retired from the register, still asked after. Ten more were secondaries he has told the site
+     * he buys from on their PioneerRx receipt — no catalogue was ever coming from them, and asking
+     * is asking him to go and get something that does not exist.
+     *
+     * So a catalogue is expected from the primary wholesaler, and from anyone who has sent one.
+     * Nowhere else. A supplier who ought to send one and never has is reached by making them
+     * primary or by the first file arriving, and the count of who is not asked after is stated
+     * below rather than left silent.
+     */
+    const keysFor = (x: { name: string; catalogName?: string | null }) =>
+      [x.catalogName ?? "", x.name].map((n) => n.trim().toLowerCase()).filter(Boolean);
+    const onRegister = sups.filter((x) => x.active);
+    const names = onRegister.length
+      ? onRegister.map((x) => ({ name: x.name, keys: keysFor(x), primary: x.primarySupplier }))
+      : [...lastBy.keys()].map((k) => ({ name: k, keys: [k], primary: false }));
+
+    let notExpected = 0;
     for (const sup of names) {
-      const last = lastBy.get(sup.key) ?? null;
-      const items = nBy.get(sup.key) ?? 0;
+      const key = sup.keys.find((k) => lastBy.has(k)) ?? sup.keys.find((k) => nBy.has(k)) ?? sup.keys[0];
+      const last = lastBy.get(key) ?? null;
+      const items = nBy.get(key) ?? 0;
+      /* Nobody ever said a file was coming from here, so it is not late — it was never expected. */
+      if (!last && !sup.primary) {
+        notExpected++;
+        continue;
+      }
       feeds.push({
-        key: `catalogue:${sup.key}`,
+        key: `catalogue:${key}`,
         label: `${sup.name} price file`,
         group: "arriving",
         cadence: "Mondays, from PioneerRx",
         lastAt: last?.at ?? null,
         state: judgeFeed({ maxQuietHours: 9 * 24, lastAt: last?.at ?? null, now, enabled: reimbursement || last !== null }),
-        detail: last ? `Loaded ${last.at.slice(0, 10)}${last.priced ? `, priced ${last.priced}` : ""}; ${items.toLocaleString()} items on file.` : "No price file has arrived for this supplier.",
+        detail: last
+          ? `Loaded ${last.at.slice(0, 10)}${last.priced ? `, priced ${last.priced}` : ""}; ${items.toLocaleString()} items on file.`
+          : "No price file has arrived from the primary wholesaler, which is the one catalogue the buying figures rest on.",
         proof: last
           ? items < 100
             ? `Only ${items} items on file — a file this small is a partial export, not a catalogue.`
-            : `${pct(numberedBy.get(sup.key) ?? 0, items)} of items carry the supplier's item number, which is what an order line is keyed by; ${pct(awpBy.get(sup.key) ?? 0, items)} carry an AWP, which is what an AWP-paid claim is priced on.`
+            : `${pct(numberedBy.get(key) ?? 0, items)} of items carry the supplier's item number, which is what an order line is keyed by; ${pct(awpBy.get(key) ?? 0, items)} carry an AWP, which is what an AWP-paid claim is priced on.`
           : null,
         probe: null,
         href: "/purchasing",
+      });
+    }
+
+    /*
+     * Said once, rather than as a row each.
+     *
+     * Not silence: a supplier dropped from this list without a word is the thing that makes a
+     * person distrust the list. But it is one sentence, not eighteen rows.
+     */
+    if (notExpected > 0) {
+      feeds.push({
+        key: "catalogue:not-expected",
+        group: "arriving",
+        label: "Suppliers no price file is expected from",
+        cadence: "not expected",
+        lastAt: null,
+        state: "off",
+        detail: `${notExpected} supplier${notExpected === 1 ? " sends" : "s send"} no price file: none has ever arrived from ${notExpected === 1 ? "them" : "any of them"} and ${notExpected === 1 ? "it is" : "they are"} not the primary wholesaler. Nothing is waiting on ${notExpected === 1 ? "it" : "them"}. Making one primary, or the first file arriving, puts it on this list.`,
+        proof: null,
+        probe: null,
+        href: "/suppliers",
+        informational: true,
       });
     }
   }

@@ -9,6 +9,8 @@ import { hasCredentials, saveCredentials, clearCredentials, discoverSensors, syn
   monthsAwaitingSignOff,
 } from "@/lib/imonnit";
 import { getSettings, setSetting } from "@/lib/settings";
+import { calibration, canAttestCalibration } from "@/lib/calibration";
+import { todayIso } from "@/lib/dates";
 import { periodLabel } from "@/lib/periods";
 import { PageHeader, Notice, Empty, Field, Card, Figure } from "@/components/ui";
 import { newId } from "@/lib/crypto";
@@ -21,6 +23,8 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
   const { ok, error, raw } = await searchParams;
   const [connected, sensors, s] = await Promise.all([hasCredentials(), trackedSensors(), getSettings()]);
   const tracked = sensors.filter((x) => x.tracked);
+  /* Whether the annual vaccine storage statement could honestly be signed today, over the loggers actually logging. */
+  const attestable = canAttestCalibration(tracked, todayIso());
 
   // This month and last, which is what anyone actually looks at.
   const now = new Date();
@@ -150,6 +154,45 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
     await audit({ action: "imonnit.sensors", userId: u.id, userName: u.name });
     revalidatePath("/temps");
     redirect("/temps?ok=" + encodeURIComponent("Saved."));
+  }
+
+  /**
+   * Records what the logger's calibration certificate says.
+   *
+   * The annual vaccine storage obligation has the pharmacist-in-charge attest that "the data logger
+   * is within its calibration period", and nothing here held a certificate, an expiry, or the make
+   * of the logger — so that sentence was signed from memory of a piece of paper in a drawer. This
+   * is the paper, as dates the site can check and warn about before they lapse.
+   *
+   * It records what the certificate says. It does not judge the logger, and an empty field stays
+   * empty rather than becoming a guess.
+   */
+  async function saveCalibration(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("sensorId") ?? "");
+    const clean = (k: string) => {
+      const v = String(fd.get(k) ?? "").trim();
+      return v === "" ? null : v;
+    };
+    await db
+      .update(schema.tempSensors)
+      .set({
+        model: clean("model"),
+        serial: clean("serial"),
+        calibratedOn: clean("calibratedOn"),
+        calibrationExpiresOn: clean("calibrationExpiresOn"),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.tempSensors.id, id));
+    await audit({
+      action: "imonnit.calibration",
+      userId: u.id,
+      userName: u.name,
+      details: `${id}: calibrated ${clean("calibratedOn") ?? "not said"}, expires ${clean("calibrationExpiresOn") ?? "not said"}`,
+    });
+    revalidatePath("/temps");
+    redirect("/temps?ok=" + encodeURIComponent("Calibration recorded."));
   }
 
   const when = (iso: string) =>
@@ -340,6 +383,79 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
                   ))}
                 </tbody>
               </table>
+            </div>
+          </Card>
+
+          {/*
+            ── The certificate behind the annual statement ──
+
+            Once a year the pharmacist-in-charge attests that "the data logger is within its
+            calibration period". Nothing here held a certificate, an expiry or the make of the
+            logger, so that was signed from memory. The CDC toolkit and the VFC programme both want
+            a certified logger with a current traceable certificate, re-certified on the interval
+            the certificate itself names — so the interval is what is kept, and the site warns
+            before it lapses rather than after.
+
+            A logger with nothing recorded says exactly that. It is not a logger out of calibration
+            and it is not one in calibration: it is a certificate nobody here has seen.
+          */}
+          <Card
+            id="calibration"
+            title="Logger calibration"
+            subtitle="What each certificate says, so the annual vaccine storage statement rests on a date rather than on memory. The certificate itself is filed under Documents."
+            count={attestable.ok ? "all current" : `${attestable.lapsed.length + attestable.unrecorded.length} to settle`}
+            tone={attestable.ok ? undefined : "warn"}
+            className="mb-6"
+          >
+            {!attestable.ok && <p className="mb-3 text-sm text-warn">{attestable.why}</p>}
+            <div className="space-y-3">
+              {tracked.map((sensor) => {
+                const c = calibration(sensor, todayIso());
+                return (
+                  <div key={sensor.id} className="rounded-md border border-line p-2">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="font-semibold text-ink">{sensor.name}</span>
+                      <span
+                        className={`badge ${
+                          c.state === "current" ? "badge-ok" : c.state === "lapsed" ? "badge-crit" : c.state === "expiring" ? "badge-warn" : "badge-muted"
+                        }`}
+                      >
+                        {c.state === "current"
+                          ? "in calibration"
+                          : c.state === "expiring"
+                            ? "expiring"
+                            : c.state === "lapsed"
+                              ? "lapsed"
+                              : c.state === "no_expiry"
+                                ? "no expiry recorded"
+                                : "no certificate recorded"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-ink-2">{c.says}</p>
+                    {sensor.model || sensor.serial ? (
+                      <p className="mt-0.5 text-xs text-ink-3">
+                        {[sensor.model, sensor.serial ? `serial ${sensor.serial}` : ""].filter(Boolean).join(" · ")}
+                      </p>
+                    ) : null}
+                    <form action={saveCalibration} className="mt-2 flex flex-wrap items-end gap-2">
+                      <input type="hidden" name="sensorId" value={sensor.id} />
+                      <Field label="Make and model">
+                        <input name="model" className="field py-1 text-xs" defaultValue={sensor.model ?? ""} placeholder="e.g. the logger on the fridge" />
+                      </Field>
+                      <Field label="Serial">
+                        <input name="serial" className="field w-32 py-1 text-xs" defaultValue={sensor.serial ?? ""} />
+                      </Field>
+                      <Field label="Calibrated on">
+                        <input type="date" name="calibratedOn" className="field py-1 text-xs" defaultValue={sensor.calibratedOn ?? ""} />
+                      </Field>
+                      <Field label="Certificate expires">
+                        <input type="date" name="calibrationExpiresOn" className="field py-1 text-xs" defaultValue={sensor.calibrationExpiresOn ?? ""} />
+                      </Field>
+                      <button className="btn btn-sm btn-primary">Save</button>
+                    </form>
+                  </div>
+                );
+              })}
             </div>
           </Card>
 

@@ -3146,6 +3146,23 @@ export const tempSensors = sqliteTable(
     maxTenthsF: integer("max_tenths_f").notNull().default(460),
     lastReadingAt: text("last_reading_at"),
     lastSyncAt: text("last_sync_at"),
+    /**
+     * The logger's calibration, which the annual vaccine storage attestation swears to.
+     *
+     * That attestation says "the data logger is within its calibration period" and nothing here
+     * held a certificate, an expiry or even the make of the logger — so the statement rested on
+     * somebody's memory of a piece of paper in a drawer. The CDC toolkit and the VFC programme
+     * both want a certified logger with a current traceable certificate, re-certified on the
+     * interval the certificate names, so the interval is what is kept: a date the site can check
+     * and warn about, with the certificate itself filed as a document.
+     *
+     * Null is "not recorded", never "not calibrated". The difference matters on an inspection.
+     */
+    model: text("model"),
+    serial: text("serial"),
+    calibratedOn: text("calibrated_on"),
+    calibrationExpiresOn: text("calibration_expires_on"),
+    calibrationDocumentId: text("calibration_document_id"),
     createdAt: text("created_at").notNull().default(now()),
     updatedAt: text("updated_at").notNull().default(now()),
   },
@@ -3652,3 +3669,25 @@ export const supplierStatementLines = sqliteTable(
     index("supplier_statement_check_idx").on(t.checkNumber),
   ],
 );
+
+/**
+ * Setup-list items the pharmacy has said do not apply to it.
+ *
+ * The owner, on forty-five of them: "these are all irrelevant, i dont have them or they arent
+ * relevant, need system to leave me alone about them". Every item said "something is wrong until
+ * this is done" and offered no third answer, so the list could only grow — and the cost of that is
+ * not noise, it is that the items which genuinely stop something stop being read along with the
+ * rest.
+ *
+ * Set aside, never hidden: the count stays on the page and any one of them is one press from
+ * coming back. Keyed by the item's own key rather than by a row id, because the items themselves
+ * are rebuilt from the data every time the page is opened — which is exactly what makes this
+ * survive the next import.
+ */
+export const setupDismissals = sqliteTable("setup_dismissals", {
+  key: text("key").primaryKey(),
+  /** Why it does not apply, in his words. Optional: a reason nobody has to give is a reason given honestly. */
+  reason: text("reason"),
+  dismissedBy: text("dismissed_by").notNull(),
+  dismissedAt: text("dismissed_at").notNull().default(now()),
+});
