@@ -96,6 +96,24 @@ async function loadSetup(): Promise<SetupItem[]> {
      * rather than leaving to puzzle somebody later.
      */
     const [rows, rates] = await Promise.all([allSuppliers(true), contractRatesBySupplier()]);
+
+    /*
+     * Whether anything of this supplier's is on the site at all.
+     *
+     * The rebate-ladder row says their prices are compared gross and an order could go to the wrong
+     * wholesaler because of it. That needs prices of theirs to be in the comparison. Counted from
+     * the three places anything of a supplier's lands — the catalogue, the invoices, and the
+     * deliveries PioneerRx booked in — and asked of both names a supplier goes by, which is the
+     * lesson from McKesson's catalogue being reported missing while 44,306 of its items sat on file.
+     */
+    const { db } = await import("@/db");
+    const client = (db as unknown as { $client: { execute: (sql: string) => Promise<{ rows: Record<string, unknown>[] }> } }).$client;
+    const seen = new Set<string>();
+    for (const table of ["supplier_items", "supplier_invoices", "pioneer_purchases"]) {
+      const r = await client.execute(`select distinct lower(trim(supplier)) as s from ${table} where supplier is not null`);
+      for (const row of r.rows) if (row.s) seen.add(String(row.s));
+    }
+
     return rows
       .filter((r) => r.active)
       .map((r) => ({
@@ -103,6 +121,7 @@ async function loadSetup(): Promise<SetupItem[]> {
         primary: r.primarySupplier === true,
         hasLadder: rates[r.name.trim().toLowerCase()] !== undefined,
         hasTermsPage: `/suppliers/${r.id}/terms`,
+        trades: [r.name, r.catalogName ?? ""].some((n) => n.trim() !== "" && seen.has(n.trim().toLowerCase())),
       }));
   }, [] as SetupInput["suppliers"]);
 
