@@ -360,6 +360,85 @@ export const DECISIONS: Decision[] = [
       },
     ],
   },
+  /*
+   * ── Vaccine storage ──
+   *
+   * Both of these are facts the cold chain policy leans on and neither can be measured. They are
+   * here rather than written into manual.ts for two reasons: the manual is prose about what the
+   * pharmacy does, and the names of people are data — this repository is public, and a staff name
+   * compiled into a policy file is a staff name in git for ever.
+   *
+   * Asked and answered on 16 September 2026; they are recorded here so the fact sheet carries them
+   * and the next person to ask does not have to ask him again.
+   */
+  {
+    key: "vaccine_stock",
+    question: "Does the pharmacy hold vaccine stock, and is it privately purchased or supplied through the Vaccines for Children programme?",
+    why:
+      "The two carry different standards. VFC requires twice-daily minimum and maximum readings on a log kept for " +
+      "three years, and its own excursion reporting to the state programme; private stock is held to the CDC toolkit, " +
+      "which this pharmacy's four readings a day satisfy. Writing the stricter rules into the manual for a pharmacy " +
+      "that holds neither VFC stock nor a VFC agreement would hold it to a standard it never agreed to.",
+    affects: "Temperature monitoring and review",
+    choices: [
+      {
+        value: "private",
+        label: "Privately purchased stock only",
+        recommended: true,
+        sentence:
+          "Vaccine stock at this pharmacy is privately purchased. The pharmacy does not hold Vaccines for Children " +
+          "stock and is not enrolled in that programme, so storage and handling follow the CDC Vaccine Storage and " +
+          "Handling Toolkit rather than the VFC programme requirements.",
+      },
+      {
+        value: "vfc",
+        label: "Vaccines for Children stock",
+        sentence:
+          "This pharmacy holds Vaccines for Children stock and is bound by the programme's storage requirements: a " +
+          "certified data logger with a current calibration certificate, minimum and maximum temperatures read and " +
+          "recorded twice each working day, records retained for three years, and every excursion reported to the " +
+          "state immunization programme as well as being explained here.",
+      },
+      {
+        value: "both",
+        label: "Both, held separately",
+        sentence:
+          "This pharmacy holds both privately purchased and Vaccines for Children stock, stored so that the two are " +
+          "distinguishable. The whole of the vaccine cold chain is operated to the VFC programme's requirements, which " +
+          "are the stricter of the two: minimum and maximum temperatures read and recorded twice each working day, " +
+          "records retained for three years, and every excursion reported to the state immunization programme as well " +
+          "as being explained here.",
+      },
+      {
+        value: "none",
+        label: "No vaccine stock is held",
+        sentence:
+          "This pharmacy does not hold vaccine stock. The refrigerator is monitored and its records kept because other " +
+          "refrigerated medicines are stored in it, but the vaccine-specific requirements of the CDC toolkit and the " +
+          "VFC programme do not apply.",
+      },
+    ],
+  },
+  {
+    key: "vaccine_coordinators",
+    question: "Who is the primary vaccine coordinator, and who is the backup?",
+    why:
+      "The excursion procedure names a role — the person who quarantines affected stock, records how long it was out " +
+      "of range and obtains the manufacturer's viability determination. The CDC toolkit asks for a named primary and " +
+      "a named backup precisely because an excursion is usually found by whoever opens the fridge, and a procedure " +
+      "that says 'someone' is a procedure nobody owns. Two names, so the answer does not depend on one person being " +
+      "at work.",
+    affects: "Temperature monitoring and review",
+    choices: [],
+    freeText: {
+      placeholder: "e.g. Jane Smith, with Alex Brown as backup",
+      sentence: (value: string) =>
+        `${value.trim()} — the vaccine coordinators named in the cold chain procedure. The primary coordinator, or the ` +
+        `backup in their absence, is responsible for quarantining stock affected by a temperature excursion, recording ` +
+        `how long it was out of range and the temperatures reached, and obtaining the manufacturer's determination of ` +
+        `viability before any of it returns to use.`,
+    },
+  },
 ];
 
 export type DecisionState = Decision & { answer: string | null; sentence: string | null };

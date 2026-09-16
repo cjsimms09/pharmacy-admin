@@ -118,6 +118,37 @@ export default async function DecisionsPage({ searchParams }: { searchParams: Pr
                   </span>
                 </label>
               ))}
+
+              {/*
+                A question whose answer is words rather than a choice.
+
+                `freeText` has been on the Decision type, and honoured by `decisionFacts`, since
+                these were written — and no page has ever rendered it, so a decision defined that way
+                showed a form with nothing in it to fill in. The first one to need it was "who is the
+                vaccine coordinator, and who is the backup", whose answer is two names and could
+                never have been a radio button.
+
+                The sentence it will produce is shown under the box as the answer is typed into it,
+                for the same reason the choices show theirs: what goes into the fact sheet is what an
+                inspector reads back.
+              */}
+              {d.freeText && (
+                <label className="block text-sm">
+                  <span className="block text-ink-2">Your answer, in your own words</span>
+                  <input
+                    name="value"
+                    defaultValue={d.answer ?? ""}
+                    placeholder={d.freeText.placeholder}
+                    className="field mt-1 w-full max-w-xl"
+                  />
+                  <span className="mt-1 block text-xs text-ink-3">
+                    {d.answer
+                      ? d.sentence
+                      : "This becomes a sentence on the fact sheet, in the pharmacy's own voice."}
+                  </span>
+                </label>
+              )}
+
               <div className="flex items-center gap-2 pt-1">
                 <button className="btn btn-primary btn-sm">{d.answer ? "Change it" : "That's how we do it"}</button>
                 {d.answer && (

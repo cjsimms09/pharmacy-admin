@@ -17,9 +17,18 @@ describe("the decisions the manual is waiting on", () => {
     assert.ok(DECISIONS.length >= 8, "the findings raised more than a handful");
   });
 
-  test("every question offers at least two real answers and names what it affects", () => {
+  test("every question can actually be answered, and names what it affects", () => {
+    /*
+     * "At least two choices" was the rule, and it was the right rule while every question was a
+     * multiple choice. The first question whose answer is words — who the vaccine coordinator is,
+     * and who the backup — has two names in it and could never have been a radio button. The
+     * invariant that matters is not the shape of the answer but that there is one: a question a
+     * person cannot answer is the fault this rule exists to catch, and a choice of one is as
+     * unanswerable as a choice of none.
+     */
     for (const d of DECISIONS) {
-      assert.ok(d.choices.length >= 2, `${d.key} offers no choice`);
+      assert.ok(d.choices.length >= 2 || d.freeText, `${d.key} cannot be answered: no choices and no box`);
+      if (!d.freeText) assert.ok(d.choices.length >= 2, `${d.key} offers no real choice`);
       assert.ok(d.affects.trim().length > 0, `${d.key} does not say which section it unblocks`);
       assert.ok(d.why.trim().length > 20, `${d.key} does not say why the manual needs it`);
     }

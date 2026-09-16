@@ -496,6 +496,34 @@ export function policies(pharmacy: string): ManualPolicy[] {
         `Refrigerated and room-temperature storage at ${pharmacy} is monitored by an electronic data logger, which records four readings a day. Readings are collected automatically into the pharmacy's compliance system; no reading is transcribed by hand.`,
         "The acceptable range for each logger is recorded against it. Any reading outside that range is flagged as an excursion and appears on a single list of excursions awaiting explanation.",
         "Every excursion must have a written explanation stating what happened and what was done about it, including the disposition of any affected stock. A month cannot be signed off while any excursion in it is unexplained.",
+        /*
+         * The logger's own certificate.
+         *
+         * Added 16 September 2026. The annual review has the pharmacist-in-charge attest that "the
+         * data logger is within its calibration period", and nothing in this pharmacy's records held
+         * a certificate, an expiry, or the make of the logger — so the statement rested on memory of
+         * a piece of paper. A certified logger with a current traceable certificate is what the CDC
+         * toolkit asks for; the interval is whatever that certificate names, so the manual requires
+         * the dates to be held rather than inventing a period of its own.
+         */
+        "Each logger is a digital data logger with a current certificate of calibration testing traceable to a recognised standard. The date of calibration and the expiry the certificate itself names are recorded against that logger in the pharmacy's compliance system, and the certificate is filed there. A logger whose certificate has expired is re-certified or replaced before its readings are relied on again.",
+        /*
+         * What is actually done about a reading out of range, as opposed to how it is recorded.
+         *
+         * The paragraph above requires an excursion to be explained and the disposition of stock
+         * written down, which is a rule about the record. It says nothing about the act, and the act
+         * is the part that decides whether a patient receives a vaccine that no longer works. These
+         * are the CDC toolkit's steps, written as this pharmacy's own standard because the owner
+         * asked for the policy on 16 September 2026 and confirmed the stock is privately purchased
+         * rather than held under the Vaccines for Children programme, whose rules are stricter.
+         *
+         * The one thing that must never be written here is a step nobody performs. "Do not discard"
+         * is first because discarding is the instinct and it destroys both the stock and the
+         * evidence; the manufacturer's determination is what returns stock to use, and nobody here
+         * may make that judgement themselves.
+         */
+        "Where a reading falls outside the range for a unit holding vaccines, the stock in that unit is immediately labelled DO NOT USE and moved to storage at the correct temperature. It is not discarded and it is not administered. The vaccine coordinator, or the backup coordinator in their absence, records how long the unit was out of range and the temperatures it reached, and contacts the manufacturer of each affected product for a determination of whether it remains viable.",
+        "Stock returns to use only on the manufacturer's determination, which is written into the excursion's explanation along with who was spoken to and when. Where a product is determined non-viable it is quarantined for disposal and the loss is recorded. The determination is retained with that month's temperature record.",
         "At the end of each month the pharmacist-in-charge reviews the month and signs it off. The signed month, its readings and its explanations are retained for five years and can be printed on demand.",
       ],
     },
