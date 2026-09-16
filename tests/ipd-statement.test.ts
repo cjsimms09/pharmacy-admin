@@ -7,7 +7,19 @@ import { looksLikeIpdStatement, readIpdStatement } from "../src/lib/ipd-statemen
  * The owner's real statement, with every identifier changed and every amount as printed: the arithmetic is the point.
  * Two settlements, each an Aytu credit memo offset against a set of invoices, and one invoice paid across both of them.
  */
-const text = fs.readFileSync("fixtures/ipd-statement.txt", "utf8");
+/*
+ * Line endings normalised, and every alteration proved to have happened.
+ *
+ * The fixture is committed with LF and `core.autocrlf` gives it CRLF on a fresh checkout, so a case that alters it by a
+ * string holding "\n" matched nothing there and left the statement valid — the reader then returned ok, and the case
+ * asserting a refusal failed against an empty string. It passed here and failed for session 1 on the same commit. A
+ * fixture edit that quietly does nothing proves nothing, so `mutate` refuses rather than testing the untouched file.
+ */
+const text = fs.readFileSync("fixtures/ipd-statement.txt", "utf8").replace(/\r\n/g, "\n");
+const mutate = (from: string, to: string): string => {
+  if (!text.includes(from)) throw new Error(`the fixture does not contain "${from.slice(0, 40)}", so this case would test the unaltered statement`);
+  return text.replace(from, to);
+};
 
 describe("reading IPD's statement of account", () => {
   const read = readIpdStatement(text);
@@ -73,27 +85,42 @@ describe("reading IPD's statement of account", () => {
 });
 
 describe("a settlement that does not hold together is refused whole", () => {
-  const brokenNet = text.replace("500020260903CM-10,706.20", "500020260903CM-10,706.21");
   test("a credit memo that is not the credit above it", () => {
-    const r = readIpdStatement(brokenNet);
+    const r = readIpdStatement(mutate("500020260903CM-10,706.20", "500020260903CM-10,706.21"));
     assert.equal(r.ok, false);
     assert.match(r.ok ? "" : r.why, /credit memo prints/);
   });
 
   test("a settlement whose invoices do not come to its credit", () => {
-    const short = text.replace("7000002 4,446.27", "7000002 4,446.26");
-    const r = readIpdStatement(short);
+    const r = readIpdStatement(mutate("7000002 4,446.27", "7000002 4,446.26"));
     assert.match(r.ok ? "" : r.why, /which is not nought/);
   });
 
-  test("more put against an invoice than the invoice is for", () => {
-    const over = text.replace("08/18/2026I 202.88\n7000003 202.88", "08/18/2026I 202.88\n7000003 302.88");
+  test("more put against an invoice than the invoice is for, named on the line rather than as a sum", () => {
+    /*
+     * The block still nets: the credit memo is moved by the same $100.00, so the only thing wrong is that one invoice
+     * was paid more than it is for. Without that, the net check would answer first and this guard would never run.
+     */
+    const over = mutate("08/18/2026I 202.88\n7000003 202.88", "08/18/2026I 202.88\n7000003 302.88")
+      .replace("09/03/2026C-10,706.20", "09/03/2026C-10,806.20")
+      .replace("500020260903CM-10,706.20", "500020260903CM-10,806.20");
     const r = readIpdStatement(over);
-    assert.match(r.ok ? "" : r.why, /which is more than it is for/);
+    assert.equal(r.ok, false);
+    assert.match(r.ok ? "" : r.why, /\$302\.88 is put against an invoice of \$202\.88, which is more than it is for/);
   });
 
-  test("a page with no settlement on it at all", () => {
-    const r = readIpdStatement("Statement\nCredits used Since 08/15/2026\nPayment RefInv/Cr NbrInvPay\n");
-    assert.match(r.ok ? "" : r.why, /no settlement could be read/);
+  test("a page that prints a credits section and yields nothing from it", () => {
+    const r = readIpdStatement("www.ipdpharma.com\nStatement\nCredits used Since 08/15/2026\nPayment RefInv/Cr NbrInvPay\n");
+    assert.match(r.ok ? "" : r.why, /prints a credits section and no settlement could be read/);
+  });
+
+  test("a month with no credit applied is still a statement, and its open invoices are still read", () => {
+    /* Every invoice paid by ACH: no "Credits used" section at all. The due dates are the point of reading it. */
+    const noCredits = text.slice(0, text.indexOf("Credits used Since"));
+    const r = readIpdStatement(noCredits);
+    assert.ok(r.ok, r.ok ? "" : r.why);
+    assert.equal(r.ok && r.statement.settlements.length, 0);
+    assert.equal(r.ok && r.statement.openInvoices.length, 5);
+    assert.equal(looksLikeIpdStatement(noCredits), true);
   });
 });

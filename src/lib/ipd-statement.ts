@@ -83,9 +83,17 @@ const iso = (us: string): string | null => {
   return Number.isFinite(d.getTime()) && d.getUTCDate() === Number(dd) ? out : null;
 };
 
-/** Whether this is IPD's statement, by its own headings rather than by its sender. */
+/**
+ * Whether this is IPD's statement, by its own printing rather than by its sender.
+ *
+ * Their domain prints on every page, and the columns are the same every month. The credits section is NOT required: a
+ * month in which every invoice was paid by ACH and no credit was applied prints none, and keying on it would leave that
+ * statement unrecognised — which is the month the site would most want the open invoices and their due dates from.
+ */
 export function looksLikeIpdStatement(text: string): boolean {
-  return /credits\s+used\s+since/i.test(text) && /payment\s*ref/i.test(text) && /ipdpharma|statement/i.test(text);
+  const theirs = /ipdpharma/i.test(text);
+  const columns = /payment\s*ref/i.test(text) || /due\s*date/i.test(text) || /credits\s+used\s+since/i.test(text);
+  return theirs && columns && /statement/i.test(text);
 }
 
 export function readIpdStatement(text: string): IpdRead {
@@ -204,7 +212,15 @@ export function readIpdStatement(text: string): IpdRead {
   const problem = finish(null);
   if (problem) return { ok: false, why: `IPD statement: ${problem}.` };
 
-  if (settlements.length === 0) return { ok: false, why: "IPD statement: no settlement could be read from it." };
+  /*
+   * A statement with no settlements is a statement, not a failure: a month paid entirely by ACH applies no credit and
+   * prints no "Credits used" section. Its open invoices and their due dates are still worth having. Only a page that
+   * prints the section and yields nothing from it is wrong.
+   */
+  if (settlements.length === 0 && /credits\s+used\s+since/i.test(text)) {
+    return { ok: false, why: "IPD statement: it prints a credits section and no settlement could be read from it." };
+  }
+  if (settlements.length === 0 && openInvoices.length === 0) return { ok: false, why: "IPD statement: neither a settlement nor an open invoice could be read from it." };
   const unnamed = settlements.flatMap((s) => s.invoices).filter((v) => v.invoiceNumber === "");
   if (unnamed.length) return { ok: false, why: `IPD statement: ${unnamed.length} invoice row${unnamed.length === 1 ? " has" : "s have"} no number against them.` };
 
