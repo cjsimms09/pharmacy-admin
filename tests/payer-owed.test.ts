@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { owedByPayer, daysBetween, type Receivable, type Received } from "../src/lib/payer-owed";
+import { owedByPayer, daysBetween, isProgrammePayer, type Receivable, type Received } from "../src/lib/payer-owed";
 
 /*
  * What a payer owes, and the three states this page exists to keep apart.
@@ -163,5 +163,52 @@ describe("grouping and ordering", () => {
     assert.equal(daysBetween("2026-09-01", "2026-09-09"), 8);
     assert.equal(daysBetween(null, "2026-09-09"), null);
     assert.equal(daysBetween("not a date", "2026-09-09"), null);
+  });
+});
+
+describe("a voucher programme's payment, whichever door it came through", () => {
+  /*
+   * Found 16 September 2026, unshipped, and due to bite in October.
+   *
+   * A programme's payment settles the programme's share and never the plan's — that rule was already
+   * here. But the store decided which it was by the payment's source, and only `copay_card` counted.
+   * RedSail's first remittance arrived the evening before as an ordinary 835 over SFTP, imported as
+   * `plan`, naming "RedSail Technologies LLC" rather than the "RedSail Technologies (RAS copay
+   * voucher)" the receivable is raised under.
+   *
+   * Nothing was harmed, because every payment in that file was for an April or May fill and this site
+   * holds no claim older than August. For a September fill each one would have settled the plan's
+   * receivable: the plan paid when it had paid nothing, the voucher owed for ever, both wrong on the
+   * same claim, every figure adding up.
+   */
+  test("the payer says it is a programme even when the source says plan", () => {
+    assert.equal(isProgrammePayer("RedSail Technologies LLC"), true, "the name on their own 835");
+    assert.equal(isProgrammePayer("RedSail Technologies (RAS copay voucher)"), true, "the name the receivable is raised under");
+    assert.equal(isProgrammePayer("Veridikal (eVoucher)"), true);
+    assert.equal(isProgrammePayer("Veridikal (Denial Conversion)"), true);
+    assert.equal(isProgrammePayer("VERIDIKAL LLC"), true, "matched on the company, not on one spelling of it");
+  });
+
+  test("a plan is never mistaken for a programme", () => {
+    for (const plan of ["Caremark", "Express Scripts", "MedImpact", "Prime Therapeutics", "Health Mart Atlas", "ProviderPay", "RelayHealth", null, ""]) {
+      assert.equal(isProgrammePayer(plan), false, String(plan));
+    }
+  });
+
+  test("the voucher line is settled by the voucher money, and the plan still owes its own share", () => {
+    /* A $60.00 net carrying a $20.00 RedSail voucher: the plan owes $40.00 and RedSail owes $20.00. */
+    const receivables: Receivable[] = [
+      { bin: "004336", name: "Caremark", dateFilled: "2026-09-02", cents: 4000, claimId: "c1", portion: "plan", cashPlan: false },
+      { bin: null, name: "RedSail Technologies (RAS copay voucher)", dateFilled: "2026-09-02", cents: 2000, claimId: "c1", portion: "programme", cashPlan: false },
+    ];
+    /* Their 835 pays the voucher, under the name their file prints. */
+    const received: Received[] = [{ bin: null, payer: "RedSail Technologies LLC", portion: "programme", claimId: "c1", cents: 2000, receivedOn: "2026-10-05", matched: true, notBilled: false }];
+    const owed = owedByPayer(receivables, received, "2026-10-06");
+    const plan = owed.lines.find((r) => r.name === "Caremark");
+    const programme = owed.lines.find((r) => r.name.toLowerCase().includes("redsail"));
+    assert.equal(programme?.outstandingCents, 0, "the voucher is settled by the voucher payment");
+    assert.equal(programme?.receivedCents, 2000);
+    assert.equal(plan?.outstandingCents, 4000, "and the plan still owes every cent of its own share");
+    assert.equal(plan?.receivedCents, 0, "the voucher money never touches the plan's line");
   });
 });

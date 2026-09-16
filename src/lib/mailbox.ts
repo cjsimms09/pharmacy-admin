@@ -162,8 +162,25 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
     client = await connect();
     const lock = await client.getMailboxLock("INBOX");
     try {
-      const unseen = await client.search({ seen: false }, { uid: true });
-      const uids = (unseen || []).slice(-50); // newest 50 unread, so a backlog can't stall the sweep
+      /*
+       * Unread mail, and anything from the last three days whether it has been read or not.
+       *
+       * Reading only unread mail made the pharmacist's own eyes a filter on the pharmacy's data. The
+       * owner forwarded two Veridikal reports on 16 September 2026 and asked why they had not
+       * arrived; they were in the mailbox, and the sweep could not see them, because opening an
+       * email to check it had sent is enough to hide it from this for ever. Nothing failed, nothing
+       * was logged, and the site went on reporting the reports as never sent.
+       *
+       * Safe because the message id is the real guard: a message already recorded is skipped a few
+       * lines below, so re-seeing one costs a fetch and nothing else. Three days bounds the fetching
+       * and is long enough to cover a weekend of somebody reading their mail before the sweep does.
+       */
+      const recentSince = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+      const [unseen, recent] = await Promise.all([
+        client.search({ seen: false }, { uid: true }),
+        client.search({ since: recentSince }, { uid: true }).catch(() => [] as number[]),
+      ]);
+      const uids = [...new Set([...(unseen || []), ...(recent || [])])].sort((a, b) => a - b).slice(-80);
       for (const uid of uids) {
         try {
           const msg = await client.fetchOne(String(uid), { source: true, envelope: true }, { uid: true });
@@ -187,9 +204,24 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
            * exactly like an email that never came. Left untouched and unread, so it behaves like
            * any other message in the mailbox.
            */
+          /*
+           * Unless it carries a report, in which case it is a forward and forwarding is the door.
+           *
+           * The rule above is right about mail the site sent itself — a training reminder coming
+           * straight back — and wrong about the most deliberate act in the whole system: the
+           * pharmacist forwarding a document into the mailbox because that is how this site is told
+           * to be given things. Where the pharmacy's own address is the mailbox, his forward is
+           * "from self" and was dropped without a word, no inbox line, no reason, nothing to find.
+           *
+           * The attachment is what tells them apart, and it is not a guess: a reminder this site
+           * sends carries none, and a forwarded report is a forwarded report precisely because it
+           * does. A self-addressed message with a readable attachment is handled like any other; one
+           * without is still left untouched and unread.
+           */
           const self = (s.mail_user ?? "").trim().toLowerCase();
           if (self && from === self) {
-            continue;
+            const carriesReport = (parsed.attachments ?? []).some((a) => acceptableAttachment({ filename: a.filename ?? null, contentType: a.contentType ?? null, content: a.content }).ok);
+            if (!carriesReport) continue;
           }
 
           /*

@@ -1,7 +1,7 @@
 import "server-only";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
-import { claimShares, owedByPayer, type Receivable, type Received, type OwedSummary } from "./payer-owed";
+import { claimShares, isProgrammePayer, owedByPayer, type Receivable, type Received, type OwedSummary } from "./payer-owed";
 
 /**
  * Loads what each payer owes: its own receivables from the fills, and what has actually arrived.
@@ -141,7 +141,17 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
      * whichever programme it names (owedByPayer keys on claim and part), so a programme read from the column rather than
      * the message cannot leave a paid share owed. Its own payer name decides only where it is not tied to one claim.
      */
-    ...(p.source === "copay_card" && claimShares({ remitCents: p.claimRemit, evoucherCents: p.claimVoucher, evoucherMessageCents: p.claimVoucherMessage, evoucherProgramme: p.claimVoucherProgramme }).programme !== null
+    /*
+     * Asked of the payer as well as the source.
+     *
+     * `copay_card` was the only door a programme's money was known to use, and on 15 September 2026
+     * RedSail's remittance came through a different one: an ordinary 835 over SFTP, imported as
+     * `plan`, naming "RedSail Technologies LLC". Every payment in it was for an April or May fill so
+     * nothing was harmed, but for a September fill each one would have settled the plan's receivable
+     * — plan paid when it had paid nothing, voucher owed for ever, both wrong on the same claim and
+     * the arithmetic sound throughout. See `isProgrammePayer`.
+     */
+    ...((p.source === "copay_card" || isProgrammePayer(p.payer)) && claimShares({ remitCents: p.claimRemit, evoucherCents: p.claimVoucher, evoucherMessageCents: p.claimVoucherMessage, evoucherProgramme: p.claimVoucherProgramme }).programme !== null
       ? { bin: null, payer: p.payer, portion: "programme" as const }
       : { bin: p.claimBin, payer: p.claimPayer ?? p.payer, portion: "plan" as const }),
     /* The claim it settled: a payment settles that claim's own share and no other (payer-owed.ts). */

@@ -94,6 +94,38 @@ export type ClaimShares = {
  * that column and Veridikal's in the message column (zero in `evoucher_cents` on 66 of 67 Veridikal claims), and
  * September has no Veridikal voucher fill. So where the programme is not read, the column decides, and `from` says so.
  */
+/**
+ * Whether a payment's payer is a voucher programme rather than a plan.
+ *
+ * ── The fault this exists to stop, found 16 September 2026 and not yet reached ──
+ *
+ * A programme's payment settles the programme's share and never the plan's — the rule is already
+ * here and already right. But the store decided which it was by the payment's **source**, and only
+ * `copay_card` counted. RedSail's first remittance arrived the evening before as an ordinary 835,
+ * imported as `plan`, under the payer name their file prints: "RedSail Technologies LLC". The
+ * voucher receivable is raised under "RedSail Technologies (RAS copay voucher)".
+ *
+ * Nothing was wrong yet, because every payment in that file was for an April or May fill and this
+ * site holds no claim older than August. The moment RedSail remits for a September fill — next
+ * month — each payment would have settled the **plan's** receivable: the plan would look paid when
+ * it had paid nothing, the voucher line would stay owed for ever, and the AR would be wrong in two
+ * directions on the same claim, quietly, with every figure adding up.
+ *
+ * So the question is asked of the payer, which is what a remittance actually tells us, rather than
+ * of the door the money came through. Matched on the company, not the exact string: the same
+ * programme is spelled three ways across the copay reader, the Veridikal reader and the 835s these
+ * companies send, and a rule that needs all three spellings kept in step is a rule that breaks the
+ * first time one of them changes their letterhead.
+ *
+ * Deliberately narrow. These two companies pay this pharmacy only as voucher programmes — RedSail is
+ * the switch, not a plan, and Veridikal is a manufacturer-funded programme. A plan named in an 835
+ * is unaffected, and a payment on a claim with no programme share settles the plan as before.
+ */
+export function isProgrammePayer(payer: string | null | undefined): boolean {
+  const n = (payer ?? "").toLowerCase();
+  return /redsail|veridikal/.test(n);
+}
+
 export function claimShares(c: VoucherFields): ClaimShares {
   const remit = c.remitCents ?? 0;
   const paid = Math.max(0, c.evoucherCents ?? 0);
