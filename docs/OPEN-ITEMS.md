@@ -343,6 +343,35 @@ plan showing paid when it had paid nothing, voucher line owed for ever, both wro
 every figure adding up. Harmless so far only because all 46 were April and May fills against books
 that begin 1 September. Fixed: `isProgrammePayer` asks the payer, not the door. Three tests.
 
+### Proved, later the same afternoon
+
+Both Veridikal reports came in through the mailbox on their own and were read: **62 eVoucher rows,
+$4,360.99** and **41 Denial Conversion rows, $4,487.92**, each with every column adding to its own
+total and every row to its own figures before anything was stored. The same sweep stored **61
+messages**, of which **55 had been sitting read and unprocessed** — including **19 supplier invoices**
+from 14–16 September. Reading an email had been enough to hide it from this site for ever.
+
+The join keys were measured rather than assumed: prescription numbers are 6 digits on both sides
+(149 voucher rows, 4,360 claims), NDCs 11 characters on both sides, and 31 of 47 distinct drugs on
+the voucher rows already appear in the claims. **No live match is proved yet** — all 149 rows are
+fills from 30 April to 25 August against books that begin 1 September. Veridikal's 27 August batch
+paid June and July fills, so September's money should arrive around late October.
+
+### A near-miss worth keeping
+
+OBSERVATION: the alert written to catch an unmatchable payment would have opened the next morning
+with *"1,934 payments, $149,798.52 cannot be matched to a claim"*.
+
+SHOULD BE: an alert fires on a fault. Every cent of that figure was August's claims being a 78-fill
+test sample, and ten more were payments against fills this pharmacy had reversed, which are recorded
+against no claim deliberately.
+
+DIFFERENCE: the whole of it. Narrowed twice — the floor is the day the books begin, not the oldest
+claim row; and a payment is stranded only where the site holds no claim on that prescription at all.
+Both narrowings came from running it against the live database before trusting it, and with them the
+true answer today is nought. **An alert that has never been run against the real data is a guess
+about the real data.**
+
 ### Still open from this chain
 
 - **The two Veridikal reports have not been read yet.** Forwarded, and the sweep that can see them is
