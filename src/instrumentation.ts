@@ -40,14 +40,36 @@ export async function register() {
     }
   })();
 
+  /**
+   * How long a job may be starved by the site being busy before it runs anyway.
+   *
+   * The idle gate is right and stays: a heavy job during a page load is what froze sign-in. But it
+   * was applied to the doors as well as to the housework, and a door that only opens when nobody is
+   * looking is not a door.
+   *
+   * Measured on 16 September 2026, while the owner was asking whether two forwarded reports had come
+   * in: the mailbox had not swept for eighty minutes. Nothing had failed. Each half-hourly beat found
+   * somebody using the site — him, or a check of mine — skipped the sweep entirely, and did not try
+   * again for another half hour. Every document this pharmacy receives comes through that sweep or
+   * the SFTP pull beside it, and both could be starved indefinitely by the site being used, which is
+   * to say by the pharmacy being open.
+   *
+   * So the gate now yields after ninety minutes. The worst case becomes a late sweep rather than no
+   * sweep, and the jobs that fetch nothing from outside keep waiting politely for a gap.
+   */
+  const MAX_STARVED_MS = 90 * 60 * 1000;
+  const lastRunAt = new Map<string, number>();
+
   let busy = false;
-  const whenIdle = async (name: string, job: () => Promise<void>) => {
+  const whenIdle = async (name: string, job: () => Promise<void>, opts: { evenWhenBusy?: boolean } = {}) => {
     if (busy) return;
     const { isIdle } = await import("./lib/activity");
-    if (!isIdle(IDLE_SECONDS)) return;
+    const starved = opts.evenWhenBusy === true && Date.now() - (lastRunAt.get(name) ?? 0) > MAX_STARVED_MS;
+    if (!isIdle(IDLE_SECONDS) && !starved) return;
     busy = true;
     try {
       await job();
+      lastRunAt.set(name, Date.now());
     } catch {
       // Every job records its own outcome. None may take the app down.
     } finally {
@@ -413,9 +435,14 @@ export async function register() {
   const runAll = async () => {
     await publicAccessTick();
     await whenIdle("warm", warmTick);
-    await whenIdle("mail", tick);
-    await whenIdle("sftp", sftpTick);
-    await whenIdle("pioneer", pioneerTick);
+    /*
+     * The three doors. These fetch from outside and are the only way anything gets in, so they are
+     * the three allowed to run on a busy site once they have been starved long enough — see
+     * MAX_STARVED_MS. Everything below them is housework on data already here and can wait for a gap.
+     */
+    await whenIdle("mail", tick, { evenWhenBusy: true });
+    await whenIdle("sftp", sftpTick, { evenWhenBusy: true });
+    await whenIdle("pioneer", pioneerTick, { evenWhenBusy: true });
     await whenIdle("invoice-lines", invoiceLinesTick);
     await whenIdle("data-health", dataHealthTick);
     await whenIdle("backup", backupTick);

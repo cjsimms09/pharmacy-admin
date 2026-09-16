@@ -122,13 +122,60 @@ describe("the scheduled PioneerRx catalogue, however it is named", () => {
     assert.equal(zip.ok, false);
   });
 
+  test("a known extension is never refused for the type its sender declared", () => {
+    /*
+     * The general rule, and the reason the Veridikal case could not be fixed by adding one alias.
+     *
+     * `application/octet-stream` — "I have no idea what this is" — has always been accepted, because
+     * Gmail sends real reports that way. So the least informative declaration in existence passed
+     * while `application/x-msexcel` was refused. A type is a claim made by somebody else's mail
+     * server, not evidence. The extension is the gate; the readers prove the contents.
+     */
+    for (const type of ["application/x-msexcel", "", "application/wholly-made-up", "binary/octet-stream"]) {
+      const v = acceptableAttachment({ filename: "eVoucher Program - Client Summary.xlsx", contentType: type });
+      assert.ok(v.ok, `refused .xlsx sent as ${type || "nothing"}`);
+    }
+    /* An unusual type is still worth seeing, so it is noted rather than lost. */
+    const odd = acceptableAttachment({ filename: "report.xlsx", contentType: "application/wholly-made-up" });
+    assert.match((odd as { note?: string }).note ?? "", /unusual for that extension/);
+    assert.equal((acceptableAttachment({ filename: "report.csv", contentType: "text/csv" }) as { note?: string }).note, undefined);
+    /* The extension list still refuses everything it always did, whatever the type claims. */
+    assert.equal(acceptableAttachment({ filename: "payload.exe", contentType: "application/vnd.ms-excel" }).ok, false);
+    assert.equal(acceptableAttachment({ filename: "catalogues.zip", contentType: "text/csv" }).ok, false);
+  });
+
+  test("a spreadsheet is accepted however the sending server spells its type", () => {
+    /*
+     * Veridikal, 15 September 2026, 21:04 and 21:08: the eVoucher Program summary and the Denial
+     * Conversion Activity summary, both .xlsx, both declared `application/x-msexcel` — an alias that
+     * predates the registered type and that plenty of servers still emit. Both were refused at the
+     * door, nothing was stored, and the expectations page then reported that Veridikal had never
+     * sent anything. The exact string below is the one their server sent.
+     */
+    for (const type of [
+      "application/x-msexcel",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/x-excel",
+      "application/excel",
+    ]) {
+      assert.ok(acceptableAttachment({ filename: "eVoucher Program - Client Summary.xlsx", contentType: type }).ok, type);
+    }
+    /* The extension list is still the gate it always was: a known type on an unknown extension is refused. */
+    assert.equal(acceptableAttachment({ filename: "payload.exe", contentType: "application/x-msexcel" }).ok, false);
+  });
+
   test("what was declined is named, so the inbox can say how the file came", () => {
     const v = acceptableAttachment({ filename: "catalogues.zip", contentType: "application/zip" });
     assert.equal(v.ok, false);
     assert.match((v as { why: string }).why, /catalogues\.zip/);
+    /*
+     * A known extension is no longer refused for its declared type — see the test above and what
+     * refusing one cost. The odd type is noted instead, so the inbox can still say how the file came.
+     */
     const t = acceptableAttachment({ filename: "Mck9_6_2026.txt", contentType: "application/zip" });
-    assert.equal(t.ok, false);
-    assert.match((t as { why: string }).why, /sent as application\/zip/);
+    assert.equal(t.ok, true);
+    assert.match((t as { note?: string }).note ?? "", /sent as application\/zip/);
   });
 
   test("the ordinary cases are unchanged", () => {

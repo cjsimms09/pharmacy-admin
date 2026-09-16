@@ -402,6 +402,20 @@ export async function importRemittance(
   /** Payments whose only claim for that fill had been reversed. Not matched, and not simply unknown. */
   paidAReversedFill: number;
   /**
+   * Payments for fills older than any claim on file — unmatchable, and not a fault.
+   *
+   * RedSail's first remittance, read 15 September 2026: 46 payments, and the line said "0 matched to
+   * a claim, 43 held unmatched". Every word true and the impression wrong. One of those fills was
+   * dispensed in April and forty-three in May; these books begin on 1 September by the owner's own
+   * instruction, so not one of those claims exists here or ever will. Nothing failed.
+   *
+   * The distinction has to be on the line, because next month's remittance will be for September
+   * fills, and a payment that genuinely should have matched must stand out instead of hiding among
+   * forty-three that never could. The copay-remit reader has said `beforeTheStart` since it was
+   * written; this path had not been given the same words.
+   */
+  beforeTheStart: number;
+  /**
    * Lines that fitted more than one paid claim and were left unattached on purpose.
    *
    * A fill billed to two payers is two claim rows with the same prescription, fill, day and drug.
@@ -450,7 +464,7 @@ export async function importRemittance(
    * caller printing it gets "3 payers" rather than one payer's name standing for all of them.
    */
   const out = {
-    payments: 0, alreadyHeld: 0, matched: 0, unmatched: 0, paidAReversedFill: 0, ambiguous: 0,
+    payments: 0, alreadyHeld: 0, matched: 0, unmatched: 0, paidAReversedFill: 0, beforeTheStart: 0, ambiguous: 0,
     amountCents: 0, skipped: 0, problems: [] as string[],
     payer: null as string | null, paidOn: null as string | null,
     settles: true, banked: false, providerAdjustmentCents: 0, remittances: sets.length,
@@ -463,6 +477,7 @@ export async function importRemittance(
     out.matched += r.matched;
     out.unmatched += r.unmatched;
     out.paidAReversedFill += r.paidAReversedFill;
+    out.beforeTheStart += r.beforeTheStart;
     out.ambiguous += r.ambiguous;
     out.amountCents += r.amountCents;
     out.skipped += r.skipped;
@@ -507,7 +522,7 @@ async function importOneRemittance(
     alreadyHeld: 0,
     matched: 0,
     unmatched: 0,
-    paidAReversedFill: 0, ambiguous: 0,
+    paidAReversedFill: 0, beforeTheStart: 0, ambiguous: 0,
     amountCents: 0,
     skipped: skipped.length,
     problems: [...r.problems],
@@ -532,6 +547,17 @@ async function importOneRemittance(
     out.problems.push(`The remittance does not balance: it says it paid ${money(r.balance.paidCents)}, its claim lines come to ${money(r.balance.claimsCents)} less ${money(r.balance.adjustmentsCents)} of provider adjustments, a difference of ${money(r.balance.differenceCents)}. Nothing from it was stored.`);
     return out;
   }
+
+  /*
+   * The oldest fill this site holds, so a payment older than it can be told from one that failed.
+   *
+   * Read from the claims themselves rather than from SITE_STARTS_ON: the boundary that matters here
+   * is what is loaded, not what the policy says should be. August's claims are a thin sample that
+   * stops on the 5th, so a payment for a fill of 2 August is as unmatchable as one from May, and
+   * calling it a failure would be as wrong.
+   */
+  const oldest = await db.query.claims.findFirst({ columns: { dateFilled: true }, orderBy: (c, { asc }) => asc(c.dateFilled) });
+  const oldestFill = oldest?.dateFilled ?? null;
 
   const held = await db.query.claimPayments.findMany({ columns: { reference: true, rxNumber: true, amountCents: true } });
   /*
@@ -578,6 +604,14 @@ async function importOneRemittance(
     else if (rec.ambiguous) {
       out.ambiguous++;
       if (out.problems.length < 12) out.problems.push(`Rx ${p.rxNumber}: ${rec.ambiguous.why}`);
+    } else if (p.serviceDate && oldestFill && p.serviceDate < oldestFill) {
+      /*
+       * Older than the oldest fill on file: unmatchable, and not a failure.
+       *
+       * Counted apart so that next month's payment for a September fill — one that genuinely ought
+       * to have matched — is not hidden among a back-run of fills that never could.
+       */
+      out.beforeTheStart++;
     } else out.unmatched++;
   }
   /*

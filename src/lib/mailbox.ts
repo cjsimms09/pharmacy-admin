@@ -1243,7 +1243,16 @@ export async function importRecognised(
       const gate = r.problems.find((p) => /does not balance/i.test(p));
       routeResult = gate
         ? `Held, nothing stored: ${gate}`
-        : `${r.payer ?? "Remittance"}${r.paidOn ? ` paid ${r.paidOn}` : ""}: ${r.payments} payments (${money(r.amountCents)}) — ${r.matched} matched to a claim, ${r.unmatched} held unmatched${r.paidAReversedFill ? `, ${r.paidAReversedFill} paid against a fill this pharmacy had reversed` : ""}, ${r.alreadyHeld} already held${r.banked ? ", banked" : ""}${r.problems.length ? `; ${r.problems.slice(0, 2).join("; ")}` : ""}`;
+        /*
+         * "0 matched to a claim, 43 held unmatched" was every word true and the impression wrong.
+         *
+         * RedSail's first remittance, 15 September 2026: one fill dispensed in April, forty-three in
+         * May, and these books begin on 1 September, so not one of those claims exists here or ever
+         * will. Read as a failure it sends somebody looking for a fault that is not there; worse, it
+         * is the sentence that will be printed next month when a September payment really does fail,
+         * and it will look the same. So the two are counted and said apart.
+         */
+        : `${r.payer ?? "Remittance"}${r.paidOn ? ` paid ${r.paidOn}` : ""}: ${r.payments} payments (${money(r.amountCents)}) — ${r.matched} matched to a claim${r.beforeTheStart ? `, ${r.beforeTheStart} for fills older than any claim on file, which cannot match and are not a fault` : ""}, ${r.unmatched} held unmatched${r.paidAReversedFill ? `, ${r.paidAReversedFill} paid against a fill this pharmacy had reversed` : ""}, ${r.alreadyHeld} already held${r.banked ? ", banked" : ""}${r.problems.length ? `; ${r.problems.slice(0, 2).join("; ")}` : ""}`;
       imported = !gate && r.payments > 0;
     } else if (cls.kind === "copay_remit") {
       /*

@@ -547,15 +547,36 @@ const TEXT_MIME = new Set(["text/plain", "text/csv", "text/tab-separated-values"
  * happened. So a file with no extension is accepted when its type is text or its first lines are
  * the catalogue's own title; everything else still needs a known extension and a known type.
  */
-export function acceptableAttachment(att: { filename?: string | null; contentType?: string | null; content?: Buffer | Uint8Array | null }): { ok: true } | { ok: false; why: string } {
+export function acceptableAttachment(att: { filename?: string | null; contentType?: string | null; content?: Buffer | Uint8Array | null }): { ok: true; note?: string } | { ok: false; why: string } {
   const name = att.filename ?? "";
   const type = att.contentType ?? "";
   if (!name) return { ok: false, why: "an attachment with no name" };
   const hasExt = /\.[A-Za-z0-9]{1,5}$/.test(name);
   if (hasExt) {
+    /*
+     * The extension decides. A sending server's declared type never refuses a file on its own.
+     *
+     * The owner, 16 September 2026, after Veridikal's two monthly reports were turned away for
+     * declaring `application/x-msexcel`: "they shouldnt be refused in the future.. we now know how
+     * they come in, what they look like, we should know what to do next time." Adding that one
+     * alias would have fixed that one sender until the next server spelled it differently.
+     *
+     * The rule was incoherent anyway, which is the real argument. `application/octet-stream` — "I
+     * have no idea what this is" — has always been accepted here, because Gmail sends real reports
+     * that way. So the least informative declaration in existence passed while a more specific one
+     * was refused. A type is a claim made by somebody else's mail server about a file; it is not
+     * evidence, and it was never the thing keeping anything out.
+     *
+     * What actually gates is unchanged and is doing all the work: the extension must be one of the
+     * dozen this site reads, `storeFile` enforces the size ceiling, and every reader proves the
+     * contents before a figure is stored. A file that lies about its type still has to survive all
+     * three. What it can no longer do is be dropped at the door and reported as never sent.
+     *
+     * An unusual type is still worth seeing, so it is recorded on the inbox line rather than lost —
+     * `REPORT_MIME` now decides what gets mentioned, not what gets in.
+     */
     if (!REPORT_EXT.test(name)) return { ok: false, why: `${name} (not a type this reads)` };
-    if (!REPORT_MIME.has(type)) return { ok: false, why: `${name} (sent as ${type || "an unknown type"})` };
-    return { ok: true };
+    return REPORT_MIME.has(type) ? { ok: true } : { ok: true, note: `${name} was sent as ${type || "an unknown type"}, which is unusual for that extension.` };
   }
   if (TEXT_MIME.has(type)) {
     if (type !== "application/octet-stream") return { ok: true };

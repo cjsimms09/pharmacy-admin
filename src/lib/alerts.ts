@@ -243,6 +243,53 @@ export async function alerts(): Promise<Alert[]> {
     });
   }
 
+  // ── A sender wrote and this turned them away ──────────────────────
+  /*
+   * The alert that would have caught the Veridikal refusal the same night.
+   *
+   * On 15 September 2026 Veridikal sent both monthly reports. The mailbox refused both — .xlsx on
+   * the extension list, `application/x-msexcel` not on the type list — and nothing anywhere said so.
+   * They sat in the Inbox as two "ignored" lines among the day's forty, while every screen that
+   * mentions Veridikal went on reporting that Veridikal had never sent anything. It was found
+   * because the owner happened to ask about a different supplier.
+   *
+   * A refusal is the one failure in the whole feed chain where the fault is certainly here: somebody
+   * outside the building did their part and this building dropped it. Nobody outside can fix it and
+   * nobody outside will chase it. So it is "now", however small the message looked, and it names the
+   * senders rather than the count, because the name is what makes it obvious that real money is
+   * behind it.
+   *
+   * Fourteen days, so a refusal cannot age quietly off the list; and the line stays until the
+   * message is sent again, which is the only thing that clears it.
+   */
+  try {
+    const since = addDays(today, -14);
+    const turnedAway = await db.query.inboxItems.findMany({
+      where: (i, { and, gte, ne }) => and(gte(i.receivedAt, since), ne(i.status, "stored")),
+      columns: { fromAddress: true, subject: true, receivedAt: true, reason: true },
+    });
+    /* Our own outgoing mail and bounces are not senders being refused. */
+    const real = turnedAway.filter((i) => !/mailer-daemon|postmaster/i.test(i.fromAddress));
+    if (real.length > 0) {
+      const senders = [...new Set(real.map((i) => i.fromAddress.split("@")[1] ?? i.fromAddress))];
+      out.push({
+        key: "inbox-refused",
+        level: "now",
+        title: `${real.length} message${real.length === 1 ? "" : "s"} arrived and ${real.length === 1 ? "was" : "were"} turned away`,
+        why:
+          `From ${senders.slice(0, 4).join(", ")}${senders.length > 4 ? ` and ${senders.length - 4} more` : ""}. ` +
+          `${real[0].reason ?? "The attachment was not a type this reads."} ` +
+          `Whatever they sent is not on the site, and every page that asks after it will say it never came. ` +
+          `Nothing at their end is wrong and nobody outside this building can fix it.`,
+        href: "/inbox",
+        action: "See what was refused",
+      });
+    }
+  } catch (e) {
+    /* The inbox failing to answer is not a reason to lose the rest of the morning's list. */
+    void e;
+  }
+
   // ── Card money the register took with no batch on file ────────────
   /*
    * There is no alert here any more, and the absence is the point.
