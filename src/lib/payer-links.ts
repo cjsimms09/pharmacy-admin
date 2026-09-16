@@ -118,6 +118,64 @@ export async function savePayerLink(
   return { id, replaced: false };
 }
 
+/**
+ * What the remittances have taught that nobody has written down yet.
+ *
+ * The owner, 16 September 2026: "does our system get smarter and learn to attach bin/pcn or scripts
+ * to payors once we start getting more 835s?? the system needs to learn."
+ *
+ * It did not. There is a store of links and it works — 141 of them, naming 1,242 of September's
+ * claims — but every one was taught by a person confirming a candidate. An 835 arriving, naming its
+ * payer, and settling a claim whose BIN nobody has ever identified taught the site nothing at all.
+ * Measured the same afternoon: 63 September claims carrying $1,725.59 had no settled payer name,
+ * and each one is a claim that cannot be chased because nobody knows who to chase.
+ *
+ * A remittance is a better witness than a search. The payer named itself, paid a specific claim, and
+ * the claim carries the identifiers it was billed under; the association is a fact, not a guess.
+ *
+ * ── The three things it refuses to do ──
+ *
+ * It never overwrites a link a person confirmed. A human decision outranks a machine's inference
+ * every time, and the failure of getting this backwards is silent — an appeal filed against the
+ * wrong agreement.
+ *
+ * It never names a claim that already has a settled name. The point is the gaps, and a remittance's
+ * payer name is the payer, which is not always the plan the claim was billed to.
+ *
+ * And it refuses where two payers have paid claims on the same key. That is the shape of a processor
+ * fronting several plans, which is precisely the case where a single name would be wrong, so it
+ * leaves those for a person and says how many it left.
+ *
+ * Pure, so what it would learn can be examined before any of it is stored.
+ */
+export type LearnedFrom = { key: ClaimKey; payer: string };
+
+export function linksToLearn(
+  paid: { key: ClaimKey; payer: string | null }[],
+  existing: Pick<PayerLinkRow, "bin" | "pcn" | "groupNumber" | "contractId">[],
+): { learn: LearnedFrom[]; conflicting: number } {
+  const byKey = new Map<string, { key: ClaimKey; payers: Set<string> }>();
+  for (const p of paid) {
+    const name = (p.payer ?? "").trim();
+    if (!name) continue;
+    /* The same rule `savePayerLink` enforces: a key with nothing in it would match every claim. */
+    if (!norm(p.key.bin) && !norm(p.key.groupNumber) && !norm(p.key.contractId)) continue;
+    /* Already known, however it was learned. */
+    if (linkFor(existing as PayerLinkRow[], p.key)) continue;
+    const id = [norm(p.key.bin), norm(p.key.pcn), norm(p.key.groupNumber), norm(p.key.contractId)].join("|");
+    const cur = byKey.get(id) ?? { key: p.key, payers: new Set<string>() };
+    cur.payers.add(name);
+    byKey.set(id, cur);
+  }
+  const learn: LearnedFrom[] = [];
+  let conflicting = 0;
+  for (const { key, payers } of byKey.values()) {
+    if (payers.size === 1) learn.push({ key, payer: [...payers][0] });
+    else conflicting++;
+  }
+  return { learn, conflicting };
+}
+
 export async function deletePayerLink(id: string): Promise<void> {
   await db.delete(schema.payerLinks).where(eq(schema.payerLinks.id, id));
 }
@@ -140,4 +198,62 @@ export async function applyLinksToClaims(): Promise<{ claims: number }> {
     touched++;
   }
   return { claims: touched };
+}
+
+/**
+ * Learns from the remittances already on file, and names the claims nobody could name.
+ *
+ * Runs on the nightly tick, so every 835 that arrives makes the next unnamed claim more likely to
+ * be named without anybody doing anything. Idempotent: a key already linked is skipped, so running
+ * it twice learns nothing the second time.
+ *
+ * Only claims with no settled payer name are offered as evidence — see `linksToLearn` for why, and
+ * for the three things it refuses to conclude.
+ */
+export async function learnLinksFromRemittances(): Promise<{ learned: number; conflicting: number; claimsNamed: number }> {
+  const rows = await db
+    .select({
+      bin: schema.claims.bin,
+      pcn: schema.claims.pcn,
+      groupNumber: schema.claims.groupNumber,
+      contractId: schema.claims.networkId,
+      pbmName: schema.claims.pbmName,
+      matchMethod: schema.claims.matchMethod,
+      payer: schema.claimPayments.payer,
+      claimId: schema.claimPayments.claimId,
+    })
+    .from(schema.claimPayments)
+    .innerJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id));
+
+  /*
+   * The gaps only. A claim the site can already name is not evidence about anything: the remittance
+   * names the payer that paid, which is not always the plan the claim was billed to, and overwriting
+   * a working name with it would lose more than it found.
+   */
+  const unnamed = rows.filter((r) => !(r.pbmName ?? "").trim() || r.matchMethod === "unresolved" || r.matchMethod === "none");
+  const existing = await allPayerLinks();
+  const { learn, conflicting } = linksToLearn(
+    unnamed.map((r) => ({ key: { bin: r.bin, pcn: r.pcn, groupNumber: r.groupNumber, contractId: r.contractId }, payer: r.payer })),
+    existing,
+  );
+
+  for (const l of learn) {
+    await db.insert(schema.payerLinks).values({
+      id: newId(),
+      bin: norm(l.key.bin),
+      pcn: norm(l.key.pcn),
+      groupNumber: norm(l.key.groupNumber),
+      contractId: norm(l.key.contractId),
+      pbmName: l.payer,
+      contractDocId: null,
+      contractFileName: null,
+      /* Said plainly on the row, because a person has to be able to tell a machine's inference from their own decision and undo it. */
+      basis: "Learned from a remittance: this payer paid a claim billed under these identifiers, and nothing else had named it.",
+      confirmedBy: "an 835",
+      confirmedOn: new Date().toISOString(),
+    });
+  }
+
+  const applied = learn.length > 0 ? await applyLinksToClaims() : { claims: 0 };
+  return { learned: learn.length, conflicting, claimsNamed: applied.claims };
 }

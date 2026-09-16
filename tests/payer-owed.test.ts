@@ -212,3 +212,59 @@ describe("a voucher programme's payment, whichever door it came through", () => 
     assert.equal(plan?.receivedCents, 0, "the voucher money never touches the plan's line");
   });
 });
+
+describe("a fill billed to two payers, settled one at a time", () => {
+  /*
+   * The owner, 16 September 2026: "is our logic sound when multiple payors on a claim, can we
+   * reconcile one payor and know whats still expected from another?"
+   *
+   * Measured the same afternoon: 84 September fills went to two payers and one to three, $31,040.33
+   * billed across them, with $13,638.95 of that sitting on the secondary rows. So this is not a
+   * corner — it is one fill in thirty-eight, and the whole of a secondary's money depends on the two
+   * halves never being confused for one another.
+   *
+   * A fill billed twice is two claim rows, each with its own payer, its own BIN and its own share of
+   * the money. Nothing here adds them together: a payment names the claim it settles, and settles
+   * that claim alone.
+   */
+  const primary: Receivable = { bin: "004336", name: "Caremark", dateFilled: "2026-09-08", cents: 7500, claimId: "primary", portion: "plan", cashPlan: false };
+  const secondary: Receivable = { bin: "610014", name: "MedImpact", dateFilled: "2026-09-08", cents: 2500, claimId: "secondary", portion: "plan", cashPlan: false };
+
+  test("the primary paying leaves the secondary owing every cent of its own share", () => {
+    const owed = owedByPayer([primary, secondary], [{ bin: "004336", payer: "Caremark", portion: "plan", claimId: "primary", cents: 7500, receivedOn: "2026-10-01", matched: true, notBilled: false }], "2026-10-02");
+    assert.equal(owed.lines.find((l) => l.name === "Caremark")?.outstandingCents, 0);
+    assert.equal(owed.lines.find((l) => l.name === "MedImpact")?.outstandingCents, 2500, "the secondary is still owed, and by name");
+    assert.equal(owed.outstandingCents, 2500, "and the fill as a whole is short by exactly the secondary's share");
+  });
+
+  test("the secondary paying first leaves the primary owing, which is the same rule the other way up", () => {
+    const owed = owedByPayer([primary, secondary], [{ bin: "610014", payer: "MedImpact", portion: "plan", claimId: "secondary", cents: 2500, receivedOn: "2026-10-01", matched: true, notBilled: false }], "2026-10-02");
+    assert.equal(owed.lines.find((l) => l.name === "MedImpact")?.outstandingCents, 0);
+    assert.equal(owed.lines.find((l) => l.name === "Caremark")?.outstandingCents, 7500);
+  });
+
+  test("one payer's money never settles the other's share, however exactly it would fit", () => {
+    /*
+     * The failure this guards. Summed per fill rather than per claim, $7,500 from the primary and a
+     * $2,500 secondary share look like a settled fill — and the secondary, which has paid nothing,
+     * disappears off the list of who owes money.
+     */
+    const both = owedByPayer([primary, secondary], [{ bin: "004336", payer: "Caremark", portion: "plan", claimId: "primary", cents: 10000, receivedOn: "2026-10-01", matched: true, notBilled: false }], "2026-10-02");
+    assert.equal(both.lines.find((l) => l.name === "MedImpact")?.outstandingCents, 2500, "an overpaying primary does not settle the secondary");
+    assert.ok((both.lines.find((l) => l.name === "Caremark")?.overpaidCents ?? 0) > 0, "it is the primary that has overpaid, and that is said");
+  });
+
+  test("both paid is the whole fill settled, to the cent", () => {
+    const owed = owedByPayer(
+      [primary, secondary],
+      [
+        { bin: "004336", payer: "Caremark", portion: "plan", claimId: "primary", cents: 7500, receivedOn: "2026-10-01", matched: true, notBilled: false },
+        { bin: "610014", payer: "MedImpact", portion: "plan", claimId: "secondary", cents: 2500, receivedOn: "2026-10-09", matched: true, notBilled: false },
+      ],
+      "2026-10-10",
+    );
+    assert.equal(owed.outstandingCents, 0);
+    assert.equal(owed.billedCents, 10000);
+    assert.equal(owed.receivedCents, 10000);
+  });
+});

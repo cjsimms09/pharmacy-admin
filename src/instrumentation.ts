@@ -479,6 +479,7 @@ export async function register() {
     await whenIdle("updates", updateTick);
     await whenIdle("manual-audit", manualAuditTick);
     await whenIdle("deliveries", deliveryTick);
+    await whenIdle("payer-learn", payerLearnTick);
     await whenIdle("ar-report", arReportTick);
     await whenIdle("mtf", mtfTick);
   };
@@ -683,6 +684,29 @@ export async function register() {
    * runs on a computer that is switched off overnight, so a job pinned to an hour on the 5th would
    * miss any month whose 5th falls on a Sunday.
    */
+  /**
+   * Learns who a BIN belongs to from the remittances that have paid it.
+   *
+   * The owner: "does our system get smarter and learn to attach bin/pcn or scripts to payors once we
+   * start getting more 835s?? the system needs to learn." It did not — every link on file had been
+   * taught by a person. This runs nightly so each remittance that arrives makes the next unnamed
+   * claim more likely to name itself, and records what it learned so the learning can be read back.
+   */
+  const payerLearnTick = async () => {
+    try {
+      const { learnLinksFromRemittances } = await import("./lib/payer-links");
+      const r = await learnLinksFromRemittances();
+      if (r.learned === 0 && r.conflicting === 0) return;
+      const { setSetting } = await import("./lib/settings");
+      await setSetting(
+        "payer_links_learned_result",
+        `${new Date().toISOString()} — ${r.learned} payer link(s) learned from remittances, ${r.claimsNamed} claim(s) named${r.conflicting ? `; ${r.conflicting} key(s) left for a person because two payers have paid on them` : ""}`,
+      );
+    } catch {
+      // Recorded in settings; never allowed to stop the app.
+    }
+  };
+
   const arReportTick = async () => {
     try {
       const { monthlyArTick } = await import("./lib/ar-report-store");

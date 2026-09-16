@@ -425,6 +425,13 @@ export const SETTING_KEYS = [
   "invoice_lines_backfill_result",
   /** What the nightly pass could newly say about lines already read: see line-schedule-backfill.ts. */
   "line_schedules_backfill_result",
+  /**
+   * What the remittances taught the site about who a BIN belongs to, on the last nightly pass.
+   *
+   * The owner: "the system needs to learn." Kept so the learning can be read back rather than only
+   * happening — a machine that infers quietly is one nobody can check or correct.
+   */
+  "payer_links_learned_result",
   "pioneer_pull_register_on",
   "pioneer_pull_register_result",
   "pioneer_register_check",
