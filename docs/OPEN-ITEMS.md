@@ -372,6 +372,30 @@ Both narrowings came from running it against the live database before trusting i
 true answer today is nought. **An alert that has never been run against the real data is a guess
 about the real data.**
 
+### The second near-miss of the same afternoon, and what the two have in common
+
+OBSERVATION: the payer learner — written to answer *"the system needs to learn"* — was asked, after
+it was deployed and before its nightly pass had run, what it would teach against the live database.
+One link: a BIN belongs to **"Health Mart Atlas"**.
+
+SHOULD BE: a link names the plan that owes the money. Health Mart Atlas is the PSAO the money travels
+through and owes this pharmacy nothing; its own report names the real plan in the prose beside the
+figure. Every payer name on file today is a route of that kind — ProviderPay, Health Mart Atlas,
+RedSail, the Medicare facilitator.
+
+DIFFERENCE: all of it. Unidentified claims would have been renamed after their courier, and a wrong
+name that looks settled is worse than an honest blank, because the blank is what gets asked about.
+Fixed before anything was written: a name that routes money for others teaches nothing, and only a
+payment recorded as a plan's is evidence. Today it learns nothing, which is true, and it begins the
+day a plan sends its own 835 under its own name.
+
+**What both had in common, and the rule that comes out of it.** The alert and the learner each had
+clean types, passing tests and correct arithmetic, and each was wrong about the world. Both were
+caught by running the thing against the live database — the first before it fired, the second before
+it wrote. Neither could have been caught by reading the code. So: *anything that will assert
+something to the owner is run against the live data before it is deployed, not after.* The shapes to
+look for are a check that cannot fail and a figure whose denominator is thin test data.
+
 ### Still open from this chain
 
 - **A live match is still unproved.** The chain is proved as far as posting; what nothing on file can
