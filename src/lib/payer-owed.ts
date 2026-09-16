@@ -100,7 +100,16 @@ export function claimShares(c: VoucherFields): ClaimShares {
   const message = Math.max(0, c.evoucherMessageCents ?? 0);
   const none: ClaimShares = { kind: "none", planCents: remit, programme: null, programmeCents: 0, unpaidFeeCents: 0, from: null };
   if (remit <= 0 || (paid === 0 && message === 0)) return none;
-  const read = c.evoucherProgramme === "RedSail" || c.evoucherProgramme === "Veridikal" ? c.evoucherProgramme : null;
+  /*
+   * What the claim says, where the pull has read the message (`voucherProgrammeFromMessage`): "RedSail", "Veridikal",
+   * or "Veridikal conversion" where the message names RelayHealth as the primary payer. The third is worth keying on
+   * rather than inferring, because the two are told apart here by the voucher covering the whole net — and 1 of 40
+   * Veridikal claims measured in P-2 has a message amount equal to the net while the plan really paid $412.89 of it.
+   * Where the claim says which it is, that beats the arithmetic in both directions.
+   */
+  const said = (c.evoucherProgramme ?? "").trim();
+  const saysConversion = /^veridikal\s+conversion$/i.test(said);
+  const read = /^redsail$/i.test(said) ? "RedSail" : /^veridikal\b/i.test(said) ? "Veridikal" : null;
   const programme = read ?? (message > 0 ? "Veridikal" : "RedSail");
   const from = read ? "programme" : "column";
   const cap = (n: number) => Math.min(n, remit);
@@ -110,7 +119,12 @@ export function claimShares(c: VoucherFields): ClaimShares {
     return { kind: "redsail_voucher", planCents: remit - voucher, programme: COPAY_PAYER, programmeCents: voucher, unpaidFeeCents: 0, from };
   }
   const amount = message || paid;
-  if (amount >= remit) {
+  /*
+   * A conversion where the claim says so, or — where it has not been read — where the programme's money is the whole
+   * net, which is what a conversion looks like. A claim that says "Veridikal" and carries a message covering the net is
+   * NOT read as a conversion: that is the anomaly above, and calling it one would say the plan owes nothing.
+   */
+  if (saysConversion || (read === null && amount >= remit)) {
     const fee = Math.min(remit, VERIDIKAL_CLAIM_FEE_CENTS - VERIDIKAL_CONVERSION_FEE_CENTS);
     return { kind: "veridikal_conversion", planCents: 0, programme: VERIDIKAL_PAYER.denial_conversion, programmeCents: remit - fee, unpaidFeeCents: fee, from };
   }
