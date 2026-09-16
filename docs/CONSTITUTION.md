@@ -297,8 +297,10 @@ are equally plain, and they are now in the code rather than in anybody's memory.
 - A check has a case proving it FINDS something, not only one proving it passes.
 
 The same reasoning covers a tool fault we cannot prevent: an editor that writes a NUL byte where the source should say
-` ` has now cost this project three incidents, and the only reason any of them was caught is that git marks the file
-binary and somebody looks. `looksBinary` is that defence written down.
+`\u0000` has now cost this project four incidents, and the fourth was this paragraph: writing the sentence about NUL bytes put
+one into this file, which git then called binary. The only thing that has ever caught it is git marking a file binary
+and somebody looking, so `looksBinary` is that defence written down — and any file the identifier check exempts is a
+file nothing is watching.
 
 ## 8. How I report
 
