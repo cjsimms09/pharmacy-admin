@@ -11,8 +11,8 @@ const complete: SetupInput = {
   plans: { total: 12, decided: 12, claimsUndecided: 0 },
   shelf: { countedOn: "2026-09-06", ageDays: 1 },
   suppliers: [
-    { name: "McKesson", primary: true, hasMinimum: false, hasLadder: true, hasTermsPage: "/suppliers/1/terms" },
-    { name: "IPC", primary: false, hasMinimum: true, hasLadder: true, hasTermsPage: "/suppliers/2/terms" },
+    { name: "McKesson", primary: true, hasLadder: true, hasTermsPage: "/suppliers/1/terms" },
+    { name: "IPC", primary: false, hasLadder: true, hasTermsPage: "/suppliers/2/terms" },
   ],
   standingCosts: 4,
   billsRecent: 20,
@@ -32,8 +32,8 @@ describe("the setup list", () => {
     assert.ok(done.length >= 10, "and the done list is the reassurance");
     assert.equal(progress, 1);
     assert.equal(stopsCount(items), 0);
-    // The primary's minimum is not asked for: only a secondary needs one to have a card.
-    assert.equal(items.some((i) => i.key === "minimum-McKesson"), false);
+    // No order minimum is asked for, of anybody. See the regression case below.
+    assert.equal(items.some((i) => i.key.startsWith("minimum-")), false);
   });
 
   test("what stops something comes first, and quickest first inside a rank", () => {
@@ -74,16 +74,30 @@ describe("the setup list", () => {
     assert.equal(setupItems({ ...complete, shelf: { countedOn: null, ageDays: null } }).find((i) => i.key === "shelf-count")?.detail, "No count has ever been uploaded.");
   });
 
-  test("a secondary without a minimum, and any supplier without a ladder, are named one line each", () => {
+  test("REGRESSION: no order minimum is ever asked for, from anybody", () => {
+    /*
+     * Eleven of these were on the list, ranked "stops", each saying "Without the minimum there is
+     * nothing for the add-on list to count towards, so that wholesaler gets no card on the Buying
+     * page". `fillToMinimums` gives a supplier with no minimum its full ranked add-on list and says
+     * so, and the Buying page renders that card — so the justification was untrue and nothing was
+     * waiting on the figure.
+     *
+     * The owner had also already settled it twice. On 8 September: "I don't want to set minimums..
+     * more want system to decide next best things to order from that supplier based on days left on
+     * hand, price, etc." And on 16 September, asked whether the unset ones have no minimum or are
+     * simply not bought from: "for all the suppliers i havent set, there is no minimum."
+     *
+     * So an empty minimum is an answer, not a gap, and this list does not ask for one.
+     */
     const items = setupItems({
       ...complete,
       suppliers: [
-        { name: "McKesson", primary: true, hasMinimum: false, hasLadder: false, hasTermsPage: "/suppliers/1/terms" },
-        { name: "IPD", primary: false, hasMinimum: false, hasLadder: true, hasTermsPage: "/suppliers/3/terms" },
+        { name: "McKesson", primary: true, hasLadder: false, hasTermsPage: "/suppliers/1/terms" },
+        { name: "IPD", primary: false, hasLadder: true, hasTermsPage: "/suppliers/3/terms" },
       ],
     });
-    assert.equal(items.some((i) => i.key === "minimum-IPD"), true);
-    assert.equal(items.some((i) => i.key === "minimum-McKesson"), false, "the primary needs no minimum");
+    assert.equal(items.some((i) => i.key.startsWith("minimum-")), false, "not for a secondary either");
+    /* The rebate ladder is a different question and is still asked: it changes what a price compares as. */
     assert.equal(items.find((i) => i.key === "ladder-McKesson")?.rank, "sharpens");
     assert.equal(items.find((i) => i.key === "ladder-McKesson")?.href, "/suppliers/1/terms");
   });

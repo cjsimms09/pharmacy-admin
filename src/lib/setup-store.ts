@@ -89,15 +89,18 @@ async function loadSetup(): Promise<SetupItem[]> {
   const suppliers = await safe(async () => {
     const { allSuppliers } = await import("./suppliers-registry");
     const { contractRatesBySupplier } = await import("./rebate-rates");
-    const { buyListNow } = await import("./shelf");
-    const [rows, rates, buy] = await Promise.all([allSuppliers(true), contractRatesBySupplier(), buyListNow().catch(() => null)]);
-    const minimumOf = new Map((buy?.suppliers ?? []).map((x) => [x.supplier, x.minimumCents]));
+    /*
+     * The buy list is no longer read here. It was loaded solely to find each supplier's order
+     * minimum, and no order minimum is asked for any more — see the note in setup-checklist.ts.
+     * Loading the whole buy list to compute a figure nothing reads is the shape worth removing
+     * rather than leaving to puzzle somebody later.
+     */
+    const [rows, rates] = await Promise.all([allSuppliers(true), contractRatesBySupplier()]);
     return rows
       .filter((r) => r.active)
       .map((r) => ({
         name: r.name,
         primary: r.primarySupplier === true,
-        hasMinimum: (minimumOf.get(r.name) ?? null) !== null,
         hasLadder: rates[r.name.trim().toLowerCase()] !== undefined,
         hasTermsPage: `/suppliers/${r.id}/terms`,
       }));

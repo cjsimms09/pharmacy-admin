@@ -647,8 +647,18 @@ export default async function SuppliersPage({
                   */}
                   <dt className="text-ink-3">Ordering</dt>
                   <dd>
+                    {/*
+                      An empty minimum is an answer, so it is not printed as a warning.
+
+                      The owner, 16 September, asked whether the unset ones have no minimum or are
+                      simply not bought from: "for all the suppliers i havent set, there is no
+                      minimum." It was amber here and eleven rows on the setup list, all of it
+                      asking for a figure that does not exist — while the buying engine has always
+                      treated an absent minimum as "nothing to fill to" and given the wholesaler its
+                      ranked add-on list regardless.
+                    */}
                     {sup.minimumOrderCents === null ? (
-                      <span className="text-warn">no minimum on file</span>
+                      <span className="text-ink-3">no minimum — nothing to reach before ordering</span>
                     ) : (
                       <>
                         minimum {money(sup.minimumOrderCents)}
