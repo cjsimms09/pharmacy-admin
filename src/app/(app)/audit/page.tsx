@@ -1,4 +1,5 @@
 import { desc } from "drizzle-orm";
+import { atLocal } from "@/lib/dates";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
@@ -17,7 +18,7 @@ export default async function AuditPage() {
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
-                <td className="whitespace-nowrap font-mono text-xs">{r.at.replace("T", " ").slice(0, 19)}</td>
+                <td className="whitespace-nowrap font-mono text-xs">{atLocal(r.at)}</td>
                 <td>{r.userName ?? "—"}</td>
                 <td className="font-mono text-xs">{r.action}</td>
                 <td className="text-xs text-ink-2">{r.entity ? `${r.entity} ${r.entityId?.slice(0, 8) ?? ""}` : ""}</td>

@@ -1,4 +1,5 @@
 import { familyTabs } from "@/lib/families";
+import { atLocal } from "@/lib/dates";
 import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
@@ -119,7 +120,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
       <PageHeader
         tabs={familyTabs("arrivals", "/inbox")}
         title="Inbox"
-        subtitle={`${summarise(items)}${s.mail_last_sweep ? ` Last checked ${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC.` : ""}`}
+        subtitle={`${summarise(items)}${s.mail_last_sweep ? ` Last checked ${atLocal(s.mail_last_sweep)}.` : ""}`}
         actions={
           <>
             <Link href="/settings/email" className="btn">Email settings</Link>
@@ -158,7 +159,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
             <>
               Nothing has arrived yet.{" "}
               {s.mail_last_sweep
-                ? `Last checked ${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC.`
+                ? `Last checked ${atLocal(s.mail_last_sweep)}.`
                 : "Use “Check for new mail now” to look."}
             </>
           ) : (
@@ -182,7 +183,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
             <tbody>
               {shown.map((i) => (
                 <tr key={i.id} id={i.id}>
-                  <td className="whitespace-nowrap text-xs">{i.receivedAt.replace("T", " ").slice(0, 16)}</td>
+                  <td className="whitespace-nowrap text-xs">{atLocal(i.receivedAt)}</td>
                   <td className="text-xs">
                     <div className="text-ink-2">{sourceOf(i).label}</div>
                     <div className="font-mono text-ink-3">{i.fromAddress}</div>
@@ -383,7 +384,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                   <div className="text-ink">{describeRule(r)}</div>
                   {r.note && <div className="text-ink-3">&ldquo;{r.note}&rdquo;</div>}
                   <div className="text-ink-3">
-                    {r.taughtAt.replace("T", " ").slice(0, 16)}
+                    {atLocal(r.taughtAt)}
                     {r.wasGuessedAs ? ` — it had guessed ${r.wasGuessedAs.replace(/_/g, " ")}` : ""}
                   </div>
                 </div>

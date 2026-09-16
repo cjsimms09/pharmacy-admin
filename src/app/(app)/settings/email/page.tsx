@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { atLocal } from "@/lib/dates";
 import { requireManager } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { hasMailPassword } from "@/lib/mailbox";
@@ -153,7 +154,7 @@ export default async function EmailSettingsPage({ searchParams }: { searchParams
           <h2 className="mb-3 font-semibold">Status</h2>
           <dl className="grid gap-2 text-sm sm:grid-cols-2">
             <div><dt className="text-xs uppercase tracking-wide text-ink-2">Automatic checking</dt><dd>{s.mail_enabled === "yes" ? <span className="badge badge-ok">on</span> : <span className="badge badge-muted">off</span>}</dd></div>
-            <div><dt className="text-xs uppercase tracking-wide text-ink-2">Last check</dt><dd>{s.mail_last_sweep ? `${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC` : "never"}</dd></div>
+            <div><dt className="text-xs uppercase tracking-wide text-ink-2">Last check</dt><dd>{s.mail_last_sweep ? atLocal(s.mail_last_sweep) : "never"}</dd></div>
             <div><dt className="text-xs uppercase tracking-wide text-ink-2">Accepting mail from</dt><dd>{s.mail_allowed_senders.trim() ? `${s.mail_allowed_senders.split(/[\n,;]+/).filter((x) => x.trim()).length} listed sender(s)` : "anyone"}</dd></div>
             <div className="sm:col-span-2"><dt className="text-xs uppercase tracking-wide text-ink-2">Last result</dt><dd>{s.mail_last_result || "—"}</dd></div>
           </dl>

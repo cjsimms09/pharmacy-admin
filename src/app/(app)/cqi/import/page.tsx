@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { atLocal } from "@/lib/dates";
 import { db } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { hasApiKey } from "@/lib/ai";
@@ -38,7 +39,7 @@ export default async function ImportPage({ searchParams }: { searchParams: Promi
             <tbody>
               {imports.map((i) => (
                 <tr key={i.id}>
-                  <td className="text-xs">{i.createdAt.slice(0, 16).replace("T", " ")}</td>
+                  <td className="text-xs">{atLocal(i.createdAt)}</td>
                   <td><span className={`badge ${i.status === "applied" ? "badge-ok" : i.status === "failed" ? "badge-crit" : "badge-warn"}`}>{i.status}</span>{i.error && <div className="text-xs text-crit">{i.error}</div>}</td>
                   <td>{i.status === "extracted" && <Link href={`/cqi/import/${i.id}`} className="text-xs text-accent hover:underline">Review</Link>}</td>
                 </tr>
