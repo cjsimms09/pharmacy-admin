@@ -36,6 +36,8 @@
  * Pure: `expected-store.ts` reads the arrivals and hands them here.
  */
 
+import { learnCadence } from "./cadence-learn";
+
 export type Cadence =
   | { kind: "daily"; skipSundays?: boolean }
   | { kind: "weekly"; weekday: number }
@@ -44,7 +46,15 @@ export type Cadence =
   /** Twice a month — IPD's statement, the wholesaler's half-month cut. */
   | { kind: "semimonthly"; days: [number, number] }
   /** No calendar: it comes when an event happens. Never late, only "last seen". */
-  | { kind: "on_event"; says: string };
+  | { kind: "on_event"; says: string }
+  /**
+   * No calendar, but a measured rhythm: the usual gap, and the longest the sender normally goes.
+   *
+   * Only `cadence-learn.ts` produces this, and only from a sender's own arrivals. It is how a
+   * voucher remittance or a wholesaler credit gets judged without inventing a date nobody promised:
+   * past the usual gap is "due", past the longest it normally goes is "stopped".
+   */
+  | { kind: "irregular"; typicalDays: number; longestDays: number };
 
 export type ExpectedState = "arriving" | "not_yet_due" | "due_now" | "overdue" | "never_arrived" | "not_expected";
 
@@ -55,7 +65,22 @@ export type Expectation = {
   from: string;
   /** What breaks in the books without it — one clause, in his words where he has given them. */
   whyItMatters: string;
+  /**
+   * What this was expected to do before anybody measured it. A fallback, not the answer.
+   *
+   * Where `arrivals` holds enough history, the rhythm measured from it wins and this is not used at
+   * all. It survives for the rows that have never arrived — which cannot be measured by definition,
+   * and are exactly the rows that matter most.
+   */
   cadence: Cadence;
+  /**
+   * Every arrival on file, so the rhythm can be measured rather than declared.
+   *
+   * The owner: "this tool needs to be smart and know when to expect things.. and adjust as needed".
+   * Ten arrivals of McKesson's drill-down say more about McKesson's rhythm than any number typed
+   * into this file, and they keep saying it better as more arrive. See `cadence-learn.ts`.
+   */
+  arrivals?: string[];
   /** Days after the due date a real sender may take before this is called overdue. */
   graceDays: number;
   /**
@@ -83,6 +108,19 @@ export type Expectation = {
   expected: boolean;
   /** A note of fact: "ACH only from 1 October", "the owner will not forward these". */
   note?: string;
+  /**
+   * Counted by the event that owes the document, not by the calendar. Supplier invoices.
+   *
+   * The owner, 16 September 2026: "we are getting receipts from pioneer. so for invoices it should
+   * use those for alerts.. but only on companies that are set to receive invoices". A wholesaler's
+   * silence says nothing on its own — no delivery, no invoice, nothing wrong. What says something is
+   * a delivery booked in at the counter with no invoice behind it: then the document exists and the
+   * pharmacy has not got it.
+   *
+   * Where this is set it settles the verdict outright, because no number of days elapsed can
+   * improve on knowing exactly how many documents are outstanding.
+   */
+  owing?: { outstanding: number; of: number; says: string };
   href: string;
 };
 
@@ -96,6 +134,18 @@ export type Judged = Expectation & {
   daysLate: number | null;
   /** The whole judgement in a sentence, for the row. */
   says: string;
+  /** The cadence actually used — measured where there was enough history, declared where there was not. */
+  using: Cadence;
+  /**
+   * Which of the two it is, said out loud on every row.
+   *
+   * A measured rhythm and a typed one look identical once they are both a date on a screen, and only
+   * one of them is evidence. Rule 6: ask what the number would make him do. "Overdue since the 5th"
+   * should make him ring the bank; it should not, if the 5th was a number I invented.
+   */
+  basis: "measured" | "declared";
+  /** How the rhythm was arrived at, for the row: "Measured: 10 arrivals, 80% on a Monday." */
+  basisSays: string;
 };
 
 const DAY = 86_400_000;
@@ -120,6 +170,11 @@ export function dueDates(c: Cadence, today: string): { last: string | null; next
   const t = parse(today);
   switch (c.kind) {
     case "on_event":
+    /*
+     * An irregular rhythm is counted from the last arrival, not from the calendar, so it is judged
+     * in `judge` where that date is known. Here it has no calendar answer, and saying so is right.
+     */
+    case "irregular":
       return { last: null, next: null };
     case "daily": {
       if (!c.skipSundays) return { last: today, next: iso(t + DAY) };
@@ -175,6 +230,8 @@ export function cadenceWords(c: Cadence): string {
       return `twice a month, the ${ordinal(c.days[0])} and the ${ordinal(c.days[1])}`;
     case "on_event":
       return c.says;
+    case "irregular":
+      return `no fixed date — usually every ${c.typicalDays} day${c.typicalDays === 1 ? "" : "s"}, not normally beyond ${c.longestDays}`;
   }
 }
 
@@ -193,12 +250,49 @@ function ordinal(n: number): string {
  * working. Only then does the calendar get used, and only for things that have a calendar.
  */
 export function judge(e: Expectation, today: string): Judged {
-  const { last, next } = dueDates(e.cadence, today);
+  /*
+   * Measured beats declared, every time there is enough to measure.
+   *
+   * The declared cadence is mine; the measured one is the sender's. Where the arrivals can answer
+   * the question, the number I typed has no business overriding them — and as more arrive the
+   * answer sharpens without anybody editing this file.
+   */
+  const learned = learnCadence(e.arrivals ?? []);
+  const using = learned?.cadence ?? e.cadence;
+  const basis: "measured" | "declared" = learned ? "measured" : "declared";
+  const basisSays =
+    learned?.says ??
+    (e.arrivals?.length
+      ? `Declared, not measured: ${e.arrivals.length} arrival${e.arrivals.length === 1 ? "" : "s"} on file is too few to read a rhythm from.`
+      : "Declared, not measured: nothing has ever arrived, so there is no rhythm to read.");
+
+  const { last, next } = dueDates(using, today);
   const lastDay = e.lastAt ? e.lastAt.slice(0, 10) : null;
-  const base = { ...e, dueOn: last, nextDueOn: next, daysLate: last ? daysBetween(last, today) : null };
+  const base = { ...e, using, basis, basisSays, dueOn: last, nextDueOn: next, daysLate: last ? daysBetween(last, today) : null };
 
   if (!e.expected) {
     return { ...base, state: "not_expected", says: e.note ?? "Not expected here, so nothing is waiting on it." };
+  }
+
+  /*
+   * Counted, not timed. Nothing outstanding is silence, however long ago the last one was.
+   *
+   * This is the ANDA rule, and it is silent by construction rather than by a threshold somebody has
+   * to keep tuning: a supplier that has not delivered owes nothing, so its row says so and stops.
+   */
+  if (e.owing) {
+    const { outstanding, of, says } = e.owing;
+    return {
+      ...base,
+      dueOn: null,
+      nextDueOn: null,
+      daysLate: null,
+      state: outstanding === 0 ? "arriving" : "overdue",
+      says:
+        outstanding === 0
+          ? `Nothing outstanding. All ${of} deliver${of === 1 ? "y" : "ies"} PioneerRx booked in ${of === 1 ? "has" : "have"} an invoice behind ${of === 1 ? "it" : "them"}, so their silence since is not a gap.`
+          : `${outstanding} deliver${outstanding === 1 ? "y" : "ies"} of ${of} with no invoice behind ${outstanding === 1 ? "it" : "them"}. ${says}`,
+    };
   }
   if (e.startsOn && parse(today) < parse(e.startsOn) && !lastDay) {
     return { ...base, state: "not_yet_due", says: `Not expected before ${e.startsOn}. ${e.note ?? ""}`.trim() };
@@ -207,21 +301,72 @@ export function judge(e: Expectation, today: string): Judged {
     return {
       ...base,
       state: "never_arrived",
-      says: `Never arrived — not once. ${e.from} ${e.cadence.kind === "on_event" ? "has sent nothing" : `should send ${cadenceWords(e.cadence)}`}, and nothing has been set up for it.`,
+      says: `Never arrived — not once. ${e.from} ${using.kind === "on_event" ? "has sent nothing" : `should send ${cadenceWords(using)}`}, and nothing has been set up for it.`,
     };
   }
-  if (e.cadence.kind === "on_event") {
-    return { ...base, state: "arriving", says: `Last one ${lastDay}. ${capitalise(e.cadence.says)}, so there is no date to be late against.` };
+
+  /*
+   * A measured rhythm with no calendar, judged from the last arrival rather than from a date.
+   *
+   * "Usually every 9 days, never longer than 19" is a real statement about a real sender, and it
+   * answers the only question being asked of an irregular one: has this stopped. Past the usual gap
+   * is due; past the longest it has ever taken, plus the grace, is stopped. No invented date.
+   */
+  if (using.kind === "irregular") {
+    const quiet = daysBetween(lastDay, today);
+    const usual = Math.max(1, using.typicalDays);
+    const outside = using.longestDays + e.graceDays;
+    const nextExpected = iso(parse(lastDay) + usual * DAY);
+    const irr = { ...base, dueOn: nextExpected, nextDueOn: nextExpected, daysLate: quiet - usual };
+    if (quiet <= usual) {
+      return { ...irr, state: "arriving", says: `Last one ${lastDay}, ${quiet} day${quiet === 1 ? "" : "s"} ago. This sender usually goes ${usual} days between, so the next is due about ${nextExpected}.` };
+    }
+    if (quiet <= outside) {
+      return { ...irr, state: "due_now", says: `Nothing for ${quiet} days, and this sender usually goes ${usual}. Still inside the ${using.longestDays} days it normally stays within, so it is due rather than stopped.` };
+    }
+    return { ...irr, state: "overdue", says: `Nothing for ${quiet} days. This sender does not normally go beyond ${using.longestDays}, so it has stopped, or it is going somewhere else.` };
+  }
+
+  if (using.kind === "on_event") {
+    return { ...base, state: "arriving", says: `Last one ${lastDay}. ${capitalise(using.says)}, so there is no date to be late against.` };
   }
   if (!last) return { ...base, state: "arriving", says: `Last one ${lastDay}.` };
 
-  const early = e.earlyDays ?? 5;
+  /*
+   * The early allowance is a share of the period, never a flat five days.
+   *
+   * Five days is right for a monthly statement, where arriving on the 3rd for the 5th is ordinary.
+   * On a daily feed it is absurd: the card batch of the 14th was covering the run of the 16th, so two
+   * days of silence read as "arriving" and the missing batch of the 15th vanished off the screen.
+   * A third of the period, capped at five: nought for a daily feed, two for a weekly one.
+   */
+  const period = using.kind === "daily" ? 1 : using.kind === "weekly" ? 7 : using.kind === "semimonthly" ? 15 : 30;
+  const early = Math.min(e.earlyDays ?? 5, Math.floor(period / 3));
   if (parse(lastDay) >= parse(last) - early * DAY) {
     return { ...base, state: "arriving", says: `Arrived ${lastDay} for the ${last} run${next ? `; next due ${next}` : ""}.` };
   }
+  /*
+   * Nothing is accused of having stopped on a rhythm nobody measured.
+   *
+   * The owner, 16 September 2026: "needs to not alert me to dumb things.. mckesson is about the only
+   * invoice we receive daily.. dont alert me we havent gotten an anda invoice in 7 days". The general
+   * form of that is this rule. To say a sender has stopped is to say it broke its own habit, and a
+   * habit I typed into a file is not its habit. Where the arrivals were too few to measure, the worst
+   * this will say is that something is due — which is a note, not an accusation.
+   *
+   * It costs nothing real: a sender with enough history to be worth chasing has enough history to be
+   * measured, and the ones without it are exactly the ANDAs.
+   */
   const late = daysBetween(last, today);
-  if (late <= e.graceDays) {
-    return { ...base, state: "due_now", says: `Due ${last}, and ${late === 0 ? "today is that day" : `${late} day${late === 1 ? "" : "s"} past it`} — inside the ${e.graceDays} days ${e.from} usually takes. Last one ${lastDay}.` };
+  if (late <= e.graceDays || basis === "declared") {
+    return {
+      ...base,
+      state: "due_now",
+      says:
+        late > e.graceDays
+          ? `Due ${last}, ${late} days ago, and the last one was ${lastDay}. Nothing stronger is said than that: ${e.from} has not sent often enough for the site to know its habits, so it cannot be told it broke one.`
+          : `Due ${last}, and ${late === 0 ? "today is that day" : `${late} day${late === 1 ? "" : "s"} past it`} — inside the ${e.graceDays} days allowed. Last one ${lastDay}.`,
+    };
   }
   return { ...base, state: "overdue", says: `Due ${last}, ${late} days ago, and the last one was ${lastDay}. ${e.from} has stopped or it is going somewhere else.` };
 }
@@ -242,7 +387,7 @@ export function judgeAll(list: Expectation[], today: string): Judged[] {
 }
 
 /** The one-line summary for the tab itself: what a person needs to know without opening it. */
-export function expectedSummary(judged: Judged[]): { overdue: number; dueNow: number; never: number; arriving: number; says: string } {
+export function expectedSummary(judged: Judged[]): { overdue: number; dueNow: number; never: number; arriving: number; measured: number; says: string } {
   const n = (s: ExpectedState) => judged.filter((j) => j.state === s).length;
   const overdue = n("overdue");
   const dueNow = n("due_now");
@@ -254,5 +399,5 @@ export function expectedSummary(judged: Judged[]): { overdue: number; dueNow: nu
     never ? `${never} never once arrived` : null,
     `${arriving} arriving on time`,
   ].filter(Boolean);
-  return { overdue, dueNow, never, arriving, says: parts.join(", ") };
+  return { overdue, dueNow, never, arriving, measured: judged.filter((j) => j.basis === "measured").length, says: parts.join(", ") };
 }

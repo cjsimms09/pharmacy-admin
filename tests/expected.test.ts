@@ -66,9 +66,11 @@ describe("the bank statement, which is the case this page was asked for", () => 
   });
 
   test("nothing since July, judged in the middle of September, has stopped", () => {
-    const r = judge(exp({ lastAt: "2026-07-31", everCount: 200 }), "2026-09-16");
+    // Four months of statements in the first days of each month, and then nothing: a measured habit, broken.
+    const arrivals = ["2026-04-04", "2026-05-05", "2026-06-03", "2026-07-04", "2026-07-31"];
+    const r = judge(exp({ arrivals, lastAt: "2026-07-31", everCount: 200 }), "2026-09-16");
+    assert.equal(r.basis, "measured");
     assert.equal(r.state, "overdue");
-    assert.equal(r.daysLate, 11);
     assert.match(r.says, /has stopped or it is going somewhere else/);
   });
 
@@ -129,6 +131,83 @@ describe("the order things are read in", () => {
     assert.equal(s.never, 1);
     assert.equal(s.arriving, 1);
     assert.doesNotMatch(s.says, /missing/i);
+  });
+});
+
+describe("what the sender's own arrivals say, against what was declared", () => {
+  /*
+   * The owner, 16 September 2026: "this tool needs to be smart and know when to expect things.. and
+   * adjust as needed". A cadence typed into a file is a guess wearing a fact's clothes; the arrivals
+   * are evidence. So the measurement wins wherever there is one, and the row says which it used.
+   */
+  test("a measured rhythm overrules the declared one", () => {
+    // Declared monthly on the 5th; actually arrives every Monday, and has done eight times.
+    const arrivals = ["2026-07-06", "2026-07-13", "2026-07-20", "2026-07-27", "2026-08-03", "2026-08-10", "2026-08-17", "2026-08-24"];
+    const r = judge(exp({ cadence: { kind: "monthly", dayOfMonth: 5 }, arrivals, lastAt: "2026-08-24", everCount: 8, graceDays: 1 }), "2026-09-16");
+    assert.deepEqual(r.using, { kind: "weekly", weekday: 1 });
+    assert.equal(r.basis, "measured");
+    assert.equal(r.state, "overdue", "judged against the Mondays it actually keeps, not the 5th nobody promised");
+  });
+
+  test("a sender with no measured habit is never accused of breaking one", () => {
+    /*
+     * The owner, 16 September 2026: "dont alert me we havent gotten an anda invoice in 7 days". To
+     * say a sender has stopped is to say it broke its own habit, and a habit typed into a file is not
+     * its habit. Two arrivals is not a habit, so the worst this may say is that something is due.
+     */
+    const r = judge(exp({ arrivals: ["2026-06-04", "2026-07-04"], lastAt: "2026-07-04", everCount: 2 }), "2026-09-16");
+    assert.equal(r.basis, "declared");
+    assert.equal(r.state, "due_now", "not overdue: nothing measured its habit, so nothing can say it broke one");
+    assert.match(r.says, /has not sent often enough for the site to know its habits/);
+  });
+
+  test("a delivery with no invoice behind it is the alert, not days of silence", () => {
+    /*
+     * "we are getting receipts from pioneer. so for invoices it should use those for alerts.. but
+     * only on companies that are set to receive invoices" — and the counted form is silent by
+     * construction: a supplier that has not delivered owes nothing, however long it has been quiet.
+     */
+    const quiet = judge(exp({ label: "ANDA invoices", owing: { outstanding: 0, of: 3, says: "" }, lastAt: "2026-06-01", everCount: 3 }), "2026-09-16");
+    assert.equal(quiet.state, "arriving");
+    assert.match(quiet.says, /Nothing outstanding/);
+    assert.equal(quiet.dueOn, null, "no date is invented for a thing counted in deliveries");
+
+    const owing = judge(exp({ label: "ParMed invoices", owing: { outstanding: 4, of: 11, says: "Their invoices have been arriving since 4 September." }, lastAt: "2026-09-04", everCount: 11 }), "2026-09-16");
+    assert.equal(owing.state, "overdue");
+    assert.match(owing.says, /4 deliveries of 11 with no invoice behind them/);
+  });
+
+  test("too little history leaves the declared cadence in place, and says so", () => {
+    const r = judge(exp({ arrivals: ["2026-08-04", "2026-09-04"], lastAt: "2026-09-04", everCount: 2 }), "2026-09-16");
+    assert.equal(r.basis, "declared");
+    assert.match(r.basisSays, /too few to read a rhythm from/);
+  });
+
+  test("a row that has never arrived says there is no rhythm to read", () => {
+    const r = judge(exp({ arrivals: [], lastAt: null, everCount: 0 }), "2026-09-16");
+    assert.equal(r.basis, "declared");
+    assert.match(r.basisSays, /nothing has ever arrived/);
+  });
+
+  test("an irregular sender is quiet, not late, until it beats its own record", () => {
+    // Gaps of 9, 19, 8, 12: usually about 10 days, never longer than 19.
+    const arrivals = ["2026-08-02", "2026-08-11", "2026-08-30", "2026-09-07", "2026-09-19"];
+    const quiet = judge(exp({ arrivals, lastAt: "2026-09-19", everCount: 5, graceDays: 0 }), "2026-10-02");
+    assert.equal(quiet.using.kind, "irregular");
+    assert.equal(quiet.state, "due_now", "13 days of silence from a sender that has gone 19 is not a fault");
+    assert.match(quiet.says, /it normally stays within/);
+
+    const stopped = judge(exp({ arrivals, lastAt: "2026-09-19", everCount: 5, graceDays: 0 }), "2026-10-12");
+    assert.equal(stopped.state, "overdue");
+    assert.match(stopped.says, /does not normally go beyond/);
+  });
+
+  test("an irregular sender inside its usual gap is simply arriving", () => {
+    const arrivals = ["2026-08-02", "2026-08-11", "2026-08-30", "2026-09-07", "2026-09-19"];
+    const r = judge(exp({ arrivals, lastAt: "2026-09-19", everCount: 5 }), "2026-09-24");
+    assert.equal(r.state, "arriving");
+    // Gaps of 9, 19, 8 and 12 days: the usual gap is 11, so the next is due 11 days after the last one.
+    assert.equal(r.nextDueOn, "2026-09-30", "counted from the last arrival, not from a calendar");
   });
 });
 

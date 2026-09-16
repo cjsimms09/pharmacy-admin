@@ -26,8 +26,10 @@ export const dynamic = "force-dynamic";
 const GROUPS: { state: ExpectedState; title: string; blurb: string; tone: "crit" | "warn" | "muted" }[] = [
   {
     state: "overdue",
-    title: "Stopped",
-    blurb: "These have come before and their date has passed. Somebody stopped sending, or it is going to an address the site does not watch.",
+    title: "Chase these",
+    blurb:
+      "Either a sender that has broken its own measured habit, or a delivery booked in at the counter with no invoice behind it. " +
+      "Nothing reaches this list on a rhythm nobody measured.",
     tone: "crit",
   },
   {
@@ -65,8 +67,10 @@ export default async function ExpectedPage() {
       />
 
       <Notice kind={summary.overdue > 0 ? "warn" : "ok"}>
-        {summary.says}. Each row is judged against its own calendar — a monthly document is not late
-        until its month is over.
+        {summary.says}. Each sender is judged against its own measured rhythm — {summary.measured} of{" "}
+        {rows.length} have arrived often enough to have one — so a monthly document is not late until
+        its month is over, and an irregular one is not late until it has been quiet longer than it
+        has ever been before.
       </Notice>
 
       {GROUPS.map((g) => {
@@ -103,7 +107,7 @@ function Row({ r, tone }: { r: Judged; tone: "crit" | "warn" | "muted" }) {
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <span className="text-base font-semibold">{r.label}</span>
         <span className="text-right text-xs text-ink-3">
-          <span className="block">{cadenceWords(r.cadence)}</span>
+          <span className="block">{cadenceWords(r.using)}</span>
           <span className="block tabular-nums">
             {r.lastAt ? `last one ${fmt(r.lastAt.slice(0, 10))}` : "none, ever"}
             {r.everCount > 0 ? ` · ${r.everCount.toLocaleString()} on file` : ""}
@@ -115,6 +119,19 @@ function Row({ r, tone }: { r: Judged; tone: "crit" | "warn" | "muted" }) {
         <span className="text-ink-3">From {r.from}. </span>
         {r.whyItMatters}
       </p>
+      {/*
+        Which kind of number this row is judged by, on the row itself.
+        A measured rhythm and one typed into a file look identical once they are both a date on a
+        screen, and only one of them is evidence. "Overdue since the 5th" should send him to the
+        bank; it should not, if the 5th was a guess.
+      */}
+      {/* A row counted in deliveries has no rhythm and needs none: the count is better evidence than any date. */}
+      {!r.owing && (
+        <p className="mt-1 text-xs text-ink-3">
+          <span className={`badge ${r.basis === "measured" ? "" : "badge-warn"}`}>{r.basis === "measured" ? "measured" : "not yet measured"}</span>{" "}
+          {r.basisSays}
+        </p>
+      )}
       {r.note && <p className="mt-1 text-xs text-ink-3">{r.note}</p>}
       <div className="mt-2">
         <Link href={r.href} className="btn btn-sm">Open it</Link>

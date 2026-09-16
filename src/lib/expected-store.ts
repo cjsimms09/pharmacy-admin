@@ -14,9 +14,16 @@ import { judgeAll, expectedSummary, type Expectation, type Judged } from "./expe
  * for the same reason `feeds.ts` does it: a reader that silently stopped storing looks identical to
  * a sender that stopped sending, and only the stored row tells them apart.
  *
- * Where nobody has said how often something should come, the row says so rather than inventing a
- * cadence. An invented cadence produces a red mark on a day nothing was owed, and the cost of that
- * is not the wrong pixel — it is that the next red mark gets ignored too.
+ * ── The cadences here are a fallback, not the answer ──
+ *
+ * Every row hands `judge` the dates it has actually arrived on, and the rhythm measured from those
+ * beats the one written here (`cadence-learn.ts`). The owner: "this tool needs to be smart and know
+ * when to expect things.. and adjust as needed". Ten arrivals of McKesson's drill-down say more
+ * about McKesson's rhythm than any number typed into this file, and they say it better every week.
+ *
+ * What is written here survives for the rows that have never arrived — which cannot be measured, by
+ * definition, and are exactly the rows that matter most. Every row says which of the two it used, so
+ * a date nobody has measured is never mistaken for one that was.
  */
 
 type Client = { execute: (sql: string, args?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> };
@@ -41,8 +48,14 @@ export async function expectedNow(opts: { today?: string } = {}): Promise<Expect
 
 async function load(today: string): Promise<ExpectedNow> {
   const c = sql();
-  const [routes, claims, onHand, bank, sales, nadac, catalogue, invoices, plan835, cardBatches] = await Promise.all([
+  const [routes, routeDays, claims, onHand, bank, sales, nadac, catalogue, invoices, plan835, cardBatches] = await Promise.all([
     c.execute("select routed_as as k, count(*) as n, max(received_at) as at from inbox_items group by routed_as"),
+    /*
+     * Every distinct day each route has ever delivered on, so the rhythm can be measured instead of
+     * declared (`cadence-learn.ts`). One day, not one message: two invoices in a morning is one
+     * arrival, because the question is when the sender sends.
+     */
+    c.execute("select routed_as as k, substr(received_at, 1, 10) as d from inbox_items group by routed_as, substr(received_at, 1, 10) order by d"),
     c.execute("select max(date_filled) as at, count(*) as n from claims"),
     c.execute("select max(counted_on) as at, count(*) as n from on_hand_imports"),
     c.execute('select max("on") as at, count(*) as n from bank_lines'),
@@ -56,8 +69,62 @@ async function load(today: string): Promise<ExpectedNow> {
 
   const byRoute = new Map<string, { n: number; at: string | null }>();
   for (const r of routes.rows) byRoute.set(String(r.k ?? ""), { n: num(r.n), at: str(r.at) });
-  const route = (k: string) => byRoute.get(k) ?? { n: 0, at: null };
+  const daysByRoute = new Map<string, string[]>();
+  for (const r of routeDays.rows) {
+    const k = String(r.k ?? "");
+    const d = str(r.d);
+    if (!d) continue;
+    const list = daysByRoute.get(k) ?? [];
+    list.push(d);
+    daysByRoute.set(k, list);
+  }
+  const route = (k: string) => ({ ...(byRoute.get(k) ?? { n: 0, at: null }), days: daysByRoute.get(k) ?? [] });
   const table = (r: { rows: Record<string, unknown>[] }) => ({ n: num(r.rows[0]?.n), at: str(r.rows[0]?.at) });
+
+  /*
+   * The days each table's own feed delivered on, for the same measurement.
+   *
+   * Newest 60, not all of them: a sender's rhythm this quarter is the one being judged, and a
+   * pattern it kept in the spring should not hold a verdict about this week. Sixty days of a daily
+   * feed is two months; sixty of a monthly one is five years, which is more history than any of
+   * these have.
+   */
+  const daysOf = async (q: string): Promise<string[]> => {
+    const r = await c.execute(q);
+    return r.rows.map((x) => str(x.d)).filter((x): x is string => x !== null);
+  };
+  /*
+   * Invoices are not judged by a rhythm at all. They are judged by the receipts.
+   *
+   * The owner, 16 September 2026, in three messages: "mckesson is about the only invoice we receive
+   * daily.. dont alert me we havent gotten an anda invoice in 7 days"; "we are getting receipts from
+   * pioneer. so for invoices it should use those for alerts.. but only on companies that are set to
+   * receive invoices like parmed, anda, ipd, ipc, and mckesson"; "everything else we are usiong
+   * pioneer receipt as invoice".
+   *
+   * He is right, and it makes the clever part unnecessary. ANDA's silence means nothing on its own —
+   * no delivery, no invoice, nothing wrong. What means something is a delivery PioneerRx booked in
+   * with no invoice behind it, because then a document exists somewhere and the pharmacy does not
+   * have it. That is an event, not a calendar, and `invoicesStillOwed()` already measures it against
+   * the wholesalers' own invoice numbers.
+   *
+   * So: one row per supplier that actually sends invoices, and no row at all for the ones where the
+   * receipt is the invoice — which is most of them, and none of them can ever raise anything here.
+   */
+  const { invoicesStillOwed } = await import("./invoices");
+  const owed = (await invoicesStillOwed()).filter((o) => !o.receiptIsTheInvoice && o.received > 0);
+
+  const [claimDays, onHandDays, bankDays, nadacDays, catalogueDays, plan835Days, cardBatchDays, mtf, mtfDays] = await Promise.all([
+    daysOf("select distinct date_filled as d from claims where date_filled is not null order by d desc limit 60"),
+    daysOf("select distinct counted_on as d from on_hand_imports where counted_on is not null order by d desc limit 60"),
+    daysOf('select distinct substr("on", 1, 10) as d from bank_lines where "on" is not null order by d desc limit 60'),
+    daysOf("select distinct file_as_of as d from nadac_prices where file_as_of is not null order by d desc limit 60"),
+    daysOf("select distinct substr(created_at, 1, 10) as d from supplier_imports order by d desc limit 60"),
+    daysOf("select distinct received_on as d from claim_payments where source = 'plan' and received_on is not null order by d desc limit 60"),
+    daysOf("select distinct received_on as d from cash_receipts where source_key like 'card-batch|%' and received_on is not null order by d desc limit 60"),
+    c.execute("select max(received_on) as at, count(*) as n from claim_payments where source = 'mtf'"),
+    daysOf("select distinct received_on as d from claim_payments where source = 'mtf' and received_on is not null order by d desc limit 60"),
+  ]);
 
   const t = {
     claims: table(claims),
@@ -83,6 +150,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: t.claims.at,
       everCount: t.claims.n,
       expected: true,
+      arrivals: claimDays,
       href: "/claims",
     },
     {
@@ -95,6 +163,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: t.onHand.at ?? route("on_hand").at,
       everCount: t.onHand.n + route("on_hand").n,
       expected: true,
+      arrivals: [...onHandDays, ...route("on_hand").days],
       href: "/purchasing/shelf",
     },
     {
@@ -107,6 +176,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("rx_transactions").at,
       everCount: route("rx_transactions").n,
       expected: true,
+      arrivals: route("rx_transactions").days,
       href: "/claims",
     },
     {
@@ -122,6 +192,7 @@ async function load(today: string): Promise<ExpectedNow> {
       note:
         "A day with no batch is no longer money lost: the register banks that day's card takings itself, and a batch " +
         "arriving later takes the receipt over. Only the card mix is lost with the email.",
+      arrivals: [...cardBatchDays, ...route("card_batch").days],
       href: "/money",
     },
     {
@@ -134,6 +205,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("purchase_drilldown").at,
       everCount: route("purchase_drilldown").n,
       expected: true,
+      arrivals: route("purchase_drilldown").days,
       href: "/purchasing",
     },
 
@@ -148,6 +220,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: t.nadac.at,
       everCount: t.nadac.n,
       expected: true,
+      arrivals: nadacDays,
       href: "/nadac",
     },
     {
@@ -160,6 +233,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: t.catalogue.at ?? route("pioneer_catalog").at,
       everCount: t.catalogue.n + route("pioneer_catalog").n,
       expected: true,
+      arrivals: [...catalogueDays, ...route("pioneer_catalog").days],
       href: "/purchasing",
     },
 
@@ -176,6 +250,7 @@ async function load(today: string): Promise<ExpectedNow> {
       everCount: t.bank.n,
       expected: true,
       note: "Not expected before the month closes. September's is due in the first week of October.",
+      arrivals: bankDays,
       href: "/money/bank",
     },
     {
@@ -188,6 +263,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: t.sales.at ?? route("accrual_sales").at,
       everCount: t.sales.n,
       expected: true,
+      arrivals: route("accrual_sales").days,
       href: "/money",
     },
     {
@@ -203,6 +279,7 @@ async function load(today: string): Promise<ExpectedNow> {
       everCount: route("ipd_statement").n,
       expected: true,
       note: "Forwarded to this conversation so far, never to the mailbox — so the site has never read one itself.",
+      arrivals: route("ipd_statement").days,
       href: "/invoices",
     },
     {
@@ -216,6 +293,7 @@ async function load(today: string): Promise<ExpectedNow> {
       everCount: route("veridikal_report").n,
       expected: true,
       note: "July's was rehearsed by hand to prove the reader. Nothing has come through the mailbox.",
+      arrivals: route("veridikal_report").days,
       href: "/payers/waiting",
     },
     {
@@ -228,21 +306,46 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("card_statement").at,
       everCount: route("card_statement").n,
       expected: true,
+      arrivals: route("card_statement").days,
       href: "/money",
     },
 
     // ── When the event happens. Never "late": there is no date to be late against ──
+    /*
+     * One row per supplier that sends invoices, judged on deliveries rather than on days elapsed.
+     *
+     * `waiting` is a delivery PioneerRx booked in, dated after this supplier's invoices started
+     * being caught here, with no invoice behind it. Nought waiting is the whole story: however long
+     * ago their last invoice was, nothing is owed and nothing is said. That is the ANDA case, and it
+     * is silent by construction rather than by a threshold somebody has to keep tuning.
+     */
+    ...owed
+      .sort((a, b) => b.waiting - a.waiting || a.supplier.localeCompare(b.supplier))
+      .map((o): Expectation => ({
+        key: `invoices:${o.supplier.toLowerCase()}`,
+        label: `${o.supplier} invoices`,
+        from: o.supplier,
+        whyItMatters: "What was bought and what is owed. The archive a board inspection reads, and the cost side of every margin.",
+        cadence: { kind: "on_event", says: "one for each delivery PioneerRx books in" },
+        graceDays: 0,
+        lastAt: o.filingSince,
+        everCount: o.received,
+        expected: true,
+        owing: { outstanding: o.waiting, of: o.received, says: o.says },
+        href: "/inventory/invoices",
+      })),
     {
-      key: "invoices",
-      label: "Supplier invoices",
-      from: "every wholesaler",
-      whyItMatters: "What was bought and what is owed. The archive that a board inspection reads.",
-      cadence: { kind: "on_event", says: "with each delivery" },
-      graceDays: 0,
-      lastAt: t.invoices.at ?? route("invoice").at,
-      everCount: t.invoices.n,
+      key: "mtf",
+      label: "Facilitator payments (MTF)",
+      from: "the facilitator",
+      whyItMatters: "The 835s for every payer that pays through the facilitator rather than direct — most of the plan money.",
+      cadence: { kind: "on_event", says: "pulled by the facilitator's tool" },
+      graceDays: 2,
+      lastAt: str(mtf.rows[0]?.at),
+      everCount: num(mtf.rows[0]?.n),
       expected: true,
-      href: "/inventory/invoices",
+      arrivals: mtfDays,
+      href: "/remits/mtf",
     },
     {
       key: "remit_835",
@@ -254,6 +357,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: t.plan835.at ?? route("remittance_835").at,
       everCount: t.plan835.n,
       expected: true,
+      arrivals: [...plan835Days, ...route("remittance_835").days],
       href: "/remits",
     },
     {
@@ -266,6 +370,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("payer_payments").at,
       everCount: route("payer_payments").n,
       expected: true,
+      arrivals: route("payer_payments").days,
       href: "/remits",
     },
     {
@@ -278,6 +383,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("accesshealth_payment").at,
       everCount: route("accesshealth_payment").n,
       expected: true,
+      arrivals: route("accesshealth_payment").days,
       href: "/remits",
     },
     {
@@ -291,6 +397,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("copay_remit").at,
       everCount: route("copay_remit").n,
       expected: true,
+      arrivals: route("copay_remit").days,
       href: "/payers/waiting",
     },
     {
@@ -303,6 +410,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("rxrescue_credit").at,
       everCount: route("rxrescue_credit").n,
       expected: true,
+      arrivals: route("rxrescue_credit").days,
       href: "/remits",
     },
     {
@@ -315,6 +423,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("rebate_report").at,
       everCount: route("rebate_report").n,
       expected: true,
+      arrivals: route("rebate_report").days,
       href: "/suppliers",
     },
     {
@@ -327,6 +436,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("sales_by_payment").at,
       everCount: route("sales_by_payment").n,
       expected: true,
+      arrivals: route("sales_by_payment").days,
       href: "/money",
     },
     {
@@ -339,6 +449,7 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("mck_returns").at,
       everCount: route("mck_returns").n,
       expected: true,
+      arrivals: route("mck_returns").days,
       href: "/purchasing",
     },
   ];
