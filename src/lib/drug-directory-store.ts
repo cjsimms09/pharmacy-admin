@@ -491,6 +491,18 @@ export async function knownNdcs(): Promise<(ndc11: string) => boolean> {
  *
  * Handed in as a function for the same reason as `knownNdcs`: `invoice-lines.ts` reads paper.
  */
+/**
+ * The DEA schedule the FDA registers against an NDC, for the invoice reader.
+ *
+ * Handed in as a function for the same reason as `knownNdcs`: the reader reads paper and must not reach a database.
+ * It answers for the lines the directory lists and declines for everything else — a device, a front-end item, a
+ * repackager's code — which is 43 of this pharmacy's 54 invoices, and declining is the honest half of the answer.
+ */
+export async function ndcSchedules(): Promise<(ndc11: string) => string | null> {
+  const rows = await db.query.drugDirectory.findMany({ columns: { ndc11: true, deaSchedule: true } });
+  const by = new Map(rows.map((r) => [r.ndc11, r.deaSchedule ?? null]));
+  return (ndc11: string) => by.get(ndc11) ?? null;
+}
 export async function ndcPackages(): Promise<(productNdc9: string) => string[]> {
   if (!heldPackagesBy9 || Date.now() - heldPackagesBy9.at >= MAX_AGE_MS) {
     const rows = await db.query.drugDirectory.findMany({ columns: { ndc11: true } });
