@@ -277,6 +277,29 @@ The cost of getting this wrong is not the wrong fact. It is that he has to audit
 him, which is the exact load this site exists to take off him — and he is overwhelmed, and part of
 that is me.
 
+## 7c. A check that cannot fail is not a check
+
+Three of these shipped looking correct, and each was found by somebody reading the code rather than by anything failing:
+
+1. **A check nobody calls.** `countedTwiceInCash` proves no purchase reaches the cash figure by two routes — the thing
+   he asked for by name, *"make sure we are not duplicating!!!!!"* — and it was fully written, fully tested, and called
+   from nowhere, while the books screen told him it "proves it by counting".
+2. **A test that proves a guard it never reaches.** A case broke a fixture to prove a reader refuses it, and the break
+   matched nothing on a different checkout, so the reader read a perfectly good document and the case passed.
+3. **A check that cannot tell "found nothing" from "looked at nothing".** The identifier scanner's binary test became
+   true of every file; it skipped all 1,123 of them and printed the sentence it prints when the repository is clean.
+
+The shape is the same each time: something that only ever reports success, so its silence means nothing. The defences
+are equally plain, and they are now in the code rather than in anybody's memory.
+
+- A check runs on real data and its result is on a screen, not only in a test.
+- A case that alters a document refuses when the alteration matches nothing (`tests/support/fixtures.ts`).
+- A check has a case proving it FINDS something, not only one proving it passes.
+
+The same reasoning covers a tool fault we cannot prevent: an editor that writes a NUL byte where the source should say
+` ` has now cost this project three incidents, and the only reason any of them was caught is that git marks the file
+binary and somebody looks. `looksBinary` is that defence written down.
+
 ## 8. How I report
 
 Short. Money first. What was wrong, what it is now, why a figure moved. He has watched September's
