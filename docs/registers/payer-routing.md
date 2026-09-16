@@ -1,6 +1,6 @@
 # Every payer that bills, and the document that settles it
 
-*Generated 2026-09-15 23:52 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
+*Generated 2026-09-16 00:23 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
 
 A payer with no settling document is not a missing payment — it is a payment nobody would notice the absence of. The state is measured from the claims and payments; which document *should* settle a payer is a fact about how this pharmacy is paid, so it comes from `decisions.md` and reads never-measured until somebody says.
 

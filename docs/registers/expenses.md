@@ -1,6 +1,6 @@
 # Every cost the business has, and whether the site sees it
 
-*Generated 2026-09-12 18:48 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
+*Generated 2026-09-16 00:23 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
 
 One line per expense category. A category with no money against it is in one of four states and the account cannot tell them apart on its own — which is why a bottom line of nearly break-even could sit above costs that had simply not arrived.
 
@@ -27,7 +27,7 @@ One line per expense category. A category with no money against it is in one of 
 | Other | operating | 0 | $0.00 | **unknown — nobody has ruled on it** | the catch-all; card processing will land here until it has a category |
 | Payroll taxes and benefits | operating | 0 | $0.00 | captured | inside the $45,000 standing payroll, which is fully loaded |
 | Pharmacy supplies | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
-| Postage and shipping | operating | 2 | $200.00 | captured |  |
+| Postage and shipping | operating | 3 | $300.00 | captured |  |
 | Professional fees | operating | 0 (+2 standing) | $0.00 | captured | standing cost: accounting and PSAO fees |
 | Rent and occupancy | operating | 0 (+1 standing) | $0.00 | captured | standing cost |
 | Repairs and maintenance | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
