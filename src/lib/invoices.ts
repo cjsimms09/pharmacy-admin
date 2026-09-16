@@ -2805,7 +2805,7 @@ export async function storeInvoiceLines(
    * every McKesson line, which is "not said" and not "not controlled". The schedule is asked of the sources that can
    * answer for a line (line-schedule.ts) and stays null where none of them can.
    */
-  const { lineSchedule } = await import("./line-schedule");
+  const { lineSchedule, directoryCodeOf } = await import("./line-schedule");
   const { ndcSchedules } = await import("./drug-directory-store");
   const scheduleOf = await ndcSchedules();
   const deliveryRow = meta.invoiceNumber
@@ -2831,7 +2831,7 @@ export async function storeInvoiceLines(
     // Which half of a combined invoice the line is on, so the Schedule II items are separable
     // inside the document as well as by the folder it is filed in. See invoice-lines.ts.
     ...(() => {
-      const said = lineSchedule({ sectionControlled: l.controlled, directoryCode: scheduleOf(l.ndc11), deliveryCodes });
+      const said = lineSchedule({ sectionControlled: l.controlled, directoryCode: directoryCodeOf(scheduleOf(l.ndc11)), deliveryCodes });
       return { controlled: said.controlled, deaSchedule: said.schedule, deaScheduleFrom: said.from };
     })(),
   }));

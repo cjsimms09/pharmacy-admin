@@ -423,6 +423,8 @@ export const SETTING_KEYS = [
   // The nightly rules-only re-read of invoices whose lines were never kept (instrumentation.ts).
   "invoice_lines_backfill_on",
   "invoice_lines_backfill_result",
+  /** What the nightly pass could newly say about lines already read: see line-schedule-backfill.ts. */
+  "line_schedules_backfill_result",
   "pioneer_pull_register_on",
   "pioneer_pull_register_result",
   "pioneer_register_check",

@@ -25,6 +25,29 @@ import { scheduleFromDea } from "./invoice-lines";
 
 export type LineSchedule = "schedule_2" | "schedule_3_5" | "none";
 
+/**
+ * What the FDA directory says about one NDC, as a code `scheduleFromDea` understands.
+ *
+ * Two different silences, and telling them apart is the whole of this function. An NDC the
+ * directory has never heard of tells you nothing. An NDC the directory *lists*, with the schedule
+ * field blank, tells you it is not a controlled substance — every entry has been looked at, and a
+ * drug recorded with no schedule is a drug with no schedule.
+ *
+ * `invoices.ts` has always applied that rule when filing a whole invoice, in as many words: "the
+ * directory's blank means 'not a controlled substance', and this is the one place such a null is a
+ * fact rather than an absence". The per-line reader did not, and passed the blank through as an
+ * empty string — which `scheduleFromDea` discards, leaving the line unanswered. So a line whose
+ * drug the FDA positively lists as uncontrolled was recorded as "nobody knows".
+ *
+ * Written as "0" because that is PioneerRx's code for an ordinary item and the parser already reads
+ * it. One vocabulary, not two.
+ */
+export function directoryCodeOf(listed: string | null | undefined): string | null {
+  if (listed === null || listed === undefined) return null;
+  const code = listed.trim();
+  return code === "" ? "0" : code;
+}
+
 export type ScheduleAnswer = {
   schedule: LineSchedule | null;
   /** Whether this line is a Schedule II item: the question `invoice_lines.controlled` has always asked. */
