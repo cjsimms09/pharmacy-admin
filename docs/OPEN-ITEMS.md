@@ -374,9 +374,10 @@ about the real data.**
 
 ### Still open from this chain
 
-- **The two Veridikal reports have not been read yet.** Forwarded, and the sweep that can see them is
-  deployed. Until one is read end to end, the claim "Veridikal will come in automatically next time"
-  is proved only as far as the door.
+- **A live match is still unproved.** The chain is proved as far as posting; what nothing on file can
+  show is a voucher payment attaching to a September claim, because not one of the 149 is for a
+  September fill. The first remittance that is will settle it, and the stranded-payment alert says so
+  on the morning it does not.
 - **His four questions, unanswered:** can we reconcile Veridikal and RedSail against the claims as we
   hold them; does AR adjust properly; do we allocate to the right payer; and do we know what is still
   expected from another payer. The third has just been fixed and tested. The other three need
