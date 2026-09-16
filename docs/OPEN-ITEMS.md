@@ -245,6 +245,41 @@ Fixed and deployed the same morning: the 8am PioneerRx pull had been running at 
 14 September. **The deploy was made while he was connected** (two sessions from 10.133.63.137) — the
 check printed "nobody on it" whatever it found, and that line was read instead of the output.
 
+## Found 16 September — what nobody is sending
+
+OBSERVATION: six of the twenty-one documents the pharmacy expects have never delivered once. Bank
+statement (0 lines on file), Veridikal's voucher report, RedSail's voucher remittance, RxRescue's
+credit memo, IPD's statement of account, the card processing statement. Measured against every route
+the mailbox has ever filed and every table their readers fill, 16 September 2026.
+
+SHOULD BE: money earned is settled by a document naming what it settles. September carries $7,762.82
+of RedSail vouchers across 46 claims, and the plan pays each of those claims net of the voucher —
+only RedSail's remittance pays the voucher itself. A statement nobody sends is revenue that ages
+without anybody noticing, because an unpaid invoice looks exactly like an unbilled one.
+
+DIFFERENCE: four of the six are money with no settling document behind it. The other two — the bank
+statement and the card processing statement — are the outside proof that what the site says arrived
+actually arrived, and nothing reconciles without them.
+
+Now on `/expected`, judged against each document's own calendar so nothing is called late before its
+date. The readers for all six exist and have been rehearsed on samples; what is absent is the
+sending. Each needs somebody set up once:
+
+| What | Who | What it settles |
+|---|---|---|
+| **Bank statement** | Emprise | Everything. No outside proof of any deposit. Due in the first week of October for September. |
+| **RedSail voucher remittance** | RedSail | $7,762.82 of September vouchers, 46 claims. Cadence not settled — nobody has said how often RedSail remits. |
+| **Veridikal voucher report** | Veridikal | eVoucher and denial-conversion money. July's was rehearsed by hand to prove the reader; nothing has come through the mailbox. |
+| **IPD statement of account** | IPD | Which invoices a credit memo settled. Aytu's top-off credits usually cover the bill, so without it a paid invoice cannot be told from an unpaid one. Forwarded to the conversation so far, never to the mailbox. |
+| **RxRescue credit memo** | RxRescue | The top-off credit, banked as third-party cash on the memo's own day. |
+| **Card processing statement** | the card processor | The month's card fees — a real expense the books do not have — and the deposits to check the batches against. |
+
+**Card takings of days with no batch: settled, 16 September.** He refused the four emails outright
+("stop asking, not sending"), so the register now banks those days itself — $14,984.24 over 9/1, 9/2,
+9/12 and 9/15 — keyed `register-card|<day>`, with a batch arriving later taking the receipt over.
+The alert and the money-waiting row are gone. An alert that repeats a request already refused costs
+the list the only thing it has.
+
 ## Mine, not yet started
 
 This heading was deleted by accident on 14 September and restored the same day. I used it as the
