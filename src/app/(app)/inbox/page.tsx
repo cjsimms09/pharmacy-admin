@@ -4,6 +4,7 @@ import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
+import { whenLocal } from "@/lib/dates";
 import { hasMailPassword } from "@/lib/mailbox";
 import { allSuppliers, addressesOf, type Supplier } from "@/lib/suppliers-registry";
 import { PageHeader, Notice, Empty } from "@/components/ui";
@@ -119,7 +120,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
       <PageHeader
         tabs={familyTabs("arrivals", "/inbox")}
         title="Inbox"
-        subtitle={`${summarise(items)}${s.mail_last_sweep ? ` Last checked ${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC.` : ""}`}
+        subtitle={`${summarise(items)}${s.mail_last_sweep ? ` Last checked ${whenLocal(s.mail_last_sweep)}.` : ""}`}
         actions={
           <>
             <Link href="/settings/email" className="btn">Email settings</Link>
@@ -158,7 +159,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
             <>
               Nothing has arrived yet.{" "}
               {s.mail_last_sweep
-                ? `Last checked ${s.mail_last_sweep.replace("T", " ").slice(0, 16)} UTC.`
+                ? `Last checked ${whenLocal(s.mail_last_sweep)}.`
                 : "Use “Check for new mail now” to look."}
             </>
           ) : (

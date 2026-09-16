@@ -103,3 +103,26 @@ export function cqiPeriodAfter(periodStart: string) {
   const i = all.findIndex((p) => p.periodStart === periodStart);
   return i >= 0 && i + 1 < all.length ? all[i + 1] : null;
 }
+
+/**
+ * A stored moment, in the pharmacy's own clock.
+ *
+ * Every job's time is stored as ISO UTC, which is right for storing and wrong for reading: this pharmacy is six hours
+ * behind it. On 16 September both sessions building this site read "the mail sweep ran 12:58" and took it for lunchtime
+ * when it was 07:58 at the counter, and one of them reported the morning's PioneerRx pull as missed on the strength of
+ * it. A pharmacist reading the same screen has no reason to do better.
+ *
+ * So a time shown to somebody is shown in their day: "today 07:58", "yesterday 08:40", "15 Sep 08:40". The word tells
+ * them which day without arithmetic, which is the whole of what those screens are for.
+ */
+export function whenLocal(iso: string | null | undefined, now = new Date()): string {
+  if (!iso) return "never";
+  const at = new Date(iso);
+  if (!Number.isFinite(at.getTime())) return "never";
+  const clock = at.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const day = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const yesterday = new Date(now.getTime() - 86_400_000);
+  if (day(at) === day(now)) return `today ${clock}`;
+  if (day(at) === day(yesterday)) return `yesterday ${clock}`;
+  return `${at.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${clock}`;
+}
