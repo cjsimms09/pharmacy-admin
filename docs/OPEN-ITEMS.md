@@ -393,8 +393,26 @@ day a plan sends its own 835 under its own name.
 clean types, passing tests and correct arithmetic, and each was wrong about the world. Both were
 caught by running the thing against the live database — the first before it fired, the second before
 it wrote. Neither could have been caught by reading the code. So: *anything that will assert
-something to the owner is run against the live data before it is deployed, not after.* The shapes to
-look for are a check that cannot fail and a figure whose denominator is thin test data.
+something to the owner is run against the live data before it is deployed, not after.*
+
+### The class, stated properly — six instances in one day
+
+Session 2's sharpening, and it is better than mine. The shape is not merely "a check that cannot
+fail". It is **an item whose stated consequence is impossible** — the sentence claims a harm that the
+system's own behaviour rules out, and nobody asked whether the harm could occur.
+
+| The sentence | Why its consequence could not happen |
+|---|---|
+| An order minimum is missing, so that wholesaler gets no card on the Buying page | `fillToMinimums` has always given a no-minimum supplier its full ranked list, and says so |
+| Eighteen price files have never arrived | One of the eighteen was the largest catalogue on the site, found under the other name it goes by |
+| Fourteen rebate ladders missing, so prices are compared gross and an order could go to the wrong wholesaler | Eight of the fourteen have no item, invoice or delivery anywhere — none of their prices is in the comparison |
+| A receipt line: "41 of 54 confirmed received" | Not one invoice on the site has a receipt; a shortfall over controlled invoices was subtracted from a total over all of them |
+| "1,934 payments, $149,798.52 cannot be matched" | Every one was August's 78-fill test sample, or a payment against a fill the pharmacy had reversed |
+| "7 messages arrived and were turned away" | Five had nothing attached, which is what most email is; two had been fixed by a forward hours earlier |
+
+The test that catches all six, and none of them is caught by reading the code: **ask the sentence
+what it would take for it to be false, and then go and see whether the data can even produce that.**
+Three of the six are mine.
 
 ### Still open from this chain
 
