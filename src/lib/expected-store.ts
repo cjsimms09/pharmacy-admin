@@ -111,6 +111,39 @@ async function load(today: string): Promise<ExpectedNow> {
    * So: one row per supplier that actually sends invoices, and no row at all for the ones where the
    * receipt is the invoice — which is most of them, and none of them can ever raise anything here.
    */
+  /*
+   * What each sender sent that the site refused to take.
+   *
+   * Veridikal, 15 September 2026: both monthly reports arrived and both were refused for their
+   * declared type. This page then reported Veridikal as having never sent anything — the one
+   * conclusion guaranteed to send him after the wrong person. A refusal is a fault here, so it is
+   * read here, keyed on the address the sender writes from.
+   */
+  const refusedRows = await c.execute(
+    "select lower(from_address) as a, count(*) as n, max(received_at) as at, max(reason) as why from inbox_items where status != 'stored' group by lower(from_address)",
+  );
+  const refusedBy = (like: string) => {
+    let n = 0;
+    let at = "";
+    let why = "";
+    for (const r of refusedRows.rows) {
+      if (!String(r.a ?? "").includes(like)) continue;
+      n += num(r.n);
+      const t = str(r.at) ?? "";
+      if (t > at) {
+        at = t;
+        why = str(r.why) ?? "";
+      }
+    }
+    return n > 0 ? { count: n, last: at, why } : undefined;
+  };
+
+  /* RedSail's remittance arrives over SFTP as an 835, not by email, so it is counted where it lands. */
+  const [redsail, redsailDays] = await Promise.all([
+    c.execute("select max(received_on) as at, count(*) as n from claim_payments where lower(payer) like '%redsail%'"),
+    daysOf("select distinct received_on as d from claim_payments where lower(payer) like '%redsail%' and received_on is not null order by d desc limit 60"),
+  ]);
+
   const { invoicesStillOwed } = await import("./invoices");
   const owed = (await invoicesStillOwed()).filter((o) => !o.receiptIsTheInvoice && o.received > 0);
 
@@ -315,7 +348,8 @@ async function load(today: string): Promise<ExpectedNow> {
       lastAt: route("veridikal_report").at,
       everCount: route("veridikal_report").n,
       expected: true,
-      note: "July's was rehearsed by hand to prove the reader. Nothing has come through the mailbox.",
+      note: "July's was rehearsed by hand to prove the reader.",
+      refused: refusedBy("veridikal"),
       arrivals: route("veridikal_report").days,
       href: "/payers/waiting",
     },
@@ -415,12 +449,21 @@ async function load(today: string): Promise<ExpectedNow> {
       from: "RedSail",
       whyItMatters:
         "September carries $7,762.82 of RedSail vouchers across 46 claims. The plan pays the claim net of the voucher; only this remittance pays the voucher.",
+      /*
+       * Counted where it actually lands, which is not the mailbox.
+       *
+       * This row read "never arrived" while RedSail's remittance had come in over SFTP the evening
+       * before as an 835 — 46 payments, $2,011.64, banked. It was keyed on the copay_remit mail
+       * route because that is the door the site was built expecting them to use, and a row keyed on
+       * a door rather than on the money is a row that reports a door.
+       */
       cadence: { kind: "on_event", says: "cadence not settled — nobody has said how often RedSail remits" },
       graceDays: 0,
-      lastAt: route("copay_remit").at,
-      everCount: route("copay_remit").n,
+      lastAt: str(redsail.rows[0]?.at) ?? route("copay_remit").at,
+      everCount: num(redsail.rows[0]?.n) + route("copay_remit").n,
       expected: true,
-      arrivals: route("copay_remit").days,
+      note: "Arrives over SFTP as an 835 rather than by email, so it is counted from the payments it posts.",
+      arrivals: [...redsailDays, ...route("copay_remit").days],
       href: "/payers/waiting",
     },
     {

@@ -12,7 +12,7 @@ import { eq, like } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getSettings, setSetting } from "./settings";
 import { decryptText, encryptText, newId } from "./crypto";
-import { storeFile, ALLOWED_MIME, MAX_FILE_BYTES } from "./files";
+import { storeFile, ALLOWED_MIME, EXCEL_MIME, MAX_FILE_BYTES } from "./files";
 import { classify, parseSupplierRules, supplierFor, unknownSenderInvoiceReason, type RouteKind } from "./autoroute";
 import { importClaims } from "./claims";
 import { importPioneerCatalog } from "./suppliers";
@@ -47,8 +47,8 @@ const ATTACHMENT_MIME = new Set([
   "text/csv",
   "text/plain",
   "text/tab-separated-values",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  /* Every alias a mail server uses for a spreadsheet — see EXCEL_MIME, and what refusing one cost. */
+  ...EXCEL_MIME,
   "application/octet-stream", // Gmail sends some report types this way; the extension check below decides
 ]);
 const ATTACHMENT_EXT = /\.(pdf|csv|tsv|txt|xls|xlsx|jpg|jpeg|png)$/i;

@@ -52,13 +52,37 @@ export function extensionOf(name: string): string {
 
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
+/**
+ * Every way a mail server spells "this is a spreadsheet".
+ *
+ * `application/vnd.ms-excel` is the registered type and the only one this list held. Veridikal's
+ * server sends `application/x-msexcel`, a pre-registration alias that plenty of systems still emit,
+ * so on 15 September 2026 both of Veridikal's monthly reports — the eVoucher Program summary and the
+ * Denial Conversion Activity summary, the two documents the site had been reporting as never having
+ * arrived — were refused on the doorstep as "not a type this reads". They arrived. This turned them
+ * away, and then the expectations page told the owner Veridikal had never sent anything.
+ *
+ * A sender's declared type is a claim about a file, not a fact about it. The extension list is what
+ * actually gates, and the readers prove the contents; so the answer is to know the aliases rather
+ * than to trust one spelling.
+ */
+export const EXCEL_MIME = [
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/x-msexcel",
+  "application/x-ms-excel",
+  "application/x-excel",
+  "application/excel",
+  "application/vnd.msexcel",
+  "application/msexcel",
+];
+
 /** Report formats accepted from the swept mailbox in addition to the upload types above. */
 export const REPORT_MIME = new Set([
   "text/csv",
   "text/plain",
   "text/tab-separated-values",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ...EXCEL_MIME,
   "application/octet-stream",
 ]);
 

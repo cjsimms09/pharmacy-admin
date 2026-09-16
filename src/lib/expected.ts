@@ -121,6 +121,18 @@ export type Expectation = {
    * improve on knowing exactly how many documents are outstanding.
    */
   owing?: { outstanding: number; of: number; says: string };
+  /**
+   * Messages this sender sent that the site turned away at the door.
+   *
+   * On 15 September 2026 Veridikal sent both of its monthly reports. The mailbox refused both —
+   * .xlsx on the extension list, `application/x-msexcel` not on the type list — and this page then
+   * told the owner Veridikal had never sent anything. Two true statements, one screen, and the
+   * conclusion it invited was to go and chase a sender who had done nothing wrong.
+   *
+   * A document that arrived and was refused is the opposite of one that never came: the fault is
+   * here, and nobody outside this building can fix it. It must never be able to read as absence.
+   */
+  refused?: { count: number; last: string; why: string };
   href: string;
 };
 
@@ -272,6 +284,23 @@ export function judge(e: Expectation, today: string): Judged {
 
   if (!e.expected) {
     return { ...base, state: "not_expected", says: e.note ?? "Not expected here, so nothing is waiting on it." };
+  }
+
+  /*
+   * Turned away at the door beats every other verdict, including "never arrived".
+   *
+   * Checked before anything else because it is the only state whose remedy is here rather than with
+   * the sender, and because the verdict it displaces — absence — would send him to chase somebody
+   * who did their part.
+   */
+  if (e.refused && e.refused.count > 0) {
+    return {
+      ...base,
+      state: "overdue",
+      says:
+        `${e.from} sent ${e.refused.count === 1 ? "this" : `${e.refused.count} of these`}, most recently ${e.refused.last.slice(0, 10)}, ` +
+        `and the site turned ${e.refused.count === 1 ? "it" : "them"} away: ${e.refused.why} Nothing is wrong at their end.`,
+    };
   }
 
   /*

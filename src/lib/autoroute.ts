@@ -20,7 +20,7 @@ import { looksLikeAccessHealthPayment } from "./accesshealth-payment";
 import { looksLikeSalesByPayment } from "./sales-by-payment";
 import { looksLikeRebateReport } from "./rebate-report";
 import { isDrillDownText } from "./drill-down-read";
-import { ALLOWED_MIME } from "./files";
+import { ALLOWED_MIME, EXCEL_MIME } from "./files";
 
 /**
  * Working out what an emailed report actually is, and loading it.
@@ -525,8 +525,15 @@ const REPORT_MIME = new Set([
   "text/csv",
   "text/plain",
   "text/tab-separated-values",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  /*
+   * Every alias a mail server uses for a spreadsheet, not just the registered one.
+   *
+   * This is the gate that actually refused Veridikal's two monthly reports on 15 September 2026:
+   * .xlsx on the extension list, and `application/x-msexcel` — a pre-registration alias — not on
+   * this one. See EXCEL_MIME in files.ts. Both reports were turned away while the site told the
+   * owner Veridikal had never sent anything.
+   */
+  ...EXCEL_MIME,
   "application/octet-stream",
 ]);
 const TEXT_MIME = new Set(["text/plain", "text/csv", "text/tab-separated-values", "application/octet-stream"]);
