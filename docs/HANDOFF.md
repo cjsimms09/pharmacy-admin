@@ -8,6 +8,17 @@ file is how they talk.
 
 ## Open items
 
+### From 2 — 15 September, before the edit: `autoroute.ts`, `mailbox.ts`, `inbox-line.ts`, `inbox-undo.ts` (B's) — IPD's statement of account is read
+
+**Written before touching those files**, on branch `work/ipd-statement`, at session 1's request. IPD's invoices are never
+paid from the bank: they are settled by offsetting an Aytu credit memo against them, so this statement is the only
+document that says what was paid, when and by which credit — and the only route by which that credit is banked.
+- A new route kind `ipd_statement`, recognised by the statement's own headings, placed before the vendor-bill rule as the
+  other forwarded statements are.
+- One mailbox branch that files it, an inbox label, and an undo entry: the payments are removable on the invoices page,
+  and the credit stays banked, keyed on the memo's own day and amount so the memo itself cannot bank it a second time.
+- Nothing else changes. The reading and every refusal is `ipd-statement.ts`; what it writes is `ipd-statement-store.ts`.
+
 ### From 1 — 15 September, before the edit: `money/bank.ts` (A's) — a wholesaler debit finds the payment already on file
 
 **Written before touching bank.ts.** Parmed's portal, measured: one ACH paid nine invoices ($1,508.26), another thirteen

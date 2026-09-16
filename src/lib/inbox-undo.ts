@@ -153,6 +153,14 @@ const EFFECTS: Record<string, KindEffect> = {
     leaves:
       "payments against those fills, which this site can take back out. No deposit: the payer payment report and the EFT notice bank that money. If the same EFT's 835 is also on file, it posted nothing while these rows stood — re-route it afterwards so its claims are posted again.",
   },
+  ipd_statement: {
+    short: "settles invoices, banks the credit",
+    writes: "one supplier payment per settlement, with what it put against each invoice, and the Aytu credit banked on the memo's own day; no revenue",
+    reversal: "kept",
+    leaves:
+      "the payments stay, and each can be removed on the invoices page, which frees the invoices it paid. The credit stays banked, keyed on the memo's day and amount — so the memo itself, read afterwards, does not bank it again.",
+    at: { href: "/inventory/invoices", label: "Invoices" },
+  },
   veridikal_report: {
     short: "pays vouchers, banks nothing",
     writes: "a payment against each claim the Veridikal summary names, counting as revenue only what the claim did not already carry; nothing on the cash account",
