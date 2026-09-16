@@ -177,6 +177,32 @@ describe("what the sender's own arrivals say, against what was declared", () => 
     assert.match(owing.says, /4 deliveries of 11 with no invoice behind them/);
   });
 
+  test("a document that arrived and was refused never reads as one that never came", () => {
+    /*
+     * Veridikal sent both monthly reports on 15 September 2026 and the mailbox refused both for the
+     * type their server declared. This page then said Veridikal had never sent anything: two true
+     * sentences on one screen, inviting the owner to chase a sender who had done their part. The
+     * fault is here, so it outranks every other verdict — including "never arrived", which is what
+     * the row would otherwise be, since nothing ever landed.
+     */
+    const r = judge(
+      exp({
+        label: "Veridikal voucher report",
+        from: "Veridikal",
+        lastAt: null,
+        everCount: 0,
+        refused: { count: 2, last: "2026-09-15T21:08:00.000Z", why: "Nothing on this message was a type this reads." },
+      }),
+      "2026-09-16",
+    );
+    assert.equal(r.state, "overdue");
+    assert.doesNotMatch(r.says, /Never arrived/);
+    assert.match(r.says, /Nothing is wrong at their end/);
+    /* The remedy has to be the one that works: the sweep skips a message id it has already recorded. */
+    assert.match(r.says, /Forward the message/);
+    assert.match(r.says, /marking the original unread will not work/);
+  });
+
   test("too little history leaves the declared cadence in place, and says so", () => {
     const r = judge(exp({ arrivals: ["2026-08-04", "2026-09-04"], lastAt: "2026-09-04", everCount: 2 }), "2026-09-16");
     assert.equal(r.basis, "declared");

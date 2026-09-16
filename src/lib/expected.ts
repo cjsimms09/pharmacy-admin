@@ -299,7 +299,18 @@ export function judge(e: Expectation, today: string): Judged {
       state: "overdue",
       says:
         `${e.from} sent ${e.refused.count === 1 ? "this" : `${e.refused.count} of these`}, most recently ${e.refused.last.slice(0, 10)}, ` +
-        `and the site turned ${e.refused.count === 1 ? "it" : "them"} away: ${e.refused.why} Nothing is wrong at their end.`,
+        `and the site turned ${e.refused.count === 1 ? "it" : "them"} away: ${e.refused.why} Nothing is wrong at their end. ` +
+        /*
+         * The remedy, on the row, because the obvious one does not work.
+         *
+         * A refused attachment is never stored — the refusal happens before storing — so there are
+         * no bytes to read again, and the sweep reads only unread mail AND skips any message id it
+         * has already recorded. Marking the original unread therefore does nothing at all, which is
+         * exactly the sort of instruction that costs somebody an afternoon. A forward carries a new
+         * message id, so it comes in clean and is read with today's rules.
+         */
+        `Forward the message to the pharmacy mailbox again and it will be read — marking the original unread will not work, ` +
+        `because the sweep has already recorded that message.`,
     };
   }
 
