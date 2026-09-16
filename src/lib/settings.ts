@@ -178,6 +178,17 @@ export const SETTING_KEYS = [
    */
   "receipt_record_kept_in",
   /*
+   * Where the executed DEA Form 222 copy 3s are kept — the paper file, or CSOS.
+   *
+   * 21 CFR 1305.17(a),(c) is the one requirement on the invoice panel this system cannot satisfy by
+   * doing its own job well: an order form is a different record from the invoice for the same
+   * goods, and none of them arrive here. The line therefore sat at "attention" permanently, which
+   * teaches that the whole panel is decorative. This records what the pharmacy actually does, so the
+   * line can report it. It is his statement and nothing more — the site cannot see a filing cabinet,
+   * so it never claims the copies are complete, only where they are and what must be producible.
+   */
+  "order_forms_kept_in",
+  /*
    * How this pharmacy actually works, on the handful of points its manual depends on — one JSON
    * row rather than a column per question, because the list changes as the manual does and a
    * migration per question is a reason not to ask one. See practice-decisions.ts.
