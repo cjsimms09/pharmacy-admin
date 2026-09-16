@@ -8,7 +8,8 @@ import { dueDateFrom } from "../src/lib/invoice-due-date";
  */
 const parmed = [
   "ParMed Pharmaceuticals                          INVOICE",
-  "INVOICE NO   7480000001      INVOICE DATE   09/11/2026",
+  /* An invented number that does not wear a real supplier's shape: 748… is how Parmed's own numbering begins. */
+  "INVOICE NO   T-748001      INVOICE DATE   09/11/2026",
   "PAYMENT TERMS : Semi mthly 15/EOM Due 10/25 NM",
   "DUE DATE     10/10/2026",
   "TOTAL DUE                                        86.87",
