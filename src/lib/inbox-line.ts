@@ -77,6 +77,8 @@ const KIND_WORDS: Record<string, string> = {
   mck_returns: "McKesson returns and credits",
   report_summary: "A totals sheet",
   /* One card settlement batch: counter takings, banked as cash only. See card-batch.ts. */
+  /* Bags, vials and labels: spending, not a drug purchase. See rx-systems-invoice.ts. */
+  supplies_invoice: "Pharmacy supplies invoice",
   card_batch: "Credit card batch",
   /* The month's card fees, booked as a bill; its deposits only checked against the batches. See card-statement.ts. */
   card_statement: "Card processing statement",

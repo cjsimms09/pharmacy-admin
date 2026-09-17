@@ -438,3 +438,75 @@ export async function bookPostage(
   });
   return { id, duplicate: false, says: `${p.says} — booked to ${category.name}.` };
 }
+
+/**
+ * A supplies invoice booked as spending, which is what it is.
+ *
+ * The owner, 16 September 2026: *"Rx system is for pharmacy supplies. Not for drugs"* and *"It just
+ * needs to be allocated as spending... it is pharmacy supply spending (bags, vials, labels)"*.
+ *
+ * Filed as a supplier invoice it would land in **Drug purchases** — cost of goods — which overstates
+ * COGS, understates gross margin on everything that divides by it, and puts carrier bags in the
+ * archive 21 CFR 1304.04 governs. It is an operating expense, and the category already exists with
+ * the right description: "Vials, caps, labels, bags, unit-dose packaging, refrigerant."
+ *
+ * ── The freight is read, not deducted on somebody's say-so ──
+ *
+ * Their page says it itself: "Freight has been added to your invoice. If the invoice is paid within
+ * 30 days, you may deduct the freight amount from the invoice total." So the total is not the
+ * spending, and the goods are. The owner said the same of the first one — "406 is freight that gets
+ * refunded.. so just use the 1715" — and the document agrees with him, which is why this reads the
+ * page rather than carrying his sentence around as a rule.
+ *
+ * Nothing is booked unless goods plus freight plus extras equal the invoice's own total to the cent
+ * (`readRxSystemsInvoice`). The freight is on the note, so an accountant can tie the bill to the
+ * paper without opening it, and can see the choice rather than having to infer it.
+ */
+export async function bookSuppliesInvoice(
+  i: import("./rx-systems-invoice").RxSystemsInvoice,
+  ctx: { vendorName: string; from: string; documentId: string | null },
+): Promise<{ id: string | null; duplicate: boolean; says: string }> {
+  const { rxSystemsBillNote } = await import("./rx-systems-invoice");
+  const key = `RXS-${i.invoiceNumber}`;
+  const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const already = await db.query.expenses.findFirst({ where: eq(schema.expenses.invoiceNumber, key) });
+  if (already) {
+    return { id: already.id, duplicate: true, says: `${ctx.vendorName} invoice ${i.invoiceNumber} is already on the books, so nothing was added.` };
+  }
+
+  const all = await vendors(true);
+  const vendor = vendorForSender(ctx.from, all) ?? all.find((v) => v.name.trim().toLowerCase() === ctx.vendorName.trim().toLowerCase()) ?? null;
+  const category =
+    (vendor?.categoryId ? await db.query.expenseCategories.findFirst({ where: eq(schema.expenseCategories.id, vendor.categoryId) }) : null) ??
+    (await db.query.expenseCategories.findFirst({ where: eq(schema.expenseCategories.name, "Pharmacy supplies") }));
+  if (!category) {
+    return { id: null, duplicate: false, says: `${ctx.vendorName} invoice ${i.invoiceNumber} could not be booked: no Pharmacy supplies category exists.` };
+  }
+
+  const id = newId();
+  await db.insert(schema.expenses).values({
+    id,
+    categoryId: category.id,
+    vendorId: vendor?.id ?? null,
+    invoiceNumber: key,
+    invoiceDate: i.invoiceDate,
+    /* A bill, not a payment: nothing here knows when it was paid, and the bank line will say. */
+    paidOn: null,
+    amountCents: i.goodsCents,
+    description: `${ctx.vendorName} — pharmacy supplies, invoice ${i.invoiceNumber}`,
+    notes: rxSystemsBillNote(i),
+    documentId: ctx.documentId,
+    source: "email",
+    /* The figures are the supplier's own and the page's arithmetic ties, so it stands as read. */
+    status: "confirmed",
+    createdBy: "the mail sweep",
+  });
+  return {
+    id,
+    duplicate: false,
+    says:
+      `${ctx.vendorName} invoice ${i.invoiceNumber} of ${i.invoiceDate}: ${money(i.goodsCents)} booked to ${category.name}. ` +
+      `The invoice totals ${money(i.totalCents)}; the ${money(i.freightCents)} of freight is deductible on their own terms and is not counted as spending.`,
+  };
+}

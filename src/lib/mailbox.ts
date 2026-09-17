@@ -4,10 +4,11 @@ import path from "node:path";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { readPostageEmail } from "./postage-email";
+import { looksLikeRxSystemsInvoice, readRxSystemsInvoice } from "./rx-systems-invoice";
 import { bankEftNotice } from "./health-mart-eft-store";
 import { bankCardBatch } from "./card-batch-store";
 import { readZip, guessType } from "./zip-read";
-import { bookPostage } from "./expenses";
+import { bookPostage, bookSuppliesInvoice } from "./expenses";
 import { eq, like, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getSettings, setSetting } from "./settings";
@@ -838,7 +839,34 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
              */
             let routedAs = "unrecognised";
             let routeResult: string | null = null;
-            if ((s.mail_auto_import ?? "").toLowerCase() !== "yes") {
+            /*
+             * A supplies invoice is spending, and goes to the books rather than the invoice archive.
+             *
+             * The owner, of the Rx Systems invoice that landed here as "a PDF this does not
+             * recognise": "It just needs to be allocated as spending. It is not a drug invoice..
+             * these invoices need to calculated for money purposes.. it is pharmacy supply spending
+             * (bags, vials, labels)".
+             *
+             * It could never have been recognised: the unknown-sender invoice test requires item
+             * lines carrying an NDC and a price, which is right for a wholesaler and impossible for
+             * a company that sells bags. So every supplies invoice fell into the general vault and
+             * none of that spending reached the account.
+             *
+             * Checked before the general reader because the general reader has nothing to say about
+             * it, and booked only when the page's own arithmetic ties — see `readRxSystemsInvoice`.
+             */
+            if (pdfWords && looksLikeRxSystemsInvoice(pdfWords, from)) {
+              const read = readRxSystemsInvoice(pdfWords);
+              if (read.ok) {
+                const booked = await bookSuppliesInvoice(read.invoice, { vendorName: "Rx Systems", from, documentId: docId });
+                routedAs = "supplies_invoice";
+                routeResult = booked.says;
+                if (!booked.duplicate && booked.id) result.imported++;
+              } else {
+                routedAs = "supplies_invoice";
+                routeResult = `A supplies invoice this could not read: ${read.why} Filed as a document; enter it by hand on the Expenses page.`;
+              }
+            } else if ((s.mail_auto_import ?? "").toLowerCase() !== "yes") {
               // Filed, and the line says why it went no further — otherwise a scheduled report that
               // arrives with the switch off looks identical to one that arrived and failed.
               routeResult = "Filed only: automatic loading is switched off under Settings → Email.";
@@ -1479,6 +1507,27 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
       return null;
     }
   })();
+  /*
+   * A supplies invoice, on this path too, and first.
+   *
+   * This is the path that exists for a document already in the vault, which is exactly where the
+   * Rx Systems invoices had been landing — one of them nineteen times. The sweep books them on
+   * arrival now, but the ones already filed never will be, because the message-id fix stops the
+   * message being read a second time. Without this they would have to be typed in by hand, and the
+   * whole point of finding them was that nobody was typing them in.
+   */
+  if (words && looksLikeRxSystemsInvoice(words, from)) {
+    const read = readRxSystemsInvoice(words);
+    if (!read.ok) return `This reads as a supplies invoice and its figures could not be trusted: ${read.why} Nothing was booked; enter it on the Expenses page.`;
+    const booked = await bookSuppliesInvoice(read.invoice, { vendorName: "Rx Systems", from, documentId: doc.id });
+    await db
+      .update(schema.inboxItems)
+      .set({ routedAs: "supplies_invoice", routeResult: booked.says, reason: `Read again ${stamp}: a pharmacy supplies invoice, booked as spending rather than filed as a drug invoice.` })
+      .where(eq(schema.inboxItems.id, itemId));
+    await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: doc.id, details: booked.says });
+    return booked.says;
+  }
+
   const kind = supplierName ? classifySupplierDocument(words, fileName, subject) : { kind: "unknown" as const, why: "" };
   if (kind.kind === "statement" || kind.kind === "rebate_report" || kind.kind === "credit_memo") {
     const word = kind.kind === "rebate_report" ? "rebate breakdown" : kind.kind === "credit_memo" ? "credit memo" : "statement of account";
