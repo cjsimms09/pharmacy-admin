@@ -14,17 +14,22 @@ async function main() {
   const rows = await planCandidates();
   const can = rows.filter((r) => r.proposed);
   const cannot = rows.filter((r) => !r.proposed);
-  const fills = (r: (typeof rows)[number]) => Number((r as unknown as { fills?: number }).fills ?? 0);
   console.log(`plans in the register: ${rows.length}`);
-  console.log(`with a proposal the site can defend: ${can.length}, covering ${can.reduce((n, r) => n + fills(r), 0)} fills`);
-  console.log(`needing a Form 5500 or the plan document: ${cannot.length}, covering ${cannot.reduce((n, r) => n + fills(r), 0)} fills`);
+  console.log(`with a proposal the site can defend: ${can.length}`);
+  console.log(`needing a Form 5500 or the plan document: ${cannot.length}`);
   const byClass = new Map<string, number>();
   for (const r of can) byClass.set(String(r.proposed), (byClass.get(String(r.proposed)) ?? 0) + 1);
   console.log("\nproposed classes:");
   for (const [k, n] of [...byClass].sort((a, b) => b[1] - a[1])) console.log(`  ${n} × ${k}`);
-  console.log("\nthe ten biggest proposals:");
-  for (const r of [...can].sort((a, b) => fills(b) - fills(a)).slice(0, 10)) {
-    console.log(`  ${String(fills(r)).padStart(5)} fills  ${String(r.name ?? "").slice(0, 32).padEnd(32)} -> ${r.proposed}  (${String(r.proposedSource ?? "")})`);
+  /*
+   * The payer label rather than a name, because a plan group has no name — only the BIN, the PCN and
+   * whatever the payer calls itself. The first version of this printed `r.name`, which does not
+   * exist on the type: it typechecked nowhere because a probe run through tsx is not typechecked,
+   * and it printed blanks. Hence the field list being read rather than assumed this time.
+   */
+  console.log("\nten proposals, with what produced each:");
+  for (const r of can.slice(0, 10)) {
+    console.log(`  ${String(r.payerLabel ?? r.pbmName ?? "(unlabelled)").slice(0, 34).padEnd(34)} -> ${r.proposed}  (${String(r.proposedSource ?? "")})`);
   }
 }
 

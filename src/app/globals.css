@@ -25,8 +25,17 @@
   --color-crit: #b3261e;
   --color-crit-soft: #fbe9e7;
 
-  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", ui-monospace, monospace;
+  /*
+    The faces are loaded in layout.tsx and arrive as these two variables.
+
+    They were previously named here as bare family names — "Inter", "JetBrains Mono" — with nothing
+    anywhere loading either, so every page fell through to Segoe UI while two Inter-only character
+    variants sat switched on below doing nothing. Named through the variables now, so the stylesheet
+    cannot ask for a face that is not being loaded: if the import in layout.tsx goes, the variable
+    goes with it and the fallback is what renders.
+  */
+  --font-sans: var(--font-inter), "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-jetbrains), "Cascadia Code", "Consolas", ui-monospace, monospace;
 
   /*
     The type scale, read from a desk chair rather than leaned into.
