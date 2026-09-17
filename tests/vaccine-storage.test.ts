@@ -24,9 +24,28 @@ describe("what the cold chain policy commits the pharmacy to", () => {
   test("the logger's certificate is held, with the interval the certificate itself names", () => {
     const t = text();
     assert.match(t, /certificate of calibration testing traceable to a recognised standard/);
-    assert.match(t, /the expiry the certificate itself names are recorded/);
+    /*
+     * "Where the certificate states one" is load-bearing. The owner, 16 September: "I don't know
+     * when it ends.. don't specific in the P&P leave it vague and compliant." Some certificates
+     * give an expiry date and some give the manufacturer's recommended interval, so a policy that
+     * assumes the first is one this pharmacy can fail on paperwork it never received.
+     */
+    assert.match(t, /kept and can be produced on request/);
+    assert.match(t, /confirmed at the annual vaccine storage review/);
+    /*
+     * REGRESSION: the manual must not describe a practice nobody performs.
+     *
+     * An earlier draft said the dates "are recorded against that logger" and the certificate "is
+     * filed there", both as statements of fact, on a day when the system held neither. A manual is
+     * the pharmacy's own evidence against itself, so it states the requirement — a certificate,
+     * kept and producible — and describes the system's part exactly: recorded where known, said to
+     * be unknown where not.
+     */
+    assert.doesNotMatch(t, /the certificate itself is filed there/);
+    assert.match(t, /where they are not, the record says so rather than implying otherwise/);
     /* No interval is invented: the certificate says how long it is good for, not this manual. */
     assert.doesNotMatch(t, /every (one|two|1|2) years?/i);
+    assert.doesNotMatch(t, /biennial|annually recalibrat/i);
   });
 
   test("an excursion is quarantined and not discarded, which is the step that protects a patient", () => {

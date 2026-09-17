@@ -92,6 +92,28 @@ describe("whether the annual statement can honestly be signed", () => {
     assert.doesNotMatch(r.why, /Out of calibration/);
   });
 
+  test("REGRESSION: a calibration date with no expiry does not block the statement", () => {
+    /*
+     * The owner, 16 September 2026, having given the fridge logger's calibration date: "I don't know
+     * when it ends.. don't specific in the P&P leave it vague and compliant."
+     *
+     * Some certificates state an expiry and some state an interval, and he may simply not have the
+     * paper to hand. None of those is the same as holding no certificate. This used to block, which
+     * made a line nobody could ever clear — the fault this file exists among. The statement is the
+     * pharmacist-in-charge's own, made at a review, about a logger he can go and look at: the site's
+     * job is to put the date in front of him, not to refuse him the pen.
+     */
+    const dated = { name: "Pharmacy Fridge", tracked: true, calibratedOn: "2026-07-01" };
+    const r = canAttestCalibration([dated], TODAY);
+    assert.equal(r.ok, true);
+    assert.match(r.why, /no expiry recorded/);
+    assert.match(r.why, /check the certificate itself/);
+    assert.deepEqual(r.unrecorded, [], "a date on file is not 'no certificate'");
+    /* And no period is invented anywhere: two years is the common interval and still a guess. */
+    assert.doesNotMatch(r.why, /two years|24 months|2 years/i);
+    assert.doesNotMatch(calibration(dated, TODAY).says, /two years|24 months|2 years/i);
+  });
+
   test("with no logger tracked at all it refuses rather than passing vacuously", () => {
     /* A check that passes because there is nothing to check is the fault this codebase is named for. */
     const r = canAttestCalibration([], TODAY);

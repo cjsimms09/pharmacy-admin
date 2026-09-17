@@ -69,10 +69,24 @@ export function calibration(
   }
 
   if (!expires) {
+    /*
+     * A calibration date with no expiry beside it is a normal certificate, not a gap.
+     *
+     * Some certificates carry an expiry date; others carry only the calibration date and the
+     * manufacturer's recommended interval, and the owner may hold one of those or may simply not
+     * have the paper to hand — on 16 September 2026 he had the date and said plainly, "I don't know
+     * when it ends". The site must not invent a period: two years is the common interval and it is
+     * still a guess, and a guessed expiry shown as fact is worse than a date and an honest silence.
+     *
+     * Nor may it hold the line red for ever, which is the fault this file exists among. So it says
+     * what it knows, and points at the annual review — which is precisely the moment a person is
+     * asked to confirm the logger is within its calibration period, and the one place the question
+     * can actually be answered.
+     */
     return {
       state: "no_expiry",
       daysLeft: null,
-      says: `Calibrated ${on}, but the certificate's expiry is not recorded, so nothing here can say whether it is still current.`,
+      says: `Calibrated ${on}. The certificate's expiry is not recorded here — some state one and some give an interval instead — so whether it is still current is confirmed at the annual vaccine storage review rather than computed.`,
     };
   }
 
@@ -120,10 +134,25 @@ export function canAttestCalibration(
   const lapsed: string[] = [];
   const unrecorded: string[] = [];
 
+  /*
+   * A logger with a calibration date and no expiry does not block the statement.
+   *
+   * It used to, and that was wrong in the direction this codebase keeps getting wrong: it made a
+   * line nobody could ever clear. The pharmacy may hold a certificate that states an interval
+   * rather than a date, and the owner may simply not have the paper to hand — he had the date and
+   * said "I don't know when it ends". Neither is the same as having no certificate at all.
+   *
+   * The statement being signed is the pharmacist-in-charge's own, made at a review, about a logger
+   * he can go and look at. The site's job there is to put the calibration date in front of him, not
+   * to refuse him the pen. What it still refuses is a logger with nothing recorded, and one whose
+   * certificate has demonstrably run out.
+   */
+  const noExpiry: string[] = [];
   for (const s of logging) {
     const c = calibration(s, today);
     if (c.state === "lapsed") lapsed.push(s.name ?? "a logger");
-    if (c.state === "unrecorded" || c.state === "no_expiry") unrecorded.push(s.name ?? "a logger");
+    if (c.state === "unrecorded") unrecorded.push(s.name ?? "a logger");
+    if (c.state === "no_expiry") noExpiry.push(s.name ?? "a logger");
   }
 
   if (logging.length === 0) {
@@ -136,6 +165,16 @@ export function canAttestCalibration(
     return {
       ok: false,
       why: `No certificate on file for ${unrecorded.join(", ")}. The statement says the logger is within its calibration period; nothing here can show that.`,
+      lapsed,
+      unrecorded,
+    };
+  }
+  if (noExpiry.length > 0) {
+    return {
+      ok: true,
+      why:
+        `Calibration dates are on file. ${noExpiry.join(", ")} ${noExpiry.length === 1 ? "has" : "have"} no expiry recorded — ` +
+        "check the certificate itself when you sign this, since that is what states how long the calibration runs.",
       lapsed,
       unrecorded,
     };
