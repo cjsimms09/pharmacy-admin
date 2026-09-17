@@ -213,6 +213,34 @@ async function main() {
   );
   out += `${routed.length} payers have billed inside the books. ${routed.filter((r) => r.state === "captured").length} have had money settle a claim; `;
   out += `${owed.length} have had none, ${money(owed.reduce((n, r) => n + Number(r.billed), 0))} billed between them.\n\n`;
+
+  /*
+   * How old the unsettled billing is, because without it that figure reads as a hole.
+   *
+   * On 17 September the register said 57 payers and $206,361.44 with nothing settling them, which
+   * is the kind of number that ruins an evening. Measured by age, every unsettled claim was filled
+   * within the last thirty days, and PBMs pay on a cycle of about that length: it is lag, not loss.
+   *
+   * And the honest half, which matters more. The books opened on 1 September, so on the day this was
+   * written nothing *could* be older than sixteen days — the age test cannot yet fail, which makes
+   * it no evidence at all rather than reassuring evidence. It is written here so the sentence says
+   * what it is worth, and so that when something does age past a payer's own cycle in October, the
+   * difference is visible rather than buried in a total that always looked like this.
+   */
+  const ageRows = (await q(
+    `SELECT max(julianday('now') - julianday(c.date_filled)) AS oldest_days,
+            count(*) AS claims
+       FROM claims c
+       LEFT JOIN claim_payments p ON p.claim_id = c.id AND p.out_of_books = 0
+      WHERE c.status = 'paid' AND c.date_filled >= '${SITE_STARTS_ON}' AND p.id IS NULL`,
+  )) as { oldest_days: number | null; claims: number }[];
+  const oldest = Math.floor(Number(ageRows[0]?.oldest_days ?? 0));
+  const booksDays = Math.floor((Date.now() - Date.parse(`${SITE_STARTS_ON}T00:00:00Z`)) / 86_400_000);
+  out += `The oldest claim with nothing against it was filled ${oldest} day${oldest === 1 ? "" : "s"} ago, `;
+  out += `and the books have been open ${booksDays}. `;
+  out += oldest >= booksDays - 1
+    ? `Nothing has aged beyond the books themselves, so this says nothing yet about whether a payer is late — there has not been time for one to be. It becomes a real test once the books are older than a payer's own payment cycle.\n\n`
+    : `A payer whose cycle is shorter than that has had time to pay and has not.\n\n`;
   out += `| BIN | Payer | Claims | Billed | Received | Through | State | What should settle it |\n|---|---|---|---|---|---|---|---|\n`;
   for (const r of routed) {
     out += `| ${r.bin ?? "(none)"} | ${String(r.payer ?? "—").slice(0, 30)} | ${r.claims} | ${money(Number(r.billed))} | ${money(Number(r.received))} | ${r.sources ?? "—"} | ${r.state} | ${r.note} |\n`;

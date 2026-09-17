@@ -1,6 +1,6 @@
 # Every way money reaches the pharmacy, and whether it is traced
 
-*Generated 2026-09-16 00:23 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
+*Generated 2026-09-17 16:49 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
 
 The register behind `docs/MONEY-TRACE.md`. A channel with nothing against it has either never paid or is not being read, and those are different — the second one loses money silently.
 
@@ -8,16 +8,17 @@ The register behind `docs/MONEY-TRACE.md`. A channel with nothing against it has
 
 | Channel | Payments | Amount | Unmatched | Last |
 |---|---|---|---|---|
-| plan | 11685 | $1,063,493.11 | 11605 | 2026-09-11 |
-| mtf | 35 | $8,330.45 | 35 | 2026-09-15 |
+| plan | 11731 | $1,065,504.75 | 11651 | 2026-09-15 |
+| copay_card | 103 | $8,848.91 | 103 | 2026-08-27 |
+| mtf | 36 | $8,427.34 | 36 | 2026-09-16 |
 
 ## Cash receipts, by kind
 
 | Kind | Receipts | Amount |
 |---|---|---|
-| third_party | 106 | $1,176,172.87 |
-| patient | 8 | $34,112.41 |
-| rebate | 1 | $9,706.52 |
+| third_party | 108 | $1,187,613.09 |
+| patient | 25 | $55,544.48 |
+| rebate | 2 | $20,403.76 |
 
 ## Channels known to exist and not in the tables above
 

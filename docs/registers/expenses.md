@@ -1,6 +1,6 @@
 # Every cost the business has, and whether the site sees it
 
-*Generated 2026-09-16 00:23 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
+*Generated 2026-09-17 16:49 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
 
 One line per expense category. A category with no money against it is in one of four states and the account cannot tell them apart on its own — which is why a bottom line of nearly break-even could sit above costs that had simply not arrived.
 
@@ -12,7 +12,7 @@ One line per expense category. A category with no money against it is in one of 
 | Owner draws and distributions | balance_sheet | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Drug purchases | cost_of_goods | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Returns and credits | cost_of_goods | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
-| Wholesaler rebates | cost_of_goods | 1 | $-9,706.52 | captured |  |
+| Wholesaler rebates | cost_of_goods | 2 | $-20,403.76 | captured |  |
 | Accreditation and compliance | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Bad debt | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Card processing and bank fees | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
@@ -35,10 +35,11 @@ One line per expense category. A category with no money against it is in one of 
 | Telephone and internet | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Utilities | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Wages and salaries | operating | 0 (+1 standing) | $0.00 | captured | standing cost, $45,000 a month, fully loaded |
-| Chargebacks and audit recoveries | revenue_offset | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
+| Chargebacks and audit recoveries | revenue_offset | 6 | $4.51 | captured |  |
 | DIR fees and price concessions | revenue_offset | 0 | $0.00 | **not captured** | arrives months later, retroactively per claim, entered by hand |
+| PSAO fees | revenue_offset | 8 | $142.20 | captured |  |
 
-**24 of 31 categories are unresolved** — nobody has said whether they exist, are coming, or do not apply:
+**23 of 32 categories are unresolved** — nobody has said whether they exist, are coming, or do not apply:
 
 - Equipment and improvements bought
 - Income tax payments
@@ -62,5 +63,4 @@ One line per expense category. A category with no money against it is in one of 
 - Repairs and maintenance
 - Telephone and internet
 - Utilities
-- Chargebacks and audit recoveries
 - DIR fees and price concessions
