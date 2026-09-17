@@ -112,30 +112,44 @@ async function load(today: string): Promise<ExpectedNow> {
    * receipt is the invoice — which is most of them, and none of them can ever raise anything here.
    */
   /*
-   * What each sender sent that the site refused to take.
+   * What each sender sent that the site refused to take — and still has not got.
    *
    * Veridikal, 15 September 2026: both monthly reports arrived and both were refused for their
-   * declared type. This page then reported Veridikal as having never sent anything — the one
-   * conclusion guaranteed to send him after the wrong person. A refusal is a fault here, so it is
-   * read here, keyed on the address the sender writes from.
+   * declared type. This page then reported Veridikal as having never sent anything, which is the one
+   * conclusion guaranteed to send him after the wrong person.
+   *
+   * ── And then the opposite fault, on the same row, the next morning ──
+   *
+   * He forwarded both. They were read: 62 eVoucher rows and 41 conversions, $8,848.91 between them,
+   * on the site and reconciled. This row went on saying "the site turned them away... forward the
+   * message again" — advice to do a thing he had already done, about a fault that was already fixed.
+   *
+   * The alert had it right and this did not, which is the worse half: two places asking one question
+   * and giving different answers, and the one he happened to read was the wrong one. So both now use
+   * `refusalsWorthReporting` — a refusal stops counting the moment the same document arrives, from
+   * any address, which is how a forward fixes it.
    */
-  const refusedRows = await c.execute(
-    "select lower(from_address) as a, count(*) as n, max(received_at) as at, max(reason) as why from inbox_items where status != 'stored' group by lower(from_address)",
+  const refusedRaw = await c.execute(
+    "select from_address, subject, received_at, reason, status from inbox_items where status != 'stored' and received_at >= date('now', '-45 days')",
   );
+  const storedRaw = await c.execute(
+    "select from_address, subject, received_at from inbox_items where status = 'stored' and received_at >= date('now', '-45 days')",
+  );
+  const asSwept = (rows: Record<string, unknown>[]) =>
+    rows.map((r) => ({
+      fromAddress: String(r.from_address ?? ""),
+      subject: String(r.subject ?? ""),
+      receivedAt: String(r.received_at ?? ""),
+      reason: str(r.reason),
+      status: str(r.status),
+    }));
+  const { refusalsWorthReporting } = await import("./inbox-refusals");
+  const outstanding = refusalsWorthReporting(asSwept(refusedRaw.rows), asSwept(storedRaw.rows));
   const refusedBy = (like: string) => {
-    let n = 0;
-    let at = "";
-    let why = "";
-    for (const r of refusedRows.rows) {
-      if (!String(r.a ?? "").includes(like)) continue;
-      n += num(r.n);
-      const t = str(r.at) ?? "";
-      if (t > at) {
-        at = t;
-        why = str(r.why) ?? "";
-      }
-    }
-    return n > 0 ? { count: n, last: at, why } : undefined;
+    const mine = outstanding.filter((m) => m.fromAddress.toLowerCase().includes(like));
+    if (mine.length === 0) return undefined;
+    const newest = mine.reduce((a, b) => (b.receivedAt > a.receivedAt ? b : a));
+    return { count: mine.length, last: newest.receivedAt, why: newest.reason ?? "" };
   };
 
   /* RedSail's remittance arrives over SFTP as an 835, not by email, so it is counted where it lands. */
