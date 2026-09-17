@@ -488,15 +488,20 @@ export async function postRebateToTheBooks(
  * that rule arrived after the damage. On 5 September 2026 the July 2026 breakdown was filed at
  * 21:45 and a May 2025 sample at 22:32; the sample won, and the pharmacy's standing rate, achieved
  * compliance and distance to the next band were all a sixteen-month-old document's. The code fix
- * stops it recurring and does nothing at all about the row that is already wrong.
+ * stops it recurring and does nothing at all about the row that is already wrong, so this runs at
+ * boot with the other corrections of known-wrong data.
  *
- * So this runs at boot, with the other corrections of known-wrong data. It is cheap: the booked
- * rebate expenses already record the period of every statement ever read, so finding the newest one
- * is a query, and only when that is newer than what is standing does a single PDF get re-read.
+ * ── The first version of this did not work, and why is the useful part ──
  *
- * Nothing is booked twice. `fileRebateReport` is idempotent on the books — the expense and the cash
- * receipt are keyed on supplier and period — so re-reading the newest statement corrects the
- * standing figures and leaves the money exactly where it was.
+ * It looked the newest statement up through the booked rebate expenses, on the reasoning that every
+ * statement ever read leaves one. They do — but the July expense carries no `document_id` at all,
+ * because it was booked through the manual intake path rather than by the reader, so there was
+ * nothing to re-read and the correction reported success by doing nothing. An expense that proves
+ * nothing is its own problem, noted in docs/OPEN-ITEMS.md; this no longer depends on it.
+ *
+ * It asks the documents instead, which is where a statement actually is. Bounded twice over: it
+ * only looks when what is standing is more than sixty days old — a current statement never is — and
+ * it only opens documents whose name says rebate, which is a query rather than a scan of the vault.
  */
 export async function correctStandingRebateStatement(): Promise<{ moved: boolean; says: string }> {
   const settings = await getSettings();
@@ -508,38 +513,52 @@ export async function correctStandingRebateStatement(): Promise<{ moved: boolean
       return null;
     }
   })();
-  if (!standingPeriodTo) return { moved: false, says: "No rebate statement is on file." };
+  if (!standingPeriodTo) return { moved: false, says: "No rebate statement is standing." };
 
-  /* Every statement ever booked, newest period first. `invoiceDate` is the period end. */
-  const booked = await db.query.expenses.findMany({
-    columns: { invoiceNumber: true, invoiceDate: true, documentId: true },
+  /*
+   * Sixty days, because a rebate breakdown is monthly and paid in arrears.
+   *
+   * A statement for last month is perhaps six weeks old by the time the next one is due, and one
+   * older than sixty days therefore means either that a statement is genuinely late — which the
+   * expected-documents page is for — or that something older is standing in its place, which is
+   * this. Either way it costs a handful of PDFs once a day, and nothing at all the rest of the time.
+   */
+  const { todayIso } = await import("./dates");
+  const sixtyDaysAgo = new Date(Date.parse(todayIso()) - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  if (standingPeriodTo >= sixtyDaysAgo) {
+    return { moved: false, says: `The statement standing covers up to ${standingPeriodTo}, which is current.` };
+  }
+
+  const candidates = await db.query.documents.findMany({
+    columns: { id: true, storageKey: true, title: true, fileName: true },
   });
-  const rebates = booked
-    .filter((e) => (e.invoiceNumber ?? "").startsWith("REBATE|") && e.invoiceDate && e.documentId)
-    .sort((a, b) => (a.invoiceDate! < b.invoiceDate! ? 1 : -1));
-  const newest = rebates[0];
-  if (!newest || newest.invoiceDate! <= standingPeriodTo) {
-    return { moved: false, says: `The statement standing is the newest on file (to ${standingPeriodTo}).` };
-  }
+  const named = candidates.filter((d) => /rebate/i.test(d.title ?? "") || /rebate/i.test(d.fileName ?? ""));
+  if (named.length === 0) return { moved: false, says: "No document on file is named as a rebate breakdown." };
 
-  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, newest.documentId!) });
-  if (!doc) {
-    return { moved: false, says: `A newer statement to ${newest.invoiceDate} is booked, but its document is gone, so nothing could be re-read.` };
-  }
   const { readFile } = await import("./files");
   const { pdfText } = await import("./pdf-text");
-  let text = "";
-  try {
-    text = pdfText(await readFile(doc.storageKey));
-  } catch {
-    return { moved: false, says: `A newer statement to ${newest.invoiceDate} is booked, but its document could not be read.` };
-  }
-  if (!looksLikeRebateReport(text)) {
-    return { moved: false, says: `A newer statement to ${newest.invoiceDate} is booked, but its document no longer reads as a rebate breakdown.` };
+  let best: { text: string; periodTo: string; id: string } | null = null;
+  for (const d of named) {
+    let text = "";
+    try {
+      text = pdfText(await readFile(d.storageKey));
+    } catch {
+      continue;
+    }
+    if (!looksLikeRebateReport(text)) continue;
+    const parsed = parseRebateReport(text);
+    /* Only a statement that passes its own checks may describe where the pharmacy stands. */
+    if (!parsed.trustworthy || !parsed.statement.periodTo) continue;
+    if (!best || parsed.statement.periodTo > best.periodTo) best = { text, periodTo: parsed.statement.periodTo, id: d.id };
   }
 
-  const filed = await fileRebateReport(text, { documentId: doc.id }, { name: "the standing-statement correction" });
+  if (!best) return { moved: false, says: "No rebate breakdown on file could be read and checked." };
+  if (best.periodTo <= standingPeriodTo) {
+    return { moved: false, says: `The statement standing (to ${standingPeriodTo}) is the newest one on file.` };
+  }
+
+  const filed = await fileRebateReport(best.text, { documentId: best.id }, { name: "the standing-statement correction" });
   return filed.stored
-    ? { moved: true, says: `The standing rebate statement moved from ${standingPeriodTo} to ${newest.invoiceDate}.` }
-    : { moved: false, says: `A newer statement to ${newest.invoiceDate} is booked, but re-reading it did not pass its own checks, so nothing was changed.` };
+    ? { moved: true, says: `The standing rebate statement moved from ${standingPeriodTo} to ${best.periodTo}.` }
+    : { moved: false, says: `A newer statement to ${best.periodTo} is on file, but re-reading it did not pass its own checks, so nothing was changed.` };
 }
