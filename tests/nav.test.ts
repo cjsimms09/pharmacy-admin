@@ -90,9 +90,20 @@ describe("navigation", () => {
     assert.equal(groupFor("/purchasing/shelf")?.label, "Buying");
     assert.equal(groupFor("/purchasing/return-soon")?.label, "Buying");
     assert.equal(groupFor("/purchasing/over-nadac")?.label, "Buying");
-    assert.equal(groupFor("/intake")?.label, "Settings");
+    /* Moved with /inbox: they are one family, and a family split across two groups is not one. */
+    assert.equal(groupFor("/intake")?.label, "Today");
     assert.equal(groupFor("/inspection/walk")?.label, "Compliance");
-    assert.equal(groupFor("/inbox")?.label, "Settings");
+    /*
+     * "What arrived" moved from Settings to Today on 17 September 2026, with "What we're expecting".
+     *
+     * Not a tidy-up. The expecting page had no menu entry at all and was reachable only from a
+     * button on the dashboard, so the owner asked twice whether it had been built. What arrived and
+     * what has not arrived are the same question asked from two ends, and neither of them is a
+     * setting. Placement, not invariant: the rules this file really guards — six groups, one group
+     * per page — are asserted separately and are untouched.
+     */
+    assert.equal(groupFor("/inbox")?.label, "Today");
+    assert.equal(groupFor("/expected")?.label, "Today");
     assert.equal(groupFor("/nadac")?.label, "Settings");
   });
 

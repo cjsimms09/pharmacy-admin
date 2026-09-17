@@ -287,6 +287,65 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   }
   const clocksNear = clocks.filter((c) => (daysUntil(c.on!) ?? 99) <= 14);
 
+  /*
+   * Everything wrong with the site itself, gathered into one list and ranked.
+   *
+   * These were five banners, each writing its own paragraph. The prose was good and there was far
+   * too much of it: on a bad morning it filled the screen before the scoreboard, which is the
+   * opposite of what a dashboard is for. The reasons survive as the short clause after each name —
+   * the rule being that a person should be able to tell in four words whether it is their problem
+   * right now, and follow the link when it is.
+   *
+   * Ranked by what it costs to leave: a form going to the Board with a blank on it, then money
+   * that cannot be sent or chased, then the site's own data, then housekeeping.
+   */
+  const attention: { what: string; detail: string | null; href: string; action: string; kind: "crit" | "warn" }[] = [];
+  if (setup.length > 0) {
+    attention.push({
+      what: "The pharmacy's own details are missing",
+      detail: `${setup.join(", ")} — a C-250 or C-900 handed over with a blank is a finding`,
+      href: "/settings",
+      action: "Fill them in once",
+      kind: "crit",
+    });
+  }
+  if (mail.state !== "ok") {
+    attention.push({
+      what: mail.summary,
+      detail: mail.failed.length > 0 ? `last error: ${mail.failed[0].error}` : "configured is not the same as working",
+      href: "/settings/email",
+      action: mail.configured ? "Check and send a test" : "Set up sending",
+      kind: mail.state === "unproven" ? "warn" : "crit",
+    });
+  }
+  if (clocksNear.length > 0) {
+    attention.push({
+      what: "A contract deadline falls within two weeks",
+      detail: clocksNear.map((c) => `${c.what} with ${c.pbmName} by ${fmt(c.on)}`).join("; "),
+      href: clocksNear[0].href,
+      action: "See the clock",
+      kind: "warn",
+    });
+  }
+  if (health.failing > 0) {
+    attention.push({
+      what: health.failing === 1 ? "The morning check found something" : `The morning check found ${health.failing} things`,
+      detail: health.checks.filter((c) => !c.ok).map((c) => `${c.what.toLowerCase()} — ${c.observed}`).join("; "),
+      href: "/tools/check",
+      action: "What each one means",
+      kind: "warn",
+    });
+  }
+  if (updates.behind > 0) {
+    attention.push({
+      what: `${updates.behind} update${updates.behind === 1 ? "" : "s"} waiting`,
+      detail: updates.newest ? `newest is "${updates.newest}" — nothing changes here until it is installed` : "nothing changes here until they are installed",
+      href: "/settings/updates",
+      action: "Install now",
+      kind: "warn",
+    });
+  }
+
   const stalled = jobs.filter((j) => j.state === "stale");
   // The feeds the figures come from, judged from their own tables; the sensors and backup are already in `jobs`.
   const lateFeeds = (await feedsNow()).late.filter((f) => f.group === "arriving");
@@ -296,28 +355,22 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <PageHeader
         title="Today"
         subtitle={fmtLong(today)}
+        /*
+          Three buttons, and one of them only exists on a day with work on it.
+
+          There were eight. Compliance, Training and Inbox are words in the bar above this one, so
+          three of the eight were the navigation printed twice; "Finish setting up" is a job that
+          finishes, and a permanent button for it is a permanent reproach. What is left is the two
+          things done FROM this page rather than navigated to — the money list and the day's
+          deliveries — and the one that appears only when something is late.
+
+          The owner, of the site as a whole: "It looks very amateur." A row of eight buttons that
+          wraps to three lines on a laptop is most of why.
+        */
         actions={
           <>
-            {/*
-              The one thing on this page that is about making money rather than keeping out of
-              trouble. Everything else here protects revenue; this is where it is found.
-            */}
             <Link href="/money/found" className="btn btn-primary">Where the money is</Link>
-            {/* Entered every day, so it is one press from the page the day starts on. */}
             <Link href={`/deliveries?month=${today.slice(0, 7)}`} className="btn">Today&rsquo;s deliveries</Link>
-            {/*
-              Not on a phone: Inbox is already in the bar above, and Compliance is one of the six words. Seven buttons
-              wrapped to three rows there and pushed the scoreboard below the fold before a single figure showed.
-            */}
-            {/*
-              On the phone as well as the desk. "What are we waiting on" is a question asked standing at the
-              counter with a wholesaler on the phone, and the answer being one press away is the point of it.
-            */}
-            <Link href="/expected" className="btn">What we&rsquo;re expecting</Link>
-            <Link href="/inbox" className="btn hidden sm:inline-flex">Inbox</Link>
-            <Link href="/settings/setup" className="btn hidden sm:inline-flex">Finish setting up</Link>
-            <Link href="/compliance" className="btn hidden sm:inline-flex">Compliance</Link>
-            <Link href="/compliance/training" className="btn hidden sm:inline-flex">Training</Link>
             {lateCount > 0 && <Link href="#now" className="btn btn-primary">Work through {lateCount}</Link>}
           </>
         }
@@ -327,80 +380,29 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {error && <Notice kind="crit">{error}</Notice>}
 
       {/*
-        The morning check, and only when it has something to say.
+        Everything wrong with the site itself, in one block instead of five.
 
-        Deliberately not a card. The owner's standing complaint about this page is that it is busy —
-        "incredibly busy and not the best from a user perspective" — and a panel that says ALL CLEAR
-        every morning is exactly the kind of furniture that pushes the things needing him below the
-        fold. Six invariants are checked every day; on the days they hold, this renders nothing at
-        all, which is the only honest way to add a check to a crowded page.
+        There were five separate full-width banners stacked here — updates, mail, missing pharmacy
+        details, a contract deadline, the morning check — each a paragraph of prose explaining itself
+        at length. On a bad morning the first actual figure on this page was below the fold, and the
+        owner's verdict on the whole site was 'It looks very amateur'. Five paragraphs of apology
+        before a single number is most of what he meant.
+
+        One block, one line each, worst first. The reason each matters is still written — it has
+        just stopped being the thing you read before you can see your own scoreboard.
       */}
-      {health.failing > 0 && (
-        <Notice kind="warn">
-          <b>
-            {health.failing === 1 ? "The morning check found something" : `The morning check found ${health.failing} things`}.
-          </b>{" "}
-          {health.checks
-            .filter((c) => !c.ok)
-            .map((c) => `${c.what}: ${c.observed}`)
-            .join(". ")}
-          . <Link href="/tools/check" className="underline">What each one means</Link>.
-        </Notice>
-      )}
-
-      {/*
-        An update nobody knows about is an update nobody installs. This used to be discoverable
-        only by opening a settings sub-page and pressing a button, so repairs sat on GitHub while
-        the pharmacy went on hitting the bug they repaired and reporting it again.
-      */}
-      {updates.behind > 0 && (
-        <Notice kind="warn">
-          <b>
-            {updates.behind} update{updates.behind === 1 ? "" : "s"} {updates.behind === 1 ? "is" : "are"} waiting to be
-            installed.
-          </b>{" "}
-          {updates.newest && <>The newest is &ldquo;{updates.newest}&rdquo;. </>}
-          Nothing on this computer changes until you install{" "}
-          {updates.behind === 1 ? "it" : "them"}, so a fix made for you is not in front of you yet.{" "}
-          <Link href="/settings/updates" className="underline">Install now</Link>.
-        </Notice>
-      )}
-
-      {/*
-        Every "Send" on this page goes through the mail server, so its state belongs on this page
-        rather than three clicks away under Settings. The distinction the old wording missed:
-        configured is not working. A Gmail address with the account password rather than an app
-        password is configured, cannot send anything, and looked fine everywhere.
-      */}
-      {mail.state !== "ok" && (
-        <Notice kind={mail.state === "unproven" ? "warn" : "crit"}>
-          <b>{mail.summary}</b>{" "}
-          {mail.failed.length > 0 && (
-            <>
-              The last error was: <i>{mail.failed[0].error}</i>{" "}
-            </>
-          )}
-          <Link href="/settings/email" className="underline">
-            {mail.configured ? "Check the mail settings and send yourself a test" : "Set up sending"}
-          </Link>
-          .
-        </Notice>
-      )}
-
-      {setup.length > 0 && (
-        <Notice kind="crit">
-          Every Board form this site prints carries the pharmacy&rsquo;s own details, and{" "}
-          {setup.length === 1 ? "one is" : `${setup.length} are`} missing: {setup.join(", ")}. A C-250 or a C-900
-          handed over with a blank where the registration number belongs is a finding.{" "}
-          <Link href="/settings" className="underline">Fill them in once</Link> and every form is right from then on.
-        </Notice>
-      )}
-
-      {clocksNear.length > 0 && (
-        <Notice kind="warn">
-          <b>A contract deadline falls within two weeks:</b>{" "}
-          {clocksNear.map((c) => `${c.what} with ${c.pbmName} by ${fmt(c.on)}`).join("; ")}.{" "}
-          <Link href={clocksNear[0].href} className="underline">See the clock</Link>.
+      {attention.length > 0 && (
+        <Notice kind={attention.some((a) => a.kind === 'crit') ? 'crit' : 'warn'}>
+          <b>{attention.length === 1 ? "One thing needs attention" : `${attention.length} things need attention`}</b>
+          <ul className="mt-1 space-y-0.5">
+            {attention.map((a) => (
+              <li key={a.what} className="text-sm">
+                <span className="font-medium">{a.what}</span>
+                {a.detail && <span className="text-ink-2"> — {a.detail}</span>}{' '}
+                <Link href={a.href} className="underline">{a.action}</Link>
+              </li>
+            ))}
+          </ul>
         </Notice>
       )}
 

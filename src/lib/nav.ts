@@ -54,7 +54,22 @@ export const NAV: NavGroup[] = [
     href: "/",
     label: "Today",
     blurb: "What is due, what is late, what the money list says, and what happened while you were not looking.",
-    items: [],
+    /*
+     * "What we're expecting" belongs here, and was reachable only from a button on the dashboard.
+     *
+     * The owner asked for that page twice — "a tab that tracks EVERYTHING we are expecting" — and
+     * then asked again whether it had been built, because nothing in the navigation said it existed.
+     * A page nobody can find is a page nobody has. It sits under Today because the question it
+     * answers ("what has not turned up?") is the same question this group is for.
+     */
+    items: [
+      { href: "/expected", label: "What we're expecting", blurb: "Everything somebody else is supposed to send: how often, when it last came, and whether that is late" },
+      { href: "/inbox", label: "What arrived", blurb: "Reports that came by email, documents dropped in by hand, and what was made of each" },
+      // Listed, though the Add button in the top bar opens the same thing: the owner asked where the
+      // upload tool had gone, and a page nobody can find in the menu is a page that does not exist.
+      { href: "/intake", label: "Add a document", blurb: "Upload anything — a photograph, a PDF, an 835, a spreadsheet — and say what it is, or let the site work it out" },
+      { href: "/tools/check", label: "The morning check", blurb: "What has to be true about this site's own data, checked every day" },
+    ],
   },
   {
     /*
@@ -153,10 +168,6 @@ export const NAV: NavGroup[] = [
       { href: "/settings/connections", label: "Connections", blurb: "Keys for Claude, iMonnit and the rest, and whether every report is arriving" },
       { href: "/tools/data-health", label: "Data health", blurb: "How complete each feed is, and how much of it links where it must — counted on the real data, with the gaps named" },
       { href: "/settings/email", label: "Email", blurb: "Reading reports in and sending training out" },
-      { href: "/inbox", label: "What arrived", blurb: "Reports that came by email, documents dropped in by hand, and what was made of each" },
-      // Listed, though the Add button in the top bar opens the same thing: the owner asked where the
-      // upload tool had gone, and a page nobody can find in the menu is a page that does not exist.
-      { href: "/intake", label: "Add a document", blurb: "Upload anything — a photograph, a PDF, an 835, a spreadsheet — and say what it is, or let the site work it out" },
       { href: "/nadac", label: "NADAC", blurb: "The federal benchmark price, fetched weekly", hidden: true },
       { href: "/reports", label: "Report check", blurb: "What a PioneerRx report can and cannot support, field by field", gated: true, hidden: true },
       { href: "/audit", label: "Activity log", blurb: "Who did what in this system, and when", hidden: true },
