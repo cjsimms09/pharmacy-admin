@@ -7,6 +7,7 @@ import { complianceSummary, type OpenItem } from "@/lib/compliance-status";
 import { staffMatrix } from "@/lib/staff-matrix";
 import { StaffBoard } from "@/components/staff-board";
 import { invoiceIssues } from "@/lib/invoices";
+import { dailyCheck } from "@/lib/daily-check-store";
 import { alerts, SOON_DAYS, type Alert } from "@/lib/alerts";
 import { returnWarningNow, WARN_CREDIT_DAYS } from "@/lib/return-soon";
 import { claimsProofNow } from "@/lib/data-health-claims-proof-store";
@@ -96,7 +97,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { ok, error } = await searchParams;
   // The signer's own name, to fill in the attestation form without asking them to remember it.
   const user = await requireUser();
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, clocks, returns, claimsProof] =
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, clocks, returns, claimsProof, health] =
     await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }),
@@ -139,6 +140,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
      * never happen on the thread answering this page.
      */
     claimsProofNow().catch(() => null),
+    /*
+     * The morning check. Six counts and two dates, so it is cheap enough to run on a page load, and
+     * it is the same function the nightly pass calls — this page and that record cannot disagree.
+     */
+    dailyCheck().catch(() => ({ checks: [], failing: 0, says: "", ranAt: "" })),
   ]);
 
   /*
@@ -319,6 +325,28 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        The morning check, and only when it has something to say.
+
+        Deliberately not a card. The owner's standing complaint about this page is that it is busy —
+        "incredibly busy and not the best from a user perspective" — and a panel that says ALL CLEAR
+        every morning is exactly the kind of furniture that pushes the things needing him below the
+        fold. Six invariants are checked every day; on the days they hold, this renders nothing at
+        all, which is the only honest way to add a check to a crowded page.
+      */}
+      {health.failing > 0 && (
+        <Notice kind="warn">
+          <b>
+            {health.failing === 1 ? "The morning check found something" : `The morning check found ${health.failing} things`}.
+          </b>{" "}
+          {health.checks
+            .filter((c) => !c.ok)
+            .map((c) => `${c.what}: ${c.observed}`)
+            .join(". ")}
+          . <Link href="/tools/check" className="underline">What each one means</Link>.
+        </Notice>
+      )}
 
       {/*
         An update nobody knows about is an update nobody installs. This used to be discoverable

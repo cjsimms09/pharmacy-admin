@@ -529,6 +529,21 @@ export async function register() {
     await whenIdle("pioneer", pioneerTick, { evenWhenBusy: true });
     await whenIdle("invoice-lines", invoiceLinesTick);
     await whenIdle("data-health", dataHealthTick);
+    /*
+     * The morning check, after the jobs that would fix what it looks for.
+     *
+     * Ordered deliberately: the invoice re-read and the schedule backfill run above it, so a fault
+     * they mend is mended before it is judged. A check that reports this morning's already-corrected
+     * problem is how a check earns being ignored.
+     */
+    await whenIdle("daily-check", async () => {
+      try {
+        const { dailyCheckTick } = await import("./lib/daily-check-store");
+        await dailyCheckTick();
+      } catch {
+        /* Its stored line says when it last succeeded; a check must never take the site down. */
+      }
+    });
     await whenIdle("backup", backupTick);
     await whenIdle("reminders", reminderTick);
     await whenIdle("nadac", nadacTick);

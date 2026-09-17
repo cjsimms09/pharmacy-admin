@@ -433,6 +433,14 @@ export const SETTING_KEYS = [
    */
   "invoice_short_reread_result",
   /**
+   * The morning check: when it last ran, and what it found (daily-check.ts).
+   *
+   * Kept as a line rather than a flag because a check failing for three days is a different problem
+   * from one that failed this morning, and nothing else in the site could tell them apart.
+   */
+  "daily_check_on",
+  "daily_check_result",
+  /**
    * What the remittances taught the site about who a BIN belongs to, on the last nightly pass.
    *
    * The owner: "the system needs to learn." Kept so the learning can be read back rather than only
