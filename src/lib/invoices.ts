@@ -2006,19 +2006,48 @@ async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
   const prices = await (await import("./invoice-price-check")).checkInvoicePrices();
   if (prices.disagreements.length > 0) {
     const n = prices.disagreements.length;
-    const overbilled = prices.overbilledCents > 0;
+    /*
+     * Blocking is about whether it is worth a phone call, not about whether it is wrong.
+     *
+     * On 17 September 2026 this sat at the top of his invoice list as blocking: "$1.49 billed above
+     * what was booked in". One bag of throat drops, on a McKesson invoice of the day before, that
+     * PioneerRx has no record of receiving. It is a real discrepancy and the site is right to have
+     * noticed — 52 of 53 invoices agree across 576 drugs, so noticing the one is the whole point.
+     * But nobody is ringing a wholesaler about $1.49, and a blocking row that nobody acts on teaches
+     * that blocking rows need not be acted on.
+     *
+     * The floor is his, not one I chose: thirty dollars, set for MAC appeals — "lets set a limit for
+     * mac claims (have to lose more than $30)" — and the question there is the same question here.
+     * The money is still counted and the row still says it, whichever side of the line it falls; what
+     * changes is whether it interrupts him.
+     */
+    const { MIN_WORTH_CHASING_CENTS } = await import("./mac-appeal-candidates");
+    /*
+     * Two questions, and reading one off the other is how a true row starts lying.
+     *
+     * Whether the pharmacy was billed above what arrived is a **fact**. Whether that is worth
+     * interrupting him is a **judgement**, and his: thirty dollars. The first version of this change
+     * used the judgement for both, so a real $1.49 overbill produced the sentence "No invoice comes
+     * to more than was booked in" — the money still on the screen above it, and the words underneath
+     * denying it.
+     */
+    const hasOverbill = prices.overbilledCents > 0;
+    const worthChasing = prices.overbilledCents >= MIN_WORTH_CHASING_CENTS;
     const over = `$${(prices.overbilledCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     out.push({
       key: "prices-disagree",
-      severity: overbilled ? "blocking" : "warn",
-      title: overbilled
+      severity: worthChasing ? "blocking" : "warn",
+      title: hasOverbill
         ? `${over} billed above what was booked in`
         : `${n} purchase${n === 1 ? "" : "s"} where the invoice and the delivery disagree`,
       detail:
         `PioneerRx records every delivery as it is booked in, and the wholesaler sends its own invoice. ` +
         `${prices.agreeing} of ${prices.checked} invoices agree throughout, across ${prices.linesCompared} drugs. ` +
-        (overbilled
-          ? `The rest do not, and the invoices come to ${over} more than PioneerRx booked in against them. The rows say which of it is a price, which is a drug billed and never booked in, and which could not be told apart.`
+        (hasOverbill
+          ? `The rest do not, and the invoices come to ${over} more than PioneerRx booked in against them. The rows say which of it is a price, which is a drug billed and never booked in, and which could not be told apart.` +
+            (worthChasing
+              ? ""
+              : ` That is under the $${(MIN_WORTH_CHASING_CENTS / 100).toFixed(0)} you set as worth chasing, so it is here to be seen rather than to be done — the money is counted either way.`)
           : `No invoice comes to more than was booked in; what differs is which drug the money is against, which every margin below it is computed from.`),
       href: "/inventory/invoices",
       action: "See what differs",

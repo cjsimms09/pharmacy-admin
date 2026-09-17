@@ -106,7 +106,8 @@ const MAC_BASES = new Set(["06", "07"]);
  * still counted in `setAside`. One constant, so raising it is one edit; if filing ever stops costing
  * a code each, the right value is zero and the gate should be removed rather than tuned.
  */
-const MIN_WORTH_FILING_CENTS = 3000;
+export const MIN_WORTH_CHASING_CENTS = 3000;
+const MIN_WORTH_FILING_CENTS = MIN_WORTH_CHASING_CENTS;
 
 /**
  * What the plan said it priced off, for the sentence that explains a refusal.
