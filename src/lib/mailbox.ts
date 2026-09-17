@@ -84,6 +84,33 @@ function senderAllowed(from: string, allowed: string[]): boolean {
   return allowed.some((a) => (a.startsWith("@") ? f.endsWith(a) : f === a));
 }
 
+/**
+ * Has this message already been dealt with?
+ *
+ * A message is done if ANY of its rows is on file, and its rows are not keyed on the bare message
+ * id. Every attachment writes its row as `<message id>#<file name>` — five separate inserts do it,
+ * and have since they were written. This lookup once asked for the bare id, which such a message
+ * never has, so it answered "never seen" every time; one Rx Systems invoice collected nineteen inbox
+ * rows in a night, one per sweep.
+ *
+ * Matched on the prefix with `substr` rather than `like`, because a Message-ID may contain an
+ * underscore and `_` is a wildcard in LIKE — a false match here would silently skip a real message,
+ * which is much the more expensive direction.
+ *
+ * Pulled out of the sweep loop so that the cheap envelope pass and the full parse ask the same
+ * question in the same words. Two spellings of "have we seen this" is how one of them drifts.
+ */
+async function alreadyOnFile(messageId: string): Promise<boolean> {
+  const row = await db.query.inboxItems.findFirst({
+    where: or(
+      eq(schema.inboxItems.messageId, messageId),
+      sql`substr(${schema.inboxItems.messageId}, 1, ${messageId.length + 1}) = ${`${messageId}#`}`,
+    ),
+    columns: { id: true },
+  });
+  return row !== undefined;
+}
+
 async function connect(): Promise<ImapFlow> {
   const s = await getSettings();
   if (!s.mail_user || !s.mail_password_enc) throw new MailNotConfiguredError();
@@ -178,7 +205,7 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
        * lines below, so re-seeing one costs a fetch and nothing else. Three days bounds the fetching
        * and is long enough to cover a weekend of somebody reading their mail before the sweep does.
        */
-      const recentSince = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+      const recentSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
       const [unseen, recent] = await Promise.all([
         client.search({ seen: false }, { uid: true }),
         client.search({ since: recentSince }, { uid: true }).catch(() => [] as number[]),
@@ -200,9 +227,41 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
        */
       const unseenUids = [...new Set(unseen || [])].sort((a, b) => a - b);
       const recentUids = [...new Set(recent || [])].filter((u) => !unseenUids.includes(u)).sort((a, b) => a - b);
-      const uids = [...unseenUids.slice(0, 200), ...recentUids.slice(-80)].sort((a, b) => a - b);
+      const uids = [...unseenUids.slice(0, 200), ...recentUids.slice(-400)].sort((a, b) => a - b);
+
+      /*
+       * Every message id first, before a single message is downloaded.
+       *
+       * The window above used to be three days because the sweep downloaded the whole of every
+       * message it looked at, so looking further back cost real time on a mailbox that takes twenty
+       * messages a day. That is what left the last hole: unread mail is now safe at any age, but a
+       * message the owner had *opened* and which was older than three days was still invisible — and
+       * opening it is exactly what he does when he is trying to find out why the site has not got it.
+       *
+       * An envelope carries the message id and nothing else, so it costs a round trip and no
+       * download. Fetching those first turns "how far back do we look" from a question about
+       * bandwidth into a question about nothing: the ids already on file are skipped here, and only
+       * a message this site has never seen is downloaded. The window is thirty days.
+       *
+       * The real dedupe is still the one below, against the database, on the parsed id. This is an
+       * optimisation and is written so that failing it costs speed and never correctness: a uid
+       * whose envelope could not be read is downloaded, exactly as before.
+       */
+      const idByUid = new Map<number, string>();
+      if (uids.length > 0) {
+        try {
+          for await (const m of client.fetch(uids.join(","), { envelope: true }, { uid: true })) {
+            if (m.uid && m.envelope?.messageId) idByUid.set(m.uid, m.envelope.messageId);
+          }
+        } catch {
+          /* No envelopes: every uid is downloaded and judged the old way. */
+        }
+      }
+
       for (const uid of uids) {
         try {
+          const knownId = idByUid.get(uid);
+          if (knownId && (await alreadyOnFile(knownId))) continue;
           const msg = await client.fetchOne(String(uid), { source: true, envelope: true }, { uid: true });
           if (!msg || !msg.source) continue;
           const parsed = await simpleParser(msg.source);
@@ -211,33 +270,7 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
           const subject = (parsed.subject ?? "").slice(0, 300);
           const receivedAt = (parsed.date ?? new Date()).toISOString();
 
-          /*
-           * A message is already done if ANY of its rows is on file, and its rows are not keyed on
-           * the bare message id.
-           *
-           * Every attachment writes its row as `<message id>#<file name>` — five separate inserts do
-           * it, and have since they were written. This lookup asked for the bare id, which such a
-           * message never has, so it answered "never seen" every time.
-           *
-           * It cost nothing while the sweep read only unread mail: the message was marked seen on
-           * the first pass and never fetched again. My change on 16 September — reading the last
-           * three days whether or not somebody had opened them — turned a latent bug into a row
-           * every half hour. One Rx Systems invoice had nineteen inbox rows by midnight, one per
-           * sweep, and would have had a hundred and forty-four before it aged out of the window.
-           * The document dedupe held, so it was one document and one invoice throughout; what
-           * multiplied was the line in his Inbox.
-           *
-           * Matched on the prefix with `substr` rather than `like`, because a Message-ID may contain
-           * an underscore and `_` is a wildcard in LIKE — a false match here would silently skip a
-           * real message, which is the more expensive direction by far.
-           */
-          const already = await db.query.inboxItems.findFirst({
-            where: or(
-              eq(schema.inboxItems.messageId, messageId),
-              sql`substr(${schema.inboxItems.messageId}, 1, ${messageId.length + 1}) = ${`${messageId}#`}`,
-            ),
-          });
-          if (already) continue;
+          if (await alreadyOnFile(messageId)) continue;
 
           /*
            * Never consume our own outgoing mail.
