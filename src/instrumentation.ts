@@ -74,6 +74,17 @@ export async function register() {
        * better than the pharmacy actually did, and the owner found it before anything here did.
        */
       await clearRebatePaymentDates();
+      /*
+       * And the duplicate ladders, which doubled every rate the estimate uses.
+       *
+       * Closing a superseded programme by NAME left a renamed one live beside its replacement, and
+       * `rebateView` sums every current ladder paying on the same basket: the contract rate read 60%
+       * where the statement says 30%. September's estimated rebate was $13,353.09 against a true
+       * $6,676.55 — about $5,000 of accrual profit that was not there, from a rename. Before the
+       * re-file below, so a correction cannot walk straight back into it.
+       */
+      const { endDuplicateRebatePrograms } = await import("./lib/supplier-terms-store");
+      await endDuplicateRebatePrograms();
       await correctStandingRebateStatement();
       /*
        * And the booked rebate that cannot produce the statement it came from.

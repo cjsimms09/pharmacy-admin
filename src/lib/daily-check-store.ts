@@ -34,6 +34,7 @@ async function gather(): Promise<Facts> {
     lastSweptAt,
     offsetsWithPaymentDates,
     offsetsWithPaymentDatesCents,
+    doubledRebateLadders,
   ] = await Promise.all([
     one(sql`select count(*) as n from inbox_items`),
     one(sql`select count(distinct message_id) as n from inbox_items`),
@@ -57,6 +58,21 @@ async function gather(): Promise<Facts> {
              where k.kind = 'revenue_offset' and e.paid_on is not null and e.status = 'confirmed'`),
     one(sql`select coalesce(sum(abs(e.amount_cents)), 0) as n from expenses e join expense_categories k on k.id = e.category_id
              where k.kind = 'revenue_offset' and e.paid_on is not null and e.status = 'confirmed'`),
+    /*
+     * Baskets with more than one current ladder on them.
+     *
+     * Grouped by supplier and by what the terms say the ladder pays on — its eligibility and the
+     * ratio it is measured by — read out of the stored JSON, because that is the identity that
+     * decides whether two rows are added together. Two ladders on one basket doubles the rate.
+     */
+    one(sql`select count(*) as n from (
+              select supplier_id,
+                     json_extract(terms_json, '$.eligibility') as basket,
+                     coalesce(json_extract(terms_json, '$.ratioMeasure'), '-') as measure
+                from supplier_rebate_programs
+               where effective_to is null
+               group by supplier_id, basket, measure
+              having count(*) > 1)`),
   ]);
 
   const settings = await getSettings();
@@ -81,6 +97,7 @@ async function gather(): Promise<Facts> {
     bookedWithNoDocument,
     offsetsWithPaymentDates,
     offsetsWithPaymentDatesCents,
+    doubledRebateLadders,
     today: todayIso(),
     now: new Date().toISOString(),
   };

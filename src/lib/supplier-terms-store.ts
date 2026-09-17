@@ -155,6 +155,44 @@ export async function saveRebateProgram(supplierId: string, input: SaveTermsInpu
         lt(schema.supplierRebatePrograms.effectiveFrom, input.effectiveFrom),
       ),
     );
+
+  /*
+   * And the same programme under a different name, which is what doubled the rebate.
+   *
+   * Closing by name alone meant a renamed programme left the old name live for ever. The ladders
+   * were renamed at some point from "McKesson generics (OneStop) rebate" to "Generics (OneStop)
+   * rebate" — the comment above this block records why — and re-filing a statement on 17 September
+   * 2026 wrote the new names beside the old ones. `rebateView` sums every current ladder paying on
+   * the same eligibility, so the contract rate read 60% instead of 30% and the brand factor 2%
+   * instead of 1%. September's estimated rebate came out at $13,353.09 against a true $6,676.55,
+   * and net profit was about $5,000 better than the pharmacy's. The owner found it: "how did net
+   * profit go from 4k this morning to 9k right now? you havent gotten anymore claims..."
+   *
+   * A programme's identity, for the purpose of not counting it twice, is WHAT IT PAYS ON — its
+   * eligibility and the ratio it is measured by — not what somebody called it. Two current ladders
+   * paying on the same basket off the same measurement are one programme under two names, whatever
+   * the names are. McKesson's compliance ladder and its purchase-ratio ladder share an eligibility
+   * and differ in measurement, so both correctly survive this.
+   */
+  const pays = `${parsed.data.eligibility}|${parsed.data.ratioMeasure ?? "-"}`;
+  const others = await db.query.supplierRebatePrograms.findMany({
+    where: and(eq(schema.supplierRebatePrograms.supplierId, supplierId), isNull(schema.supplierRebatePrograms.effectiveTo)),
+  });
+  for (const o of others) {
+    if (o.name === name) continue;
+    if (o.effectiveFrom >= input.effectiveFrom) continue;
+    let theirs: { eligibility?: string; ratioMeasure?: string | null } = {};
+    try {
+      theirs = JSON.parse(o.termsJson) as typeof theirs;
+    } catch {
+      continue;
+    }
+    if (`${theirs.eligibility}|${theirs.ratioMeasure ?? "-"}` !== pays) continue;
+    await db
+      .update(schema.supplierRebatePrograms)
+      .set({ effectiveTo: dayBefore(input.effectiveFrom), updatedAt: new Date().toISOString() })
+      .where(eq(schema.supplierRebatePrograms.id, o.id));
+  }
   const id = newId();
   await db.insert(schema.supplierRebatePrograms).values({
     id,
@@ -324,4 +362,67 @@ export async function setNoRebates(supplierId: string, none: boolean, user: { na
   return none
     ? `Recorded: ${supplier.name} pays no rebates. Their prices are compared as they stand, and the site will stop asking for a schedule.`
     : `${supplier.name}'s rebate terms are outstanding again.`;
+}
+
+/**
+ * Ends duplicate rebate ladders — two current programmes paying on the same basket off the same
+ * measurement — keeping the newest of each.
+ *
+ * This is what doubled the rebate estimate on 17 September 2026. Closing a superseded version by
+ * NAME left a renamed programme live beside its replacement, `rebateView` summed both, and the
+ * contract rate read 60% where the statement says 30%. September's estimate was $13,353.09 against
+ * a true $6,676.55 — about $5,000 of profit that was not there, on the accrual account, from a
+ * rename.
+ *
+ * `saveRebateProgram` no longer creates them. This ends the ones already on file, and is safe to run
+ * on every boot: with nothing duplicated it is one query and no writes.
+ *
+ * Never deletes. A ladder that priced a month really did price it, and the month has been reported
+ * on; ending it dates the change instead, which is what an accountant would do and what keeps the
+ * older months readable.
+ */
+export async function endDuplicateRebatePrograms(): Promise<{ ended: number; says: string }> {
+  const rows = await db.query.supplierRebatePrograms.findMany({
+    where: isNull(schema.supplierRebatePrograms.effectiveTo),
+  });
+
+  /** Everything current, grouped by supplier and by what it pays on. */
+  const groups = new Map<string, typeof rows>();
+  for (const r of rows) {
+    let t: { eligibility?: string; ratioMeasure?: string | null } = {};
+    try {
+      t = JSON.parse(r.termsJson) as typeof t;
+    } catch {
+      continue;
+    }
+    const key = `${r.supplierId}|${t.eligibility}|${t.ratioMeasure ?? "-"}`;
+    const at = groups.get(key);
+    if (at) at.push(r);
+    else groups.set(key, [r]);
+  }
+
+  let ended = 0;
+  const names: string[] = [];
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    /* Newest by effective date wins; the id breaks a tie so the same input always gives the same answer. */
+    const ranked = [...group].sort((a, b) => (a.effectiveFrom === b.effectiveFrom ? (a.id < b.id ? 1 : -1) : a.effectiveFrom < b.effectiveFrom ? 1 : -1));
+    const keep = ranked[0];
+    for (const old of ranked.slice(1)) {
+      await db
+        .update(schema.supplierRebatePrograms)
+        .set({ effectiveTo: dayBefore(keep.effectiveFrom), updatedAt: new Date().toISOString() })
+        .where(eq(schema.supplierRebatePrograms.id, old.id));
+      ended++;
+      names.push(old.name);
+    }
+  }
+
+  return {
+    ended,
+    says:
+      ended === 0
+        ? "No supplier has two current ladders paying on the same basket."
+        : `${ended} superseded rebate ladder${ended === 1 ? "" : "s"} ended (${[...new Set(names)].join(", ")}). Every rate the estimate uses was being added twice.`,
+  };
 }

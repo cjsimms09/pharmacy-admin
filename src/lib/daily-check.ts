@@ -57,6 +57,14 @@ export type Facts = {
    */
   offsetsWithPaymentDates: number;
   offsetsWithPaymentDatesCents: number;
+  /**
+   * Suppliers with two current rebate ladders paying on the same basket off the same measurement.
+   *
+   * `rebateView` sums every current ladder with the same eligibility, so two of them double the rate
+   * the estimate uses — and the estimate is a cost-of-goods line, so profit rises by the whole of the
+   * difference. A rename is enough to create one, which is how it happened.
+   */
+  doubledRebateLadders: number;
   /** Today, so the check does not have to ask the clock and can be tested. */
   today: string;
   /** Now, ISO, for the same reason. */
@@ -242,6 +250,33 @@ export function runDailyCheck(f: Facts): Check[] {
       f.offsetsWithPaymentDates === 0
         ? null
         : `${money(f.offsetsWithPaymentDatesCents)} is being counted twice on the cash account — once as revenue and once as a negative cost — so gross profit is that much better than the pharmacy's. Cleared at every restart; standing here means something is writing the date back.`,
+    kind: "money",
+  });
+
+  /*
+   * 8. No supplier pays on the same basket twice.
+   *
+   * The rate that prices a rebate is summed across every current ladder with the same eligibility,
+   * so a second ladder on the same basket does not compete with the first — it is ADDED to it. The
+   * contract rate read 60% against a statement that says 30%, the brand factor 2% against 1%, and
+   * September's estimated rebate came out at double. It is a cost-of-goods line, so the whole of the
+   * difference landed in profit: about $5,000, from a programme having been renamed.
+   *
+   * Cheapest check on this list and the one that would have saved the most. It counts.
+   */
+  checks.push({
+    what: "No supplier pays on the same basket twice",
+    shouldBe:
+      "A rebate rate is summed across every current ladder paying on the same basket, so a second ladder on the same basket is added to the first rather than replacing it. One programme should be current per basket per supplier; two means every rate the estimate uses is doubled, and the estimate is a cost of goods, so profit rises by the whole of the difference.",
+    observed:
+      f.doubledRebateLadders === 0
+        ? "one current ladder per basket"
+        : `${f.doubledRebateLadders} basket${f.doubledRebateLadders === 1 ? "" : "s"} with more than one current ladder`,
+    ok: f.doubledRebateLadders === 0,
+    difference:
+      f.doubledRebateLadders === 0
+        ? null
+        : "Every rate on those baskets is being added twice, so the estimated rebate — and the profit above it — is overstated. The superseded ladders are ended at every restart; standing here means something is filing them under a new name again.",
     kind: "money",
   });
 

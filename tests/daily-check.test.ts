@@ -15,6 +15,7 @@ const wellRun: Facts = {
   bookedWithNoDocument: 0,
   offsetsWithPaymentDates: 0,
   offsetsWithPaymentDatesCents: 0,
+  doubledRebateLadders: 0,
   today: "2026-09-17",
   now: "2026-09-17T17:00:00.000Z",
 };
@@ -33,7 +34,7 @@ describe("a well-run day", () => {
       assert.ok(c.shouldBe.length > 40, `${c.what} has no rule written`);
       assert.equal(c.difference, null);
     }
-    assert.match(summarise(checks), /^All 7 checks pass\.$/);
+    assert.match(summarise(checks), /^All 8 checks pass\.$/);
   });
 });
 
@@ -92,6 +93,27 @@ describe("the faults of 17 September 2026, as they actually were", () => {
     assert.match(c.difference!, /counted twice on the cash account/);
     assert.match(c.difference!, /gross profit is that much better/);
   });
+
+  /*
+   * The one that cost the most and would have been cheapest to catch.
+   *
+   * Two current ladders on the contract basket and two on brand, because a programme had been
+   * renamed and the old name stayed live. The rates are summed, so the contract rate read 60%
+   * against a statement saying 30%, and September's estimated rebate — a cost-of-goods line — came
+   * out at double. About $5,000 of accrual profit that was not there.
+   */
+  test("two baskets each carrying two current ladders, which doubles every rate", () => {
+    const c = check({ doubledRebateLadders: 2 }, "No supplier pays on the same basket twice");
+    assert.equal(c.ok, false);
+    assert.match(c.observed, /2 baskets with more than one current ladder/);
+    assert.match(c.difference!, /added twice/);
+  });
+});
+
+describe("the summary counts every rule", () => {
+  test("eight of them, and a new one cannot be added without this noticing", () => {
+    assert.equal(runDailyCheck(wellRun).length, 8);
+  });
 });
 
 describe("the sweep, which is how nearly everything arrives", () => {
@@ -127,7 +149,7 @@ describe("what it says when it cannot say", () => {
 
   test("summarise names what failed rather than counting silently", () => {
     const s = summarise(runDailyCheck({ ...wellRun, inboxRows: 1822, invoicesShort: 4, invoicesShortCents: 768 }));
-    assert.match(s, /2 of 7 failing/);
+    assert.match(s, /2 of 8 failing/);
     assert.match(s, /one inbox row per delivered attachment/);
   });
 });

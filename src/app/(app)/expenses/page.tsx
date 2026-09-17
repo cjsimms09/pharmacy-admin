@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireManager, requireUser } from "@/lib/auth";
 import { audit } from "@/lib/audit";
-import { categories, vendors, recentExpenses, unpaid, missingThisMonth, seedCategories, addCategory, saveVendor, saveExpense, setExpenseStatus, expenseById, voidExpense, expensesIn } from "@/lib/expenses";
+import { categories, vendors, recentExpenses, unpaid, missingThisMonth, seedCategories, expensesBetween, addCategory, saveVendor, saveExpense, setExpenseStatus, expenseById, voidExpense, expensesIn } from "@/lib/expenses";
 import { formatCents } from "@/lib/money";
 import { fmt, todayIso } from "@/lib/dates";
 import { PageHeader, Notice, Empty, Card, Figure, Field } from "@/components/ui";
@@ -33,14 +33,34 @@ const KIND_LABEL: Record<string, string> = {
  * The rule lives on the vendor rather than in a rules screen of its own, because the thing somebody
  * wants to say is "bills from Stamps.com are postage" — a fact about Stamps.com.
  */
-export default async function ExpensesPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; edit?: string; standing?: string; vendor?: string }> }) {
+export default async function ExpensesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ok?: string; error?: string; edit?: string; standing?: string; vendor?: string; from?: string; to?: string; basis?: string }>;
+}) {
   await requireUser();
-  const { ok, error, edit, standing, vendor } = await searchParams;
+  const { ok, error, edit, standing, vendor, from, to, basis: basisParam } = await searchParams;
 
   // Standard chart of accounts on first visit. An empty one gets filled badly.
   await seedCategories();
 
-  const [cats, vend, recent, owed, missing, editing, standingAll] = await Promise.all([
+  /*
+   * The drill-down behind a figure on the books, which this page has been ignoring since it was written.
+   *
+   * The money page links every cost figure here as `?from=…&to=…`, and this page read neither. So a
+   * figure for September drilled through to a list of every expense ever recorded — and the owner,
+   * checking September, found July's and August's rebates in it and reasonably concluded the rebate
+   * had been counted twice on the accrual side. It had not: the P&L had one rebate line and it was
+   * September's own estimate. The figure was right and the page behind it showed a different set of
+   * rows, which is worse than a wrong figure, because it costs confidence in the right ones.
+   *
+   * `expensesBetween` selects on the same column the P&L selects on — the invoice date for accrual,
+   * the payment date for cash — so a row appears here if and only if it is in that figure.
+   */
+  const period = from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) ? { from, to } : null;
+  const basis: "accrual" | "cash" = basisParam === "cash" ? "cash" : "accrual";
+
+  const [cats, vend, recent, owed, missing, editing, standingAll, inPeriod] = await Promise.all([
     categories(),
     vendors(),
     recentExpenses(100),
@@ -48,6 +68,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
     missingThisMonth(),
     edit ? expenseById(edit) : Promise.resolve(null),
     allStandingCosts(),
+    period ? expensesBetween(period.from, period.to, basis) : Promise.resolve(null),
   ]);
   const month = todayIso().slice(0, 7);
   const changing = standing ? standingAll.find((x) => x.id === standing) ?? null : null;
@@ -276,6 +297,75 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
 
       {ok && <Notice kind="ok">{ok}</Notice>}
       {error && <Notice kind="crit">{error}</Notice>}
+
+      {/*
+        The rows behind one figure on the books, and nothing else.
+
+        First, before the month-to-date tiles and the whole recent list, because somebody who
+        arrived here from a figure came to check that figure. Sending them to a list of everything
+        and letting them find it is how they end up reading July's rebate as September's.
+
+        It says which basis it is showing and why a row is in it, because that is the question:
+        the same bill is in the accrual month it was incurred and the cash month it was paid, and a
+        list that does not say which it is sorted on cannot be checked against anything.
+      */}
+      {inPeriod && (
+        <Card
+          tone={undefined}
+          title={`Every charge in ${period!.from} to ${period!.to}, on the ${basis} account`}
+          count={inPeriod.length}
+          className="my-4"
+          actions={
+            <>
+              <Link href={`/expenses?from=${period!.from}&to=${period!.to}&basis=${basis === "cash" ? "accrual" : "cash"}`} className="btn btn-sm">
+                Show the {basis === "cash" ? "accrual" : "cash"} account
+              </Link>
+              <Link href="/expenses" className="btn btn-sm">Everything</Link>
+            </>
+          }
+        >
+          <p className="mb-3 text-xs text-ink-3">
+            {basis === "accrual"
+              ? "Sorted and selected on the invoice date — the month the cost was incurred, whatever month it was paid in. This is the set of rows the accrual figure on the books adds up."
+              : "Sorted and selected on the payment date — the month the money actually left, whatever month the cost belongs to. A cost with no payment date is not here at all, because none of it has left yet."}
+          </p>
+          {inPeriod.length === 0 ? (
+            <Empty>Nothing on the {basis} account in this period.</Empty>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="table min-w-[640px]">
+                <thead>
+                  <tr>
+                    <th className="w-[96px]">{basis === "cash" ? "Paid" : "Invoiced"}</th>
+                    <th>What</th>
+                    <th className="w-[22%]">Category</th>
+                    <th className="num w-[110px]">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inPeriod.map((e) => (
+                    <tr key={e.id}>
+                      <td className="whitespace-nowrap text-xs">{fmt(basis === "cash" ? e.paidOn ?? e.invoiceDate : e.invoiceDate)}</td>
+                      <td>
+                        <span className="text-sm">{e.description ?? e.invoiceNumber ?? "—"}</span>
+                        {e.invoiceNumber && e.description && <span className="ml-2 text-xs text-ink-3">{e.invoiceNumber}</span>}
+                      </td>
+                      <td className="text-xs text-ink-2">{cats.find((k) => k.id === e.categoryId)?.name ?? "—"}</td>
+                      <td className="num whitespace-nowrap text-sm">{formatCents(e.amountCents)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={3}>Total on the {basis} account</td>
+                    <td className="num">{formatCents(inPeriod.reduce((n, e) => n + e.amountCents, 0))}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
 
       <div className="my-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Figure

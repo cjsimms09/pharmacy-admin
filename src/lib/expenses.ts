@@ -211,6 +211,32 @@ export async function expensesIn(month: string, basis: "accrual" | "cash" = "acc
   });
 }
 
+/**
+ * Every charge a given period and basis actually contains, for the drill-down behind a figure.
+ *
+ * The money page has linked its cost figures to `/expenses?from=…&to=…` since it was written, and
+ * that page has never read `from` or `to`. So every figure on the books drilled through to a list of
+ * every expense ever recorded — which is how the owner came to be looking at July's and August's
+ * rebates while trying to check September, and concluded the rebate had been counted twice on the
+ * accrual side. It had not. The figures were right and the page behind them was showing a different
+ * set of rows entirely, which is worse than being wrong: "i have no condfidence."
+ *
+ * Selecting on the same column the P&L selects on is the whole point, so a row is in this list if
+ * and only if it is in that figure. Accrual reads the invoice date, cash reads the payment date, and
+ * a range rather than a month so a quarter or a year drills down the same way.
+ */
+export async function expensesBetween(
+  from: string,
+  to: string,
+  basis: "accrual" | "cash" = "accrual",
+): Promise<Expense[]> {
+  const col = basis === "cash" ? schema.expenses.paidOn : schema.expenses.invoiceDate;
+  return db.query.expenses.findMany({
+    where: and(gte(col, from), lte(col, to), eq(schema.expenses.status, "confirmed")),
+    orderBy: [desc(col)],
+  });
+}
+
 /** Everything recent, for the screen. Drafts first, because they are the ones needing a person. */
 export async function recentExpenses(limit = 200): Promise<Expense[]> {
   const rows = (await db.query.expenses.findMany({ orderBy: [desc(schema.expenses.invoiceDate)], limit })).filter((r) => r.status !== "void");
