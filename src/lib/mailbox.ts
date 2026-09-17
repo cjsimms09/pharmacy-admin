@@ -8,7 +8,7 @@ import { bankEftNotice } from "./health-mart-eft-store";
 import { bankCardBatch } from "./card-batch-store";
 import { readZip, guessType } from "./zip-read";
 import { bookPostage } from "./expenses";
-import { eq, like } from "drizzle-orm";
+import { eq, like, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getSettings, setSetting } from "./settings";
 import { decryptText, encryptText, newId } from "./crypto";
@@ -191,7 +191,32 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
           const subject = (parsed.subject ?? "").slice(0, 300);
           const receivedAt = (parsed.date ?? new Date()).toISOString();
 
-          const already = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.messageId, messageId) });
+          /*
+           * A message is already done if ANY of its rows is on file, and its rows are not keyed on
+           * the bare message id.
+           *
+           * Every attachment writes its row as `<message id>#<file name>` — five separate inserts do
+           * it, and have since they were written. This lookup asked for the bare id, which such a
+           * message never has, so it answered "never seen" every time.
+           *
+           * It cost nothing while the sweep read only unread mail: the message was marked seen on
+           * the first pass and never fetched again. My change on 16 September — reading the last
+           * three days whether or not somebody had opened them — turned a latent bug into a row
+           * every half hour. One Rx Systems invoice had nineteen inbox rows by midnight, one per
+           * sweep, and would have had a hundred and forty-four before it aged out of the window.
+           * The document dedupe held, so it was one document and one invoice throughout; what
+           * multiplied was the line in his Inbox.
+           *
+           * Matched on the prefix with `substr` rather than `like`, because a Message-ID may contain
+           * an underscore and `_` is a wildcard in LIKE — a false match here would silently skip a
+           * real message, which is the more expensive direction by far.
+           */
+          const already = await db.query.inboxItems.findFirst({
+            where: or(
+              eq(schema.inboxItems.messageId, messageId),
+              sql`substr(${schema.inboxItems.messageId}, 1, ${messageId.length + 1}) = ${`${messageId}#`}`,
+            ),
+          });
           if (already) continue;
 
           /*
