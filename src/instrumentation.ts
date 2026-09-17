@@ -65,7 +65,15 @@ export async function register() {
        * sixteen months old. Filing now refuses to let an older statement do that; this puts the one
        * already on file back. A query when there is nothing to do.
        */
-      const { correctStandingRebateStatement, attachMissingRebateDocuments } = await import("./lib/rebate-report-store");
+      const { correctStandingRebateStatement, attachMissingRebateDocuments, clearRebatePaymentDates } = await import("./lib/rebate-report-store");
+      /*
+       * First, because it is the only wrong figure here that is a wrong PROFIT figure.
+       *
+       * A rebate expense carrying a payment date put the same money on the cash account twice — once
+       * as the receipt's revenue and once as this row's negative cost. September 2026 read $10,697.24
+       * better than the pharmacy actually did, and the owner found it before anything here did.
+       */
+      await clearRebatePaymentDates();
       await correctStandingRebateStatement();
       /*
        * And the booked rebate that cannot produce the statement it came from.

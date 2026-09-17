@@ -13,6 +13,8 @@ const wellRun: Facts = {
   invoicesShortCents: 0,
   lastSweptAt: "2026-09-17T16:29:00.000Z",
   bookedWithNoDocument: 0,
+  offsetsWithPaymentDates: 0,
+  offsetsWithPaymentDatesCents: 0,
   today: "2026-09-17",
   now: "2026-09-17T17:00:00.000Z",
 };
@@ -31,7 +33,7 @@ describe("a well-run day", () => {
       assert.ok(c.shouldBe.length > 40, `${c.what} has no rule written`);
       assert.equal(c.difference, null);
     }
-    assert.match(summarise(checks), /^All 6 checks pass\.$/);
+    assert.match(summarise(checks), /^All 7 checks pass\.$/);
   });
 });
 
@@ -73,6 +75,23 @@ describe("the faults of 17 September 2026, as they actually were", () => {
     assert.equal(c.ok, false);
     assert.match(c.difference!, /1 figure on the books/);
   });
+
+  /*
+   * The most expensive of the day, and the only one that moved a profit figure.
+   *
+   * Two rebate expenses carried the wholesaler's payment date, so the cash account had each of them
+   * twice — as the receipt's revenue and as this row's negative cost. $10,697.24 on September alone.
+   */
+  test("two rebate expenses dated as paid, putting $20,403.76 on the cash account twice", () => {
+    const c = check(
+      { offsetsWithPaymentDates: 2, offsetsWithPaymentDatesCents: 2_040_376 },
+      "No revenue offset is dated as paid",
+    );
+    assert.equal(c.ok, false);
+    assert.match(c.observed, /2 dated as paid, \$20,403\.76/);
+    assert.match(c.difference!, /counted twice on the cash account/);
+    assert.match(c.difference!, /gross profit is that much better/);
+  });
 });
 
 describe("the sweep, which is how nearly everything arrives", () => {
@@ -108,7 +127,7 @@ describe("what it says when it cannot say", () => {
 
   test("summarise names what failed rather than counting silently", () => {
     const s = summarise(runDailyCheck({ ...wellRun, inboxRows: 1822, invoicesShort: 4, invoicesShortCents: 768 }));
-    assert.match(s, /2 of 6 failing/);
+    assert.match(s, /2 of 7 failing/);
     assert.match(s, /one inbox row per delivered attachment/);
   });
 });

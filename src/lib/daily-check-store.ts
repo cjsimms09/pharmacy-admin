@@ -32,6 +32,8 @@ async function gather(): Promise<Facts> {
     invoicesShortCents,
     bookedWithNoDocument,
     lastSweptAt,
+    offsetsWithPaymentDates,
+    offsetsWithPaymentDatesCents,
   ] = await Promise.all([
     one(sql`select count(*) as n from inbox_items`),
     one(sql`select count(distinct message_id) as n from inbox_items`),
@@ -47,6 +49,14 @@ async function gather(): Promise<Facts> {
      */
     one(sql`select count(*) as n from expenses where invoice_number like 'REBATE|%' and document_id is null`),
     text(sql`select max(swept_at) as v from inbox_items`),
+    /*
+     * Revenue offsets dated as paid, by the category's kind rather than by name, so a new
+     * revenue-offset category is covered the day somebody adds it.
+     */
+    one(sql`select count(*) as n from expenses e join expense_categories k on k.id = e.category_id
+             where k.kind = 'revenue_offset' and e.paid_on is not null and e.status = 'confirmed'`),
+    one(sql`select coalesce(sum(abs(e.amount_cents)), 0) as n from expenses e join expense_categories k on k.id = e.category_id
+             where k.kind = 'revenue_offset' and e.paid_on is not null and e.status = 'confirmed'`),
   ]);
 
   const settings = await getSettings();
@@ -69,6 +79,8 @@ async function gather(): Promise<Facts> {
     invoicesShortCents,
     lastSweptAt,
     bookedWithNoDocument,
+    offsetsWithPaymentDates,
+    offsetsWithPaymentDatesCents,
     today: todayIso(),
     now: new Date().toISOString(),
   };

@@ -406,7 +406,8 @@ export async function postRebateToTheBooks(
         .update(expenses)
         .set({
           amountCents: -Math.abs(total),
-          paidOn: statement.paidOn ?? already.paidOn,
+          /* Cleared, not carried: see the note on the insert below. The receipt is the cash side. */
+          paidOn: null,
           notes:
             `From the wholesaler's own statement: brand ${((statement.brandRebateCents ?? 0) / 100).toFixed(2)}, ` +
             `generic ${((statement.genericRebateCents ?? 0) / 100).toFixed(2)}, fees ${((statement.totalFeesCents ?? 0) / 100).toFixed(2)}. ` +
@@ -423,7 +424,25 @@ export async function postRebateToTheBooks(
       invoiceNumber: key,
       /* The accrual date is the period it was earned in, not the day it was paid or read. */
       invoiceDate: statement.periodTo,
-      paidOn: statement.paidOn ?? null,
+      /*
+       * No paid date, and this is the line that was counting the rebate twice.
+       *
+       * The cash side of a rebate is the receipt written below — `addCashReceipt`, kind "rebate", in
+       * the month the wholesaler paid it. Putting the payment date on the expense as well made the
+       * same money arrive twice on the cash account: once as revenue from the receipt, and once as a
+       * NEGATIVE cost from this row, because `expensesIn(month, "cash")` selects on `paidOn`.
+       *
+       * Measured on 17 September 2026, an hour after the August statement was filed: September on
+       * the cash basis carried a −$10,697.24 expense AND a +$10,697.24 receipt, so gross profit was
+       * $10,697.24 better than the pharmacy's. The owner found it before any check here did — "are
+       * gross profit went up massively today and IDK how or why" — which is exactly the shape of
+       * fault this site is supposed to catch and did not.
+       *
+       * Every other revenue offset in this codebase already works this way and says so: booked with
+       * no paid date, because the cash account sees the money by its own route. A rebate's route is
+       * the receipt. This row is the accrual, and only the accrual.
+       */
+      paidOn: null,
       amountCents: -Math.abs(total),
       description: `${supplier.name} rebate, ${statement.periodFrom ?? "?"} to ${statement.periodTo}`,
       notes:
@@ -626,5 +645,31 @@ export async function attachMissingRebateDocuments(): Promise<{ linked: number; 
       linked === orphans.length
         ? `${linked} booked rebate${linked === 1 ? "" : "s"} now carr${linked === 1 ? "ies" : "y"} the statement ${linked === 1 ? "it" : "they"} came from.`
         : `${linked} of ${orphans.length} linked; the rest have no statement on file whose printed period matches what was booked.`,
+  };
+}
+
+/**
+ * Takes the payment date off rebate expenses, which is what made the cash account count them twice.
+ *
+ * A rebate's cash side is its receipt. The accrual row carrying a paid date as well meant
+ * `expensesIn(month, "cash")` returned it, so the same money arrived twice in the paid month: once
+ * as revenue and once as a negative cost. September 2026 was $10,697.24 better than the pharmacy.
+ *
+ * The code is fixed; these rows were written before it was. At boot, with the other corrections of
+ * known-wrong data, because a wrong profit figure is the one thing on this site nobody can afford to
+ * wait a night for.
+ */
+export async function clearRebatePaymentDates(): Promise<{ cleared: number; says: string }> {
+  const rows = (
+    await db.query.expenses.findMany({ columns: { id: true, invoiceNumber: true, paidOn: true, amountCents: true } })
+  ).filter((e) => (e.invoiceNumber ?? "").startsWith("REBATE|") && e.paidOn);
+  if (rows.length === 0) return { cleared: 0, says: "No rebate expense carries a payment date." };
+  for (const e of rows) {
+    await db.update(schema.expenses).set({ paidOn: null }).where(eq(schema.expenses.id, e.id));
+  }
+  const cents = rows.reduce((n, e) => n + Math.abs(e.amountCents), 0);
+  return {
+    cleared: rows.length,
+    says: `${rows.length} rebate expense${rows.length === 1 ? "" : "s"} had a payment date taken off, ${`$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} that the cash account was counting twice.`,
   };
 }

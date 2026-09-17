@@ -48,6 +48,15 @@ export type Facts = {
   lastSweptAt: string | null;
   /** Money booked off a statement that does not point at the statement it came from. */
   bookedWithNoDocument: number;
+  /**
+   * Revenue offsets carrying a payment date, which puts them on the cash account twice.
+   *
+   * A rebate, a DIR clawback, a recoupment: the cash side of each is its own receipt or a deposit
+   * that already arrived net. A paid date on the expense as well means `expensesIn(month, "cash")`
+   * returns it too, and the same money lands twice — as revenue and as a negative cost.
+   */
+  offsetsWithPaymentDates: number;
+  offsetsWithPaymentDatesCents: number;
   /** Today, so the check does not have to ask the clock and can be tested. */
   today: string;
   /** Now, ISO, for the same reason. */
@@ -204,6 +213,35 @@ export function runDailyCheck(f: Facts): Check[] {
       f.bookedWithNoDocument === 0
         ? null
         : `${f.bookedWithNoDocument} figure${f.bookedWithNoDocument === 1 ? "" : "s"} on the books that cannot show where ${f.bookedWithNoDocument === 1 ? "it" : "they"} came from.`,
+    kind: "money",
+  });
+
+  /*
+   * 7. No revenue offset carries a payment date.
+   *
+   * The check that should have existed this morning. A rebate, a DIR clawback and a recoupment are
+   * all money the pharmacy was told it had and did not; the cash account sees each by its own route —
+   * the rebate's receipt, or a deposit that already arrived net. A payment date on the expense as
+   * well puts it on the cash account a second time, as a negative cost beside the revenue, and
+   * profit goes up by the whole amount with nothing on any screen to say why.
+   *
+   * It happened on 17 September 2026 and the owner found it, not this site: "are gross profit went
+   * up massively today and IDK how or why." $10,697.24 on one month. Every other rule in this file
+   * exists because something was found by hand once; this is the most expensive of them.
+   */
+  checks.push({
+    what: "No revenue offset is dated as paid",
+    shouldBe:
+      "A rebate, a clawback or a recoupment is money the pharmacy was told it had earned and did not. The cash account sees it by its own route — the rebate's receipt, or a deposit that already arrived net — so the expense must carry no payment date. With one, the same money lands twice on the cash account and profit rises by the whole of it.",
+    observed:
+      f.offsetsWithPaymentDates === 0
+        ? "none of them is dated as paid"
+        : `${f.offsetsWithPaymentDates} dated as paid, ${money(f.offsetsWithPaymentDatesCents)} between them`,
+    ok: f.offsetsWithPaymentDates === 0,
+    difference:
+      f.offsetsWithPaymentDates === 0
+        ? null
+        : `${money(f.offsetsWithPaymentDatesCents)} is being counted twice on the cash account — once as revenue and once as a negative cost — so gross profit is that much better than the pharmacy's. Cleared at every restart; standing here means something is writing the date back.`,
     kind: "money",
   });
 
