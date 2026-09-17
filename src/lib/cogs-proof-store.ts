@@ -26,20 +26,41 @@ async function terms(from: string, to: string): Promise<CogsTerms> {
     return v === null || v === undefined ? null : Number(v);
   };
 
-  const claimsCogsCents = await one(
-    sql`select sum(acquisition_cents) as n from claims
-         where date_filled >= ${from} and date_filled <= ${to} and acquisition_cents is not null`,
-  );
+  /*
+   * Route one has to be the books' own figure, not one that resembles it.
+   *
+   * The first version of this summed `acquisition_cents` off the claims table by `date_filled`, and
+   * both halves of that were wrong. The account counts per FILL, not per transmission — a
+   * coordinated claim is one bottle billed to two payers, and summing the rows costs that bottle
+   * twice — and it dates a fill by `soldOn`, the day it left the shop, not the day it was filled.
+   *
+   * Measured: the raw sum for 1–16 September came to $420,327.82 against the account's $269,984.50.
+   * A proof of a figure that computes its own version of that figure is not a proof of anything; it
+   * is a second opinion about a third number. So it reads `allFills` — the same loader the profit
+   * and loss reads — and applies the same two rules, which is the only way a disagreement here can
+   * be a disagreement about the books.
+   */
+  const { allFills } = await import("./claims");
+  const fills = await allFills({ from, to: `${to}T23:59:59` });
+  const sold = fills.filter((f) => (f.soldOn ?? "").slice(0, 10) >= from && (f.soldOn ?? "").slice(0, 10) <= to && f.acquisitionCents !== null);
+  const claimsCogsCents = sold.length ? sold.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0) : null;
 
   /*
-   * What the wholesalers billed for GOODS, which is not what they billed.
+   * What actually arrived, from PioneerRx's own receiving — not from the invoices.
    *
-   * Line extensions rather than invoice totals, because a total carries freight, tax and fees — real
-   * money, and not goods that can sit on a shelf. Reconciling the shelf against a figure containing
-   * $406 of freight would put the freight into the gap and leave somebody hunting for it.
+   * The owner, when the first version reported a gap: "we have pioneer receipts". He is right, and
+   * it is the better term by a distance. An invoice is in this site only if the mailbox caught it,
+   * so the invoice feed measures the mailbox as much as the buying: on file are 41 McKesson invoices
+   * starting 9 September, 3 from IPD, none at all from ANDA. PioneerRx books in every delivery as it
+   * is received, whoever sent it and whether or not a PDF ever arrived — $362,526.71 for September
+   * against $203,727.64 of invoices, and it carries JamsRX, Xymogen and ANDA, which the invoice feed
+   * has never seen.
+   *
+   * Reconciling the shelf against invoices was therefore measuring how good the post is. This
+   * measures what was put on the shelf, which is the term the identity actually calls for.
    */
   const purchasesCents = await one(
-    sql`select sum(extended_cents) as n from invoice_lines
+    sql`select sum(total_cents) as n from pioneer_purchases
          where invoice_date >= ${from} and invoice_date <= ${to}`,
   );
 
