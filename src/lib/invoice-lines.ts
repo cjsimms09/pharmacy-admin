@@ -24,6 +24,8 @@
  * with anything, and it is read from the invoice rather than inferred from the drug.
  */
 
+import { salesTaxOnInvoice } from "./invoice-tax";
+
 export type InvoiceLineRead = {
   ndc11: string;
   description: string | null;
@@ -888,6 +890,20 @@ export function parseInvoiceLines(
   // A half left open — the last subtotal never printed, or the page it was on did not read — is
   // not silently treated as one kind or the other; those lines keep a null and say nothing.
   const totalCents = out.reduce((n, l) => n + l.extendedCents, 0);
+
+  /*
+   * Tax, where the invoice prints a subtotal that proves the item lines are all of them.
+   *
+   * Last, and only on what is still unexplained: if freight or another charge has already closed the
+   * gap there is nothing for this to find, and it refuses unless three printed figures agree with
+   * what was read. See invoice-tax.ts for why a label beside a number is not enough.
+   */
+  const otherChargesCents = charges.reduce((n, ch) => n + ch.amountCents, 0);
+  if (out.length > 0 && printedTotalCents !== null && totalCents + otherChargesCents !== printedTotalCents) {
+    const tax = salesTaxOnInvoice(text, totalCents, printedTotalCents, otherChargesCents);
+    if (tax) charges.push({ description: "Sales tax", amountCents: tax.amountCents });
+  }
+
   const chargesCents = charges.reduce((n, ch) => n + ch.amountCents, 0);
 
   /*
