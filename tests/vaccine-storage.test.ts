@@ -24,9 +24,17 @@ describe("what the cold chain policy commits the pharmacy to", () => {
   test("the logger's certificate is held, with the interval the certificate itself names", () => {
     const t = text();
     assert.match(t, /certificate of calibration testing traceable to a recognised standard/);
-    assert.match(t, /the expiry the certificate itself names are recorded/);
+    /*
+     * "Where the certificate states one" is load-bearing. The owner, 16 September: "I don't know
+     * when it ends.. don't specific in the P&P leave it vague and compliant." Some certificates
+     * give an expiry date and some give the manufacturer's recommended interval, so a policy that
+     * assumes the first is one this pharmacy can fail on paperwork it never received.
+     */
+    assert.match(t, /where the certificate states one its expiry, are recorded/);
+    assert.match(t, /confirmed at the annual vaccine storage review/);
     /* No interval is invented: the certificate says how long it is good for, not this manual. */
     assert.doesNotMatch(t, /every (one|two|1|2) years?/i);
+    assert.doesNotMatch(t, /biennial|annually recalibrat/i);
   });
 
   test("an excursion is quarantined and not discarded, which is the step that protects a patient", () => {

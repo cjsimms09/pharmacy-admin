@@ -506,7 +506,23 @@ export function policies(pharmacy: string): ManualPolicy[] {
          * toolkit asks for; the interval is whatever that certificate names, so the manual requires
          * the dates to be held rather than inventing a period of its own.
          */
-        "Each logger is a digital data logger with a current certificate of calibration testing traceable to a recognised standard. The date of calibration and the expiry the certificate itself names are recorded against that logger in the pharmacy's compliance system, and the certificate is filed there. A logger whose certificate has expired is re-certified or replaced before its readings are relied on again.",
+        /*
+         * Deliberately not specific about how long a calibration lasts.
+         *
+         * The owner, 16 September 2026, asked for the expiry: "I don't know when it ends.. don't
+         * specific in the P&P leave it vague and compliant." He is right, and it is right for a
+         * better reason than convenience. A manual is a standard the pharmacy is held to. Writing
+         * "recalibrated every two years" commits it to an interval nobody here has read off a
+         * certificate, and the first inspector to see a certificate saying something else has a
+         * finding the pharmacy wrote against itself. The requirement is that the certificate be
+         * current; the certificate is what says for how long. So the manual requires the dates to
+         * be held and reviewed, and names no period of its own.
+         *
+         * "Where the certificate states one" is doing real work in that sentence: some certificates
+         * give an expiry date, others give the manufacturer's recommended interval, and a policy
+         * that assumes the first is a policy this pharmacy can fail on paperwork it never received.
+         */
+        "Each logger is a digital data logger with a current certificate of calibration testing traceable to a recognised standard. The date of calibration, and where the certificate states one its expiry, are recorded against that logger in the pharmacy's compliance system, and the certificate itself is filed there. Whether the calibration is still current is confirmed at the annual vaccine storage review, and a logger found to be outside it is re-certified or replaced before its readings are relied on again.",
         /*
          * What is actually done about a reading out of range, as opposed to how it is recorded.
          *
