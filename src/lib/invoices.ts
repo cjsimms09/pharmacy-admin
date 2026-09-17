@@ -338,6 +338,24 @@ const CLASS_SCHEDULE_2 = new Set(["X", "A"]);
 const CLASS_SCHEDULE_3_5 = new Set(["B", "C", "D", "E"]);
 /** Item classes known to be nothing of the sort: legend, OTC, supplies. */
 const CLASS_UNCONTROLLED = new Set(["R", "O", "N", "S", "G", "H", "P", "T", "V", "W", "Y", "Z"]);
+/**
+ * Letters McKesson prints on a line that are not item classes at all.
+ *
+ * K marks a line bought on the generics contract — it is the single fact that decides whether a
+ * price gets the tier rate taken off it, and it says nothing whatever about what the drug is.
+ *
+ * It matters here because of where it sits. On an ordinary McKesson invoice the columns run AWP,
+ * class, price, K; on a drop ship the class column is empty, so `ITEM_LINE` — which takes the first
+ * capital after the first money — picks up the K. The drop ship of 17 September 2026 therefore came
+ * out as "1 line carries an item class this does not recognise (K), so what they are has to be
+ * confirmed. It could not be read automatically either", of an invoice that reads to the cent.
+ *
+ * Both halves of that were wrong, and the second is the one that matters: the site told him a
+ * document was unreadable when what was missing was a column the document does not print. A person
+ * still has to say what a page with no class letter carries — that asymmetry is deliberate and
+ * stays — but they should be told the truth about why they are being asked.
+ */
+const NOT_AN_ITEM_CLASS = new Set(["K"]);
 
 /** A line of the invoice's item table, and what the supplier said it was. */
 const ITEM_LINE = /^(\d{4,5}-\d{3,4}-\d{2}|\d{5}-\d{4}-\d{2}).{0,200}?\s([\d,]+\.\d{2})\s+([A-Z])\s/;
@@ -761,8 +779,14 @@ export function classifyInvoiceText(text: string): TextVerdict {
 
   const two = items.filter((i) => CLASS_SCHEDULE_2.has(i.cls));
   const lower = items.filter((i) => CLASS_SCHEDULE_3_5.has(i.cls));
+  /* A contract marker is not a class, so a line carrying only one carries no class at all. */
+  const unclassed = items.filter((i) => NOT_AN_ITEM_CLASS.has(i.cls));
   const unrecognised = items.filter(
-    (i) => !CLASS_SCHEDULE_2.has(i.cls) && !CLASS_SCHEDULE_3_5.has(i.cls) && !CLASS_UNCONTROLLED.has(i.cls),
+    (i) =>
+      !CLASS_SCHEDULE_2.has(i.cls) &&
+      !CLASS_SCHEDULE_3_5.has(i.cls) &&
+      !CLASS_UNCONTROLLED.has(i.cls) &&
+      !NOT_AN_ITEM_CLASS.has(i.cls),
   );
 
   head.allItems = items.map((i) => i.line);
@@ -807,6 +831,28 @@ export function classifyInvoiceText(text: string): TextVerdict {
       confident: false,
       controlledItems: unrecognised.map((i) => i.line),
       basis: `${unrecognised.length} line${unrecognised.length === 1 ? " carries an item class" : "s carry item classes"} this does not recognise (${[...new Set(unrecognised.map((i) => i.cls))].join(", ")}), so what they are has to be confirmed.`,
+    };
+  }
+
+  /*
+   * A page that prints no item class, which is not the same as one this could not read.
+   *
+   * McKesson's drop-ship layout leaves the class column empty and prints only the generics-contract
+   * K. There is nothing wrong with the reading — the invoice balances to the cent — and there is
+   * also no supplier determination on it, so it still needs a person. The difference is entirely in
+   * what he is told: a column the document does not print, rather than a document that could not be
+   * read. He was shown the second twice, of an invoice the site reads perfectly.
+   */
+  if (unclassed.length > 0) {
+    return {
+      ...head,
+      schedule: "unknown",
+      confident: false,
+      controlledItems: unclassed.map((i) => i.line),
+      basis:
+        `This layout prints no item class — ${unclassed.length === 1 ? "the one line carries" : `all ${unclassed.length} lines carry`} only ` +
+        `McKesson's generics-contract mark, which says nothing about what the drug is. The invoice itself read fine and balances to its printed total. ` +
+        `Nobody has said what these goods are, so it is held with the Schedule II records until you say otherwise.`,
     };
   }
 

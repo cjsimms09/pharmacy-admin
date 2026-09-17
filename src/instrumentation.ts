@@ -65,8 +65,17 @@ export async function register() {
        * sixteen months old. Filing now refuses to let an older statement do that; this puts the one
        * already on file back. A query when there is nothing to do.
        */
-      const { correctStandingRebateStatement } = await import("./lib/rebate-report-store");
+      const { correctStandingRebateStatement, attachMissingRebateDocuments } = await import("./lib/rebate-report-store");
       await correctStandingRebateStatement();
+      /*
+       * And the booked rebate that cannot produce the statement it came from.
+       *
+       * The morning check found it: $9,706.52 of July rebate on the books with no document_id,
+       * because that one was booked through the manual intake path and the document was never
+       * carried across. It spends correctly and proves nothing. Matched on the statement's printed
+       * period against the period already in the expense's key — never on amount or filing order.
+       */
+      await attachMissingRebateDocuments();
 
       /*
        * A day's re-read is forgotten on start-up, so a deploy always gets one.

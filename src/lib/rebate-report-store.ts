@@ -562,3 +562,69 @@ export async function correctStandingRebateStatement(): Promise<{ moved: boolean
     ? { moved: true, says: `The standing rebate statement moved from ${standingPeriodTo} to ${best.periodTo}.` }
     : { moved: false, says: `A newer statement to ${best.periodTo} is on file, but re-reading it did not pass its own checks, so nothing was changed.` };
 }
+
+/**
+ * Links a booked rebate back to the statement it came from, where the link was never made.
+ *
+ * The morning check asks whether money read off a document can produce that document, and on 17
+ * September 2026 it said no: one rebate expense, $9,706.52 for July, with no `document_id` at all.
+ * It spends correctly and proves nothing, and nobody would have noticed until an accountant or an
+ * inspector asked where the figure came from.
+ *
+ * It happened because that one was booked through the manual intake path rather than by the reader —
+ * a person uploaded the breakdown, confirmed the amount on the review form, and the expense was
+ * written without the document being carried across. The reader's own path has always set it.
+ *
+ * Narrow, and bounded by its own first query: nothing to link means one count and no file reads.
+ * Where there is something, it matches on the statement's printed period against the period already
+ * in the expense's key — not on amount, and not on filing order. A statement whose period does not
+ * match is not attached at all, because a document that cannot be shown to be the source of a
+ * figure is worse than no document: it is a wrong answer to the question the check is asking.
+ */
+export async function attachMissingRebateDocuments(): Promise<{ linked: number; says: string }> {
+  const orphans = (
+    await db.query.expenses.findMany({ columns: { id: true, invoiceNumber: true, documentId: true } })
+  ).filter((e) => (e.invoiceNumber ?? "").startsWith("REBATE|") && !e.documentId);
+  if (orphans.length === 0) return { linked: 0, says: "Every booked rebate carries its statement." };
+
+  const named = (
+    await db.query.documents.findMany({ columns: { id: true, storageKey: true, title: true, fileName: true } })
+  ).filter((d) => /rebate/i.test(d.title ?? "") || /rebate/i.test(d.fileName ?? ""));
+  if (named.length === 0) return { linked: 0, says: `${orphans.length} booked rebate has no statement on file to link to.` };
+
+  const { readFile } = await import("./files");
+  const { pdfText } = await import("./pdf-text");
+  /* Each candidate read once, whatever the number of orphans. */
+  const periods = new Map<string, string>();
+  for (const d of named) {
+    try {
+      const text = pdfText(await readFile(d.storageKey));
+      if (!looksLikeRebateReport(text)) continue;
+      const p = parseRebateReport(text);
+      if (p.trustworthy && p.statement.periodFrom && p.statement.periodTo) {
+        periods.set(`${p.statement.periodFrom}|${p.statement.periodTo}`, d.id);
+      }
+    } catch {
+      /* Unreadable: it cannot be evidence for anything. */
+    }
+  }
+
+  let linked = 0;
+  for (const e of orphans) {
+    /* The key is `REBATE|<supplierId>|<from>|<to>`: the period is already in it. */
+    const parts = (e.invoiceNumber ?? "").split("|");
+    if (parts.length < 4) continue;
+    const documentId = periods.get(`${parts[2]}|${parts[3]}`);
+    if (!documentId) continue;
+    await db.update(schema.expenses).set({ documentId }).where(eq(schema.expenses.id, e.id));
+    linked++;
+  }
+
+  return {
+    linked,
+    says:
+      linked === orphans.length
+        ? `${linked} booked rebate${linked === 1 ? "" : "s"} now carr${linked === 1 ? "ies" : "y"} the statement ${linked === 1 ? "it" : "they"} came from.`
+        : `${linked} of ${orphans.length} linked; the rest have no statement on file whose printed period matches what was booked.`,
+  };
+}
