@@ -25,6 +25,20 @@ The math has to be perfect — a wrong number that looks right is worse than no 
 
 ## Now
 
+### Decided, and not to be raised again
+
+- **The room sensor's `kind` says "refrigerator" and that is fine.** It prints on the monthly
+  temperature log as "Room Temperature (refrigerator) · acceptable range 68.0F to 77.0F", which
+  reads oddly, and it is display-only — nothing computes from `kind`, no reading or excursion
+  judgement touches it. Raised twice; the owner, 17 September 2026: "The rook sensor label is
+  fine.. just leave it." Do not raise it a third time.
+- **The fridge logger's calibration expiry is not known and is not being chased.** The owner, twice
+  on 17 September: "I don't know when it ends.. don't specific in the P&P leave it vague and
+  compliant", and "leave me alone about the fridge logger. idk when its calibration ends, I dont
+  care." The manual names no interval, the certificate is kept with the logger, and the site no
+  longer asks — see `calibration.ts`. A certificate that has demonstrably expired is still reported,
+  because that is a fact about whether the readings are backed.
+
 ### 0. Everything he asked for on the afternoon of 16 September, and where each stands
 
 He said it plainly: *"dont just drop what you are doing, everything I say needs to be fixed.. you
