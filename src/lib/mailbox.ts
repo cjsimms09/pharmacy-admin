@@ -5,6 +5,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { readPostageEmail } from "./postage-email";
 import { looksLikeEftNotice } from "./health-mart-eft";
+import { safeToDelete } from "./mail-cleanup";
 import { looksLikeRxSystemsInvoice, readRxSystemsInvoice } from "./rx-systems-invoice";
 import { bankEftNotice } from "./health-mart-eft-store";
 import { bankCardBatch } from "./card-batch-store";
@@ -921,6 +922,39 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
             result.stored++;
           }
           await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
+
+          /*
+           * Deleted from the mailbox, once the site can prove it has what was in it.
+           *
+           * The owner, 17 September 2026: "can i delete email in gmail?? can we do this automatically
+           * once we have what we need?" and then "delete on gmail".
+           *
+           * Off unless he switches it on, and gated by `safeToDelete` rather than by "we finished".
+           * Everything else in this file can be done again; a deleted email cannot, and on the day
+           * something has gone wrong it is the only remaining record of what a supplier actually
+           * sent. So a message is deleted only where every line it produced is stored, identified and
+           * read without a reader stopping short — and anything less leaves it where it is for ever,
+           * which is the cheap mistake of the two.
+           *
+           * Audited by what was deleted rather than by how many, because after this the message is
+           * not there to be looked at.
+           */
+          if ((s.mail_delete_when_done ?? "").toLowerCase() === "yes") {
+            const mine = await db.query.inboxItems.findMany({
+              where: or(eq(schema.inboxItems.messageId, messageId), sql`substr(${schema.inboxItems.messageId}, 1, ${messageId.length + 1}) = ${`${messageId}#`}`),
+              columns: { status: true, routedAs: true, routeResult: true, documentId: true },
+            });
+            const verdict = safeToDelete(mine);
+            if (verdict.ok) {
+              await client.messageDelete(String(uid), { uid: true });
+              await audit({
+                action: "inbox.deleted_from_mailbox",
+                userId: ctx.userId,
+                userName: ctx.userName,
+                details: `${subject || "(no subject)"} from ${from} — ${verdict.why}. Everything in it is on the site.`,
+              });
+            }
+          }
         } catch (e) {
           result.errors.push(e instanceof Error ? e.message.split("\n")[0] : String(e));
         }

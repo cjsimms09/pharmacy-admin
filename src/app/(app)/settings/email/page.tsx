@@ -122,6 +122,24 @@ export default async function EmailSettingsPage({ searchParams }: { searchParams
         </div>
 
         {/*
+          Deleting mail is the one thing here that cannot be undone, so it is off until he says so and
+          it is gated on proof rather than on completion. See `safeToDelete` in mail-cleanup.ts.
+        */}
+        <div className="sm:col-span-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="mail_delete_when_done" value="yes" defaultChecked={s.mail_delete_when_done === "yes"} />
+            Delete a message from the mailbox once everything in it is on the site
+          </label>
+          <p className="mt-1 text-xs text-ink-3">
+            Only where the site can prove it has what was in it: every attachment stored, every one identified, and no
+            reader that stopped short. A message with one refused attachment, one document nobody could name, or an
+            invoice whose figures would not balance is left alone — those are exactly the ones somebody goes back to the
+            original for. Anything not taken stays in the mailbox, so an inbox that is not quite empty is the worst this
+            can do. Deleting cannot be undone, and the audit log records each one with what was in it.
+          </p>
+        </div>
+
+        {/*
           Supplier addresses live in one place: the Suppliers register.
 
           They used to be set here as well, as free-text rules, and an address set in one place

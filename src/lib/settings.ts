@@ -432,6 +432,16 @@ export const SETTING_KEYS = [
    * happening — a machine that infers quietly is one nobody can check or correct.
    */
   "payer_links_learned_result",
+  /**
+   * Whether a message is deleted from the mailbox once the site can prove it has what was in it.
+   *
+   * The owner: "delete on gmail". Off unless it says yes, and gated by `safeToDelete` in
+   * `mail-cleanup.ts` — a message is only ever deleted where every line it produced is stored,
+   * identified and read without a reader stopping short. A deleted email cannot be got back, and on
+   * the day something has gone wrong it is the only remaining record of what a supplier actually
+   * sent, so anything short of proof leaves it where it is.
+   */
+  "mail_delete_when_done",
   "pioneer_pull_register_on",
   "pioneer_pull_register_result",
   "pioneer_register_check",

@@ -330,13 +330,25 @@ async function load(today: string): Promise<ExpectedNow> {
       label: "Bank statement",
       from: "Emprise",
       whyItMatters: "The only outside proof that the money the site says arrived actually arrived. Nothing reconciles without it.",
-      /* The statement closes at month end and is available in the first days of the next month. It is a scan: there is no CSV export (measured, and the reason the reader reads a PDF). */
-      cadence: { kind: "monthly", dayOfMonth: 5 },
+      /*
+       * Month end, on his instruction, and not asked for before it.
+       *
+       * The owner, 17 September 2026: "emprise you get at end of month.. stop asking." The row was
+       * set to the 5th of the following month, which is when a statement usually turns up, and it
+       * had never arrived — so it sat in "never once arrived" from the day the page was built,
+       * every day, about a document he had told me the timing of.
+       *
+       * Day 31 clamps to the last day of whatever month it is. `startsOn` keeps it quiet until the
+       * first one is genuinely owed rather than reporting an absence that is not yet an absence.
+       * It is a scan: there is no CSV export, which is why the reader reads a PDF.
+       */
+      cadence: { kind: "monthly", dayOfMonth: 31 },
       graceDays: 7,
+      startsOn: "2026-09-30",
       lastAt: t.bank.at,
       everCount: t.bank.n,
       expected: true,
-      note: "Not expected before the month closes. September's is due in the first week of October.",
+      note: "He collects this at the end of the month; nothing chases it before then.",
       arrivals: bankDays,
       href: "/money/bank",
     },
@@ -346,13 +358,19 @@ async function load(today: string): Promise<ExpectedNow> {
       from: "the ProviderPay portal — fetched by hand, nobody sends it",
       whyItMatters:
         "What each payer paid in and what was swept across to the operating account. It is what proves the deposits on the bank statement are the payments on the report and not more money.",
-      /* The owner, 16 September 2026: "wells fargo report that we manually get on first of month". */
-      cadence: { kind: "monthly", dayOfMonth: 1 },
+      /*
+       * "same with wells fargo" — 17 September 2026, of Emprise's "you get at end of month.. stop
+       * asking". He said on the 16th that he fetches it on the first of the month and on the 17th
+       * that it should stop asking before then; both describe one thing, which is that it belongs to
+       * the month end and not to any day before it.
+       */
+      cadence: { kind: "monthly", dayOfMonth: 31 },
       graceDays: 5,
+      startsOn: "2026-09-30",
       lastAt: str(wells.rows[0]?.at),
       everCount: num(wells.rows[0]?.n),
       expected: true,
-      note: "Nothing will ever arrive by itself here: it is downloaded from the portal, so this row is a reminder rather than a chase.",
+      note: "Fetched from the portal at the month end; nothing arrives by itself and nothing chases it before then.",
       arrivals: wellsDays,
       href: "/money",
     },
