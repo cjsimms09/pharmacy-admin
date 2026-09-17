@@ -29,6 +29,21 @@ export async function register() {
   // that way hides the Fetch button behind a job that no longer exists.
   void (async () => {
     try {
+      /*
+       * Wrong data does not wait for a quiet moment.
+       *
+       * The payer learner wrote one link before its guard existed — a BIN recorded as belonging to
+       * Health Mart Atlas, which is the courier and not a plan — and three claims were stamped with
+       * it. The undo was written and put on the nightly pass, and the nightly pass is gated on the
+       * site being idle, so the correction sat unrun while the wrong names stayed on the claims and
+       * I reported it as fixed.
+       *
+       * A correction of known-wrong data belongs here, at boot, with the other things that cannot
+       * wait: it is one query when there is nothing to undo, and it now also runs on every restart
+       * rather than once a night.
+       */
+      const { unlearnCourierLinks } = await import("./lib/payer-links");
+      await unlearnCourierLinks();
       const { failOrphanedNadacJob } = await import("./lib/nadac-job");
       await failOrphanedNadacJob();
       const { failOrphanedDirectoryJob } = await import("./lib/drug-directory-job");
