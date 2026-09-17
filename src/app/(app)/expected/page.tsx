@@ -142,16 +142,31 @@ function Count({ n, label, tone, big }: { n: number; label: string; tone: "crit"
   );
 }
 
+/**
+ * One row, one line.
+ *
+ * The owner, having been shown a table twice: "we still hjavent turned it into a table.. that is
+ * easily readbale". He was looking at a table, so what he meant was that it does not read like one —
+ * and he was right. Every row carried two or three lines of wrapped prose under the name, so
+ * twenty-five rows were seventy lines of text with a grid drawn round them. A table you cannot run
+ * your eye down is a list wearing a table's clothes.
+ *
+ * So a row is one line and nothing wraps. The sentence that explains a row still matters, but only
+ * for the rows that need doing — a feed that arrived this morning does not need a paragraph saying
+ * so — and it appears under the name only there, where there are never many. Every row carries it on
+ * hover as well, so nothing is lost for the ones that stay quiet.
+ */
 function Row({ r, now }: { r: Judged; now: Date }) {
   const chip = CHIP[r.state];
   const last = r.lastAt ? r.lastAt.slice(0, 10) : null;
+  const needsDoing = r.state === "overdue" || r.state === "due_now" || r.state === "never_arrived";
   return (
-    <tr className="align-top">
+    <tr title={r.says}>
       {/*
         Status first, with a colour bar, because this page exists to make a problem obvious and the
         last column on the right is the last place a reader looks.
       */}
-      <td>
+      <td className="whitespace-nowrap">
         <span className="flex items-center gap-2">
           <span className={`inline-block h-4 w-1 rounded-sm ${chip.stripe}`} aria-hidden />
           <span className={`badge ${chip.badge}`}>{chip.label}</span>
@@ -161,30 +176,23 @@ function Row({ r, now }: { r: Judged; now: Date }) {
         <Link href={r.href} className="font-medium text-ink hover:underline">
           {r.label}
         </Link>
-        {/* The one thing only this row needs: what happened, or what it is for. */}
-        <div className="mt-0.5 text-xs leading-relaxed text-ink-2">{r.says}</div>
-        {r.note && <div className="mt-0.5 text-xs leading-relaxed text-ink-3">{r.note}</div>}
+        {needsDoing && <div className="mt-0.5 text-xs leading-snug text-ink-2">{r.says}</div>}
       </td>
-      <td className="text-xs text-ink-2">{r.from}</td>
-      <td className="text-xs text-ink-2">
+      <td className="truncate text-xs text-ink-2">{r.from}</td>
+      <td className="whitespace-nowrap text-xs text-ink-2">
         {r.owing ? "one per delivery" : cadenceWords(r.using)}
-        {!r.owing && r.basis === "declared" && (
-          <span className="mt-0.5 block">
-            <span className="badge badge-muted">declared</span>
-          </span>
-        )}
+        {!r.owing && r.basis === "declared" && <span className="ml-1 text-ink-3">(declared)</span>}
       </td>
-      <td className="num text-xs text-ink-2">
+      <td className="num whitespace-nowrap text-xs">
         {last ? (
           <>
-            <span className="block text-ink">{fmt(last)}</span>
-            <span className="block text-ink-3">{agoWords(last, now)}</span>
+            <span className="text-ink">{fmt(last)}</span> <span className="text-ink-3">{agoWords(last, now)}</span>
           </>
         ) : (
           <span className="text-ink-3">never</span>
         )}
       </td>
-      <td className="num text-xs text-ink-2">
+      <td className="num whitespace-nowrap text-xs text-ink-2">
         {r.nextDueOn ? fmt(r.nextDueOn) : <span className="text-ink-3">—</span>}
       </td>
     </tr>
