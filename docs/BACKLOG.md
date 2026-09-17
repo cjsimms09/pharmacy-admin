@@ -56,15 +56,30 @@ here with its state, and nothing leaves until it is done and measured.
   Deliberately not learned from the mail — that is the inference that nearly renamed his claims after
   their courier this afternoon.
 
+**Answered on 17 September, and what each answer became:**
+
+- *"delete on gmail"* — a checkbox on Settings → Email, off until he ticks it, gated on proof rather
+  than on having finished: every attachment stored, every one identified, no reader that stopped
+  short. Anything less leaves the message where it is for ever.
+- *"AI output rate what do you need from me? fix it"* — nothing was needed. A $0 output rate is not a
+  price; the published rate for the model stands in, the page says so and names the **$87.00** the
+  zero was hiding, and his invoice figures replace it whenever he types them.
+- *"emprise you get at end of month.. stop asking"* and *"same with wells fargo"* — both moved to
+  month end and neither chased before it.
+- *"loggers exp date, idk leave vague but compliant"* — done by session 2 and merged. The clause
+  requires a current traceable certificate, kept and producible; dates recorded where known, said to
+  be unknown where not; currency confirmed at the annual review. No interval named, because the
+  certificate names its own.
+- *"bactrim indication ignore"* — dropped.
+
 **Still waiting on him, not on me:**
 
-- The **indication** for the 26.2 lb patient — Bactrim is right for some and wrong for others, and
-  the answer changes the recommendation entirely.
-- Confirm the bank split is as the site now has it: **Emprise** the operating account (a scan, no
-  CSV), **Wells Fargo / ProviderPay** the payer account he downloads on the 1st.
-- The fridge logger's **calibration expiry**; he gave the date, and no interval should be invented.
+- **Four BIN names** on Payers → Nobody can name. 73 claims carrying $1,830.76 have no payer, and
+  BIN 015581, 610097, 610502 and 025706 are most of the money. He reads these on sight; the site
+  never will, and after the courier incident it is not going to guess.
 - Every temperature sensor is typed `refrigerator`, including the room one, so the monthly log an
-  inspector reads prints "Room Temperature (refrigerator) · acceptable range 68.0F to 77.0F".
+  inspector reads prints "Room Temperature (refrigerator) · acceptable range 68.0F to 77.0F". Put to
+  him twice; display-only, but it prints on the document an inspector reads.
 
 ### A. Stop the setup list nagging about things he does not have (16 September)
 
