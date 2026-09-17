@@ -47,6 +47,8 @@ export type NadacStanding = {
   /** Whether the Kansas floor can reach this plan at all. */
   inScope: boolean;
   classification: string | null;
+  /** The register row governing this fill, so fills group by plan on a key rather than a printed name. */
+  planId: string | null;
   /** What can be done about it, in the words of the action. */
   standing: "owed" | "argue" | "the price" | "unclassified";
 };
@@ -151,7 +153,15 @@ export async function againstNadac(fills: Fill[]): Promise<AgainstNadac> {
     }
     const floor = computeFloor(f.quantityThousandths, nadac, ksFee);
     const primary = f.payers[0];
-    const cls = lookup({ bin: primary.bin, pcn: primary.pcn ?? null, groupNumber: primary.groupNumber })?.classification ?? null;
+    /*
+     * The register row itself, not only its classification.
+     *
+     * Attributing a fill to a plan by the payer's printed name is the fault that hid McKesson's
+     * catalogue for a fortnight: a display string is not a key. The row's own id is, and carrying it
+     * here is what lets anything downstream group fills by plan without matching on words.
+     */
+    const plan = lookup({ bin: primary.bin, pcn: primary.pcn ?? null, groupNumber: primary.groupNumber }) ?? null;
+    const cls = plan?.classification ?? null;
     const inScope = cls ? CLASS_INFO[cls as keyof typeof CLASS_INFO]?.inScope === true : false;
     const against = f.revenueCents - floor.floorCents;
 
@@ -180,6 +190,7 @@ export async function againstNadac(fills: Fill[]): Promise<AgainstNadac> {
       nadacOn: nadac.effectiveOn,
       inScope,
       classification: cls,
+      planId: plan?.id ?? null,
       standing,
     });
   }
