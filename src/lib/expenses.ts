@@ -247,10 +247,34 @@ export async function automaticReceiptsLike(month: string, amountCents: number):
 }
 
 export async function unpaid(): Promise<Expense[]> {
-  return db.query.expenses.findMany({
+  const rows = await db.query.expenses.findMany({
     where: and(isNull(schema.expenses.paidOn), eq(schema.expenses.status, "confirmed")),
     orderBy: [schema.expenses.invoiceDate],
   });
+  /*
+   * A revenue offset is not a bill, so it can never be owed.
+   *
+   * The owner, 17 September 2026: "all the pbm fees still say owed.. if we got them from the 835 I
+   * dont believe thats true." He is right, and the two facts that produce the error are both
+   * deliberate. A PBM origination fee, a DIR clawback, a recoupment and a wholesaler rebate are all
+   * booked with NO paid date on purpose — the money never moved, because the deposit arrived net of
+   * it, and writing a paid date would count it a second time on the cash account. And "unpaid" here
+   * means exactly "no paid date", so every one of them appeared on a list of bills to settle.
+   *
+   * Nobody is ever going to pay them. They are money the pharmacy was told it had earned and did
+   * not, deducted before the deposit was cut, and a list of outstanding bills that contains eight
+   * items nobody can pay is a list that stops being trusted — while a real unpaid invoice hides in
+   * the middle of it.
+   *
+   * Filtered by the category's kind rather than by name, so a new revenue-offset category is right
+   * the day somebody adds it.
+   */
+  const offsets = new Set(
+    (await db.query.expenseCategories.findMany({ columns: { id: true, kind: true } }))
+      .filter((k) => k.kind === "revenue_offset")
+      .map((k) => k.id),
+  );
+  return rows.filter((e) => !e.categoryId || !offsets.has(e.categoryId));
 }
 
 /**
@@ -574,26 +598,32 @@ export async function bookUnbookedSuppliesInvoices(): Promise<{ booked: number; 
   const { readFile } = await import("./files");
   const { pdfText } = await import("./pdf-text");
 
-  const docs = await db.query.documents.findMany({ columns: { id: true, title: true, fileName: true, storageKey: true } });
-  const candidates = docs.filter((d) => /invoice/i.test(d.title ?? "") || /invoice/i.test(d.fileName ?? ""));
-
   /*
-   * Who sent each one, because this document cannot name itself.
+   * Who sent each one, because this document cannot name itself — and because it is also the cheap
+   * way to narrow this to the documents that could possibly be one.
    *
-   * The first version of this passed no sender and relied on the page saying "Rx Systems, Inc." It
-   * does say it, and the PDF's text layer does not survive it: the extraction clips strings, so the
-   * address comes out as "SAIN, MO 63301" and the city as "WICHI, KS 67212". A test that needs the
-   * company's full name on a page that loses the end of every string fails on the one document it
-   * was written for — which it did, silently, and the $1,715 stayed off the books through a deploy
-   * I had already called a fix.
+   * The first version passed no sender and relied on the page saying "Rx Systems, Inc." It does say
+   * it, and the PDF's text layer does not survive it: the extraction clips the end of every string,
+   * so the address comes out as "SAIN, MO 63301" and the city as "WICHI, KS 67212". A test that
+   * needs a company's full name on a page like that fails on exactly the document it exists for —
+   * which it did, silently, and the $1,715 stayed off the books through a deploy I had already
+   * called a fix.
    *
-   * The sender is not clipped. It is on the inbox row that filed the document, it is the thing
-   * `looksLikeRxSystemsInvoice` prefers when it has it, and it is how the live sweep recognises
-   * these at all.
+   * The second version fixed the recognition and opened 89 PDFs to do it, at start-up, on a machine
+   * with 7.3 GB of memory — which is how a correction becomes the reason the site is slow to come
+   * back. Sender first, from one query: a supplies invoice arrives from the company that sells the
+   * supplies, so anything not from them cannot be one and is never read. Eighty-nine files becomes
+   * one, and stays one however large the vault gets.
    */
   const arrivals = await db.query.inboxItems.findMany({ columns: { documentId: true, fromAddress: true } });
   const senderOf = new Map<string, string>();
   for (const a of arrivals) if (a.documentId && a.fromAddress) senderOf.set(a.documentId, a.fromAddress);
+
+  const docs = await db.query.documents.findMany({ columns: { id: true, title: true, fileName: true, storageKey: true } });
+  const candidates = docs.filter((d) => {
+    if (!/rxsystems\.com/i.test(senderOf.get(d.id) ?? "")) return false;
+    return /invoice/i.test(d.title ?? "") || /invoice/i.test(d.fileName ?? "");
+  });
 
   let booked = 0;
   let cents = 0;
