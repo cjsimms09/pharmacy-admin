@@ -43,6 +43,19 @@ here with its state, and nothing leaves until it is done and measured.
 | "it should show month closed only once everything is done, money matches and everything lines up" | **Done.** Four states; "closed" needs every document in *and* every figure tying. |
 | "get rid of still to upload for august alert" | **Done**, in the checklist rather than the alert, so every reader is fixed. |
 
+**Waiting on him, added late on 16 September:**
+
+- **Press "Read it again" on the Rx Systems line in the Inbox.** The supplies reader is deployed and
+  proved against that invoice — $1,715.00 of goods, $406.00 of freight excluded on their own printed
+  terms, arithmetic tying to their $2,121.00 total — but the message-id fix means that message will
+  never be swept again, so the one already in the vault needs the press. Everything they send after
+  today books itself.
+- **Vendors have no sending addresses.** Rx Systems and Endicia are both on the vendor register with
+  the right categories and an empty . The supplies reader falls back to matching on
+  the name, so Rx Systems works; the next supplies vendor will not until its address is on its row.
+  Deliberately not learned from the mail — that is the inference that nearly renamed his claims after
+  their courier this afternoon.
+
 **Still waiting on him, not on me:**
 
 - The **indication** for the 26.2 lb patient — Bactrim is right for some and wrong for others, and
