@@ -8,6 +8,7 @@ import { CLASS_INFO } from "@/lib/plans";
 import { SOURCE_LABEL } from "@/lib/plan-evidence";
 import { planShortlist } from "@/lib/plan-shortlist-store";
 import { formatCents } from "@/lib/money";
+import { familyTabs } from "@/lib/families";
 import { PageHeader, Card, Figure, Notice, Empty } from "@/components/ui";
 
 /**
@@ -152,6 +153,12 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
       <PageHeader
         title="Plan classification"
         subtitle="Which law each plan sits under, proposed from the BIN listing and confirmed by you."
+        /*
+          Without these this page could be reached and not left: it is in the floor family now, and
+          every other page in that family carries the row. Nothing in the whole site linked here
+          until 17 September 2026 — the only route in the inventory with no inbound link at all.
+        */
+        tabs={familyTabs("floor", "/payers/plans")}
         help={
           <>
             <p>

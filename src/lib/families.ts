@@ -42,6 +42,20 @@ export const FAMILIES = {
   floor: [
     { href: "/claims/floor", label: "Paid under the floor" },
     { href: "/plans", label: "Which plans it reaches" },
+    /*
+     * The one that actually gets the plans classified, and nothing in the site linked to it.
+     *
+     * 17 September 2026, the owner: "We still don't know how to classify all these plans." It had
+     * been built — it reads what each plan identifies itself as, offers the class with the sentence
+     * behind it, biggest first, one press to confirm — and then no menu entry, no tab and no link
+     * anywhere pointed at it. An inventory of every route found exactly one page with no inbound
+     * link in the whole site, and it was this one.
+     *
+     * Beside the register rather than instead of it: /plans is ninety blank boxes to fill in by
+     * hand, which is the job nobody finishes, and this is the same job done by confirming. Second
+     * in the row because "which plans does the floor reach" is the question the family is about.
+     */
+    { href: "/payers/plans", label: "Classify by evidence" },
     { href: "/claims/appeals", label: "Appeals filed" },
   ],
   payers: [
