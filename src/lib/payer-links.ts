@@ -1,6 +1,6 @@
 import "server-only";
 import { db, schema } from "@/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { newId } from "./crypto";
 
 /**
@@ -153,9 +153,15 @@ export type LearnedFrom = { key: ClaimKey; payer: string };
 /**
  * Whether a name on a remittance is somebody moving money for a plan, rather than the plan itself.
  *
- * The check that stopped this feature being worse than not having it. Written, deployed, and then
- * asked — before the nightly pass had run once — what it would actually teach against the live data.
- * The answer was one link: a BIN belongs to "Health Mart Atlas".
+ * The check that stopped this feature being worse than not having it — one pass too late.
+ *
+ * Written, deployed, and only then asked what it would teach against the live data. The answer was
+ * one link: a BIN belongs to "Health Mart Atlas". I reported that nothing had been written because
+ * the pass had not run. It had run, at 17:10, twenty minutes earlier, and the setting that says so
+ * was one query away: **1 payer link learned, 3 claims named.** Three of his claims spent the night
+ * under the name of their courier, and the sentence telling him they had not was mine.
+ *
+ * `unlearnCourierLinks` takes it back, nightly and for nothing.
  *
  * Health Mart Atlas does not owe this pharmacy anything. It is the PSAO the money travels through,
  * and its own payment report names the real plan in a sentence beside the figure — Caremark, Prime
@@ -234,7 +240,44 @@ export async function applyLinksToClaims(): Promise<{ claims: number }> {
  * Only claims with no settled payer name are offered as evidence — see `linksToLearn` for why, and
  * for the three things it refuses to conclude.
  */
-export async function learnLinksFromRemittances(): Promise<{ learned: number; conflicting: number; claimsNamed: number }> {
+/**
+ * Takes back links this learned that it should never have written.
+ *
+ * It did write one. On 16 September 2026 at 17:10 — twenty minutes before the courier guard was
+ * deployed, and while I was telling the owner "nothing was written: the pass had not run" — the
+ * nightly pass learned that BIN 005377 belongs to **Health Mart Atlas** and stamped three of his
+ * claims with it. Health Mart Atlas is the PSAO the money travels through. It owes this pharmacy
+ * nothing, and three claims were sitting under the name of their courier.
+ *
+ * I was wrong about it twice over: wrong to ship the learner before asking what it would teach, and
+ * wrong again to tell him nothing had happened without checking the one setting that would have
+ * said so. The guard stops the next one. This undoes the last one, because a machine that can be
+ * wrong and cannot take it back is a machine nobody should let near a ledger.
+ *
+ * Only ever its own rows: `confirmedBy` is "an 835" on a link this wrote and a person's name on a
+ * link they wrote, and a human decision is never touched here whatever it says.
+ */
+export async function unlearnCourierLinks(): Promise<{ removed: number; names: string[] }> {
+  const mine = (await allPayerLinks()).filter((l) => l.confirmedBy === "an 835" && routesMoneyForOthers(l.pbmName));
+  for (const l of mine) {
+    await db.delete(schema.payerLinks).where(eq(schema.payerLinks.id, l.id));
+    /*
+     * And the claims it stamped, back to unresolved rather than to some other guess. "Nobody knows"
+     * is the true state and it is the state that gets asked about; a courier's name looks settled
+     * and would never be questioned again.
+     */
+    await db
+      .update(schema.claims)
+      .set({ pbmName: null, matchMethod: "unresolved" })
+      .where(and(eq(schema.claims.pbmName, l.pbmName), eq(schema.claims.matchMethod, "confirmed_link")));
+  }
+  return { removed: mine.length, names: [...new Set(mine.map((l) => l.pbmName))] };
+}
+
+export async function learnLinksFromRemittances(): Promise<{ learned: number; conflicting: number; claimsNamed: number; unlearned: number }> {
+  /* Anything it got wrong before the guard existed comes out first, every night, for nothing. */
+  const undone = await unlearnCourierLinks();
+
   const rows = await db
     .select({
       bin: schema.claims.bin,
@@ -284,5 +327,5 @@ export async function learnLinksFromRemittances(): Promise<{ learned: number; co
   }
 
   const applied = learn.length > 0 ? await applyLinksToClaims() : { claims: 0 };
-  return { learned: learn.length, conflicting, claimsNamed: applied.claims };
+  return { learned: learn.length, conflicting, claimsNamed: applied.claims, unlearned: undone.removed };
 }

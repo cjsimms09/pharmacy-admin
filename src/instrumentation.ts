@@ -696,11 +696,11 @@ export async function register() {
     try {
       const { learnLinksFromRemittances } = await import("./lib/payer-links");
       const r = await learnLinksFromRemittances();
-      if (r.learned === 0 && r.conflicting === 0) return;
+      if (r.learned === 0 && r.conflicting === 0 && r.unlearned === 0) return;
       const { setSetting } = await import("./lib/settings");
       await setSetting(
         "payer_links_learned_result",
-        `${new Date().toISOString()} — ${r.learned} payer link(s) learned from remittances, ${r.claimsNamed} claim(s) named${r.conflicting ? `; ${r.conflicting} key(s) left for a person because two payers have paid on them` : ""}`,
+        `${new Date().toISOString()} — ${r.learned} payer link(s) learned from remittances, ${r.claimsNamed} claim(s) named${r.unlearned ? `; ${r.unlearned} link(s) taken back because they named a courier rather than a plan` : ""}${r.conflicting ? `; ${r.conflicting} key(s) left for a person because two payers have paid on them` : ""}`,
       );
     } catch {
       // Recorded in settings; never allowed to stop the app.

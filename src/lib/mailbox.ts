@@ -4,6 +4,7 @@ import path from "node:path";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { readPostageEmail } from "./postage-email";
+import { looksLikeEftNotice } from "./health-mart-eft";
 import { looksLikeRxSystemsInvoice, readRxSystemsInvoice } from "./rx-systems-invoice";
 import { bankEftNotice } from "./health-mart-eft-store";
 import { bankCardBatch } from "./card-batch-store";
@@ -247,7 +248,27 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
           const self = (s.mail_user ?? "").trim().toLowerCase();
           if (self && from === self) {
             const carriesReport = (parsed.attachments ?? []).some((a) => acceptableAttachment({ filename: a.filename ?? null, contentType: a.contentType ?? null, content: a.content }).ok);
-            if (!carriesReport) continue;
+            /*
+             * Or a body a reader knows, because the most valuable messages here have no attachment.
+             *
+             * The owner set up a rule on 17 September 2026 to forward Health Mart Atlas's EFT
+             * notices automatically — the best possible answer to "somebody has to remember to
+             * forward this", and the thing that would have silently defeated it is the guard I wrote
+             * the day before. Those notices carry no attachment at all: the whole payment is four
+             * lines of text, read by `looksLikeEftNotice`. A rule forwarding from the pharmacy's own
+             * address would have made every one of them "from self with nothing attached", and each
+             * would have been dropped without a line, a reason or a trace — $21,745.11 on the first
+             * one alone.
+             *
+             * The guard's real subject was never "no attachment". It was our own outgoing post
+             * coming back: a training reminder this site sent, which no reader recognises and which
+             * must stay unread so it does not look delivered. So the test is whether anything here
+             * can read it, in either half of the message.
+             */
+            const words = `${parsed.text ?? ""}
+${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
+            const bodyIsAReport = looksLikeEftNotice(subject, words) || readPostageEmail(from, subject, parsed.text ?? "") !== null;
+            if (!carriesReport && !bodyIsAReport) continue;
           }
 
           /*
