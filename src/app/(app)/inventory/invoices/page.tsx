@@ -47,6 +47,8 @@ import {
 import { supplierPayments, allocatedByInvoice, removeSupplierPayment } from "@/lib/supplier-payments";
 import { stillToChase, fromBeforeWeWatched } from "@/lib/invoices-owed";
 import { checkInvoicePrices } from "@/lib/invoice-price-check";
+import { duplicateInvoiceDocuments, removeDuplicateInvoiceDocuments } from "@/lib/duplicate-documents-store";
+import { DOCUMENT_CATEGORY_LABEL } from "@/lib/labels";
 import { invoiceCompliance, RETENTION_YEARS } from "@/lib/invoice-compliance";
 import { setSetting } from "@/lib/settings";
 import { getSettings } from "@/lib/settings";
@@ -166,6 +168,16 @@ export default async function InvoicesPage({
   const { db: database } = await import("@/db");
   const documentIds = new Set((await database.query.documents.findMany({ columns: { id: true } })).map((d) => d.id));
   const orphanRows = rows.filter((r) => !documentIds.has(r.documentId));
+
+  /*
+   * Copies of invoice documents the mailbox filed more than once.
+   *
+   * Counted here and never acted on here: the removal happens only when he presses the button, and
+   * it calls the same planning function this count came from, so the number he reads and the rows
+   * that go cannot disagree. Read-only until pressed is the whole design — this deletes records out
+   * of the archive a DEA inspection reads.
+   */
+  const duplicates = canManage ? await duplicateInvoiceDocuments() : null;
 
   // What is in the invoice folder that is not an invoice. Only an invoice belongs there.
   const misfiled = canManage ? await misfiledInVault() : [];
@@ -756,6 +768,27 @@ export default async function InvoicesPage({
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/inventory/invoices?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not re-read those."));
+    }
+  }
+
+  /**
+   * Removes the copies, once he has read what would go and pressed the button.
+   *
+   * Never on a timer and never on arrival. The count on the card comes from the same `plan()` this
+   * calls, so nothing can have drifted between reading and pressing except the database itself — and
+   * if it has, the plan is rebuilt against what is there now rather than against what the card said.
+   */
+  async function removeDuplicates() {
+    "use server";
+    const u = await requireManager();
+    try {
+      const r = await removeDuplicateInvoiceDocuments({ userId: u.id, userName: u.name });
+      revalidatePath("/inventory/invoices");
+      revalidatePath("/documents");
+      redirect("/inventory/invoices?ok=" + encodeURIComponent(r.says));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/inventory/invoices?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not remove those."));
     }
   }
 
@@ -1421,6 +1454,44 @@ export default async function InvoicesPage({
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+
+      {duplicates && duplicates.removable > 0 && (
+        <Card
+          tone="warn"
+          title="The same invoices, filed more than once"
+          count={duplicates.removable}
+          subtitle="Nothing is missing and no invoice lost its document — what is wrong is the counting. Removing these leaves exactly one of each file, and the drawers below then hold one record per invoice."
+          className="mt-4 mb-6"
+          actions={
+            <form action={removeDuplicates}>
+              <SubmitButton className="btn btn-sm btn-primary" pendingLabel="Removing the extra copies…" formNoValidate>
+                Remove the {duplicates.removable} extra copies
+              </SubmitButton>
+            </form>
+          }
+        >
+          <ul className="rows">
+            {duplicates.drawers.map((d) => (
+              <li key={d.category} className="flex flex-wrap items-baseline justify-between gap-2 py-2">
+                <span className="text-sm">{DOCUMENT_CATEGORY_LABEL[d.category as keyof typeof DOCUMENT_CATEGORY_LABEL] ?? d.category}</span>
+                <span className="text-xs text-ink-2 tabular-nums">
+                  {d.rows} record{d.rows === 1 ? "" : "s"} for {d.files} invoice{d.files === 1 ? "" : "s"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {/*
+            Said out loud, because this deletes rows out of the archive an inspection reads and the
+            only honest way to offer that is to state what it refuses to touch before he presses it.
+          */}
+          <p className="mt-3 text-xs text-ink-3">
+            A copy is removed only where all four hold: nothing anywhere in this site names it, another row with
+            byte-identical contents is still held against an invoice, it does not share its stored file with any other
+            row, and it is an invoice record. Anything failing one of them is kept —{" "}
+            {duplicates.keptBecause.map((k) => `${k.count} because ${k.reason}`).join("; ")}.
+          </p>
         </Card>
       )}
 
