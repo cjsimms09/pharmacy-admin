@@ -51,7 +51,7 @@ here with its state, and nothing leaves until it is done and measured.
   never be swept again, so the one already in the vault needs the press. Everything they send after
   today books itself.
 - **Vendors have no sending addresses.** Rx Systems and Endicia are both on the vendor register with
-  the right categories and an empty . The supplies reader falls back to matching on
+  the right categories and no sending address recorded. The supplies reader falls back to matching on
   the name, so Rx Systems works; the next supplies vendor will not until its address is on its row.
   Deliberately not learned from the mail — that is the inference that nearly renamed his claims after
   their courier this afternoon.
