@@ -287,17 +287,22 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   }
   const clocksNear = clocks.filter((c) => (daysUntil(c.on!) ?? 99) <= 14);
 
+  const stalled = jobs.filter((j) => j.state === "stale");
+  // The feeds the figures come from, judged from their own tables; the sensors and backup are already in `jobs`.
+  const lateFeeds = (await feedsNow()).late.filter((f) => f.group === "arriving");
+
   /*
    * Everything wrong with the site itself, gathered into one list and ranked.
    *
-   * These were five banners, each writing its own paragraph. The prose was good and there was far
-   * too much of it: on a bad morning it filled the screen before the scoreboard, which is the
-   * opposite of what a dashboard is for. The reasons survive as the short clause after each name —
-   * the rule being that a person should be able to tell in four words whether it is their problem
-   * right now, and follow the link when it is.
+   * These were five banners and two full cards, each writing its own paragraph. The prose was good
+   * and there was far too much of it: on a bad morning it filled the screen before the scoreboard,
+   * which is the opposite of what a dashboard is for. The reasons survive as the short clause after
+   * each name — the rule being that a person should be able to tell in four words whether it is
+   * their problem right now, and follow the link when it is.
    *
-   * Ranked by what it costs to leave: a form going to the Board with a blank on it, then money
-   * that cannot be sent or chased, then the site's own data, then housekeeping.
+   * Ranked by what it costs to leave: a form going to the Board with a blank on it, then data that
+   * has stopped arriving, then money that cannot be sent or chased, then housekeeping. A stale feed
+   * is third from nothing because every figure downstream of it goes on looking right.
    */
   const attention: { what: string; detail: string | null; href: string; action: string; kind: "crit" | "warn" }[] = [];
   if (setup.length > 0) {
@@ -316,6 +321,33 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       href: "/settings/email",
       action: mail.configured ? "Check and send a test" : "Set up sending",
       kind: mail.state === "unproven" ? "warn" : "crit",
+    });
+  }
+  /*
+   * A feed that has stopped, and a job that has stopped, which were two crit cards of their own.
+   *
+   * Both are the same sentence — something that should be happening is not — and both were taking a
+   * full panel to say it. The feed one matters most of anything on this list: a report that stops
+   * arriving does not blank a figure, it freezes one, so everything downstream goes on looking
+   * exactly as right as it did yesterday. "Is everything arriving?" is now a page of its own, which
+   * is where the detail belongs.
+   */
+  if (lateFeeds.length > 0) {
+    attention.push({
+      what: lateFeeds.length === 1 ? "A report the site runs on has stopped arriving" : `${lateFeeds.length} reports the site runs on have stopped arriving`,
+      detail: `${lateFeeds.map((f) => `${f.label} (last ${f.lastAt ? f.lastAt.slice(0, 10) : "never"})`).join(", ")} — every figure downstream is going stale while still looking right`,
+      href: "/expected",
+      action: "What we're expecting",
+      kind: "crit",
+    });
+  }
+  if (stalled.length > 0) {
+    attention.push({
+      what: stalled.length === 1 ? "Something the site does for you has stopped" : `${stalled.length} things the site does for you have stopped`,
+      detail: `${stalled.map((j) => j.label).join(", ")} — a job that quietly stops looks exactly like one with nothing to do`,
+      href: "/tools/check",
+      action: "The morning check",
+      kind: "crit",
     });
   }
   if (clocksNear.length > 0) {
@@ -346,9 +378,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     });
   }
 
-  const stalled = jobs.filter((j) => j.state === "stale");
-  // The feeds the figures come from, judged from their own tables; the sensors and backup are already in `jobs`.
-  const lateFeeds = (await feedsNow()).late.filter((f) => f.group === "arriving");
 
   return (
     <>
@@ -456,7 +485,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         stays on its own page, so that these two keep meaning something.
       */}
       {/* ── The four numbers. Large, because this is the question asked from the doorway. ── */}
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
         <Figure
           value={lateCount}
           label="Late"
@@ -478,13 +507,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           tone={quick.length === 0 ? "ok" : quickLate > 0 ? "warn" : "ok"}
           href="#quick"
         />
-        <Figure
-          value={soon.length}
-          label="Coming up"
-          sub="Next 60 days · none of it late"
-          tone="ok"
-          href="#soon"
-        />
+        {/*
+          "Coming up" was a fourth tile here and is gone.
+
+          Its own subtitle read "none of it late" — a tile that is green by definition, whose number
+          only ever means "the future exists", pointing at a collapsed panel further down the same
+          page. Three tiles that can turn red are a scoreboard; a fourth that cannot is furniture,
+          and furniture is what makes a dashboard read as amateur. The panel itself is still there.
+        */}
       </div>
 
       {(() => {
@@ -609,32 +639,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         );
       })()}
 
-      {lateFeeds.length > 0 && (
-        <Card
-          tone="crit"
-          title={lateFeeds.length === 1 ? "A report the site runs on has stopped arriving" : `${lateFeeds.length} reports the site runs on have stopped arriving`}
-          className="mb-6"
-        >
-          <p className="text-sm text-ink-2">
-            {lateFeeds.map((f) => `${f.label} (last ${f.lastAt ? f.lastAt.slice(0, 10) : "never"})`).join(", ")}. Every figure downstream of {lateFeeds.length === 1 ? "it" : "them"} is quietly going stale while continuing to look right.{" "}
-            <Link href="/settings/feeds" className="underline">Is everything arriving?</Link>
-          </p>
-        </Card>
-      )}
-
-      {stalled.length > 0 && (
-        <Card
-          tone="crit"
-          title={stalled.length === 1 ? "Something the site does for you has stopped" : `${stalled.length} things the site does for you have stopped`}
-          className="mb-6"
-        >
-          <p className="text-sm text-ink-2">
-            {stalled.map((j) => j.label).join(", ")}. A job that quietly stops looks exactly like one with nothing to
-            do — which is the one failure mode of automating any of this.
-          </p>
-        </Card>
-      )}
-
       {/*
         Is my staff covered — second, and prominent, because it is the question an inspector asks
         and the only view that answers it in one look.
@@ -711,11 +715,25 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             </p>
           </Card>
         ) : (
-          <div className="space-y-4">
-            <Group title="Training" rows={lateTraining} action={{ href: "/compliance/training", label: "Send training" }} />
-            <Group title="Licences and credentials" rows={lateCredentials} action={{ href: "/staff", label: "Staff" }} />
-            <Group title="Pharmacy duties" rows={latePharmacy.filter((r) => !r.attest)} action={{ href: "/compliance", label: "Compliance" }} />
-          </div>
+          /*
+            One queue, banded — not three cards.
+
+            Training, licences and pharmacy duties were a card each, with their own heading, their
+            own count and their own button. Three panels, all answering the same question: what is
+            late and what do I do about it. On a morning with one item in each, that was three
+            bordered boxes holding three rows between them, and the eye has to start again at every
+            border.
+
+            Banded inside one card instead, worst first, each band naming where the work is done.
+            The same rows, the same counts, the same links out — one object to read instead of three.
+          */
+          <LateQueue
+            bands={[
+              { title: "Pharmacy duties", rows: latePharmacy.filter((r) => !r.attest), href: "/compliance", label: "Compliance" },
+              { title: "Licences and credentials", rows: lateCredentials, href: "/staff", label: "Staff" },
+              { title: "Training", rows: lateTraining, href: "/compliance/training", label: "Send training" },
+            ]}
+          />
         )}
       </section>
 
@@ -786,17 +804,45 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 }
 
 /**
- * One band of late things.
+ * Everything late, in one card, banded by where the work gets done.
  *
- * Grouped by the kind of work rather than by severity, because those are three different
- * afternoons: sending training out, chasing paperwork off individual people, and duties only the
- * PIC can discharge. A single list sorted by days late interleaves all three and makes every one
- * of them feel unfinished.
+ * This was three separate cards, one per band, each with its own heading, count and button. The
+ * owner's verdict on the site was that it is busy and reads as amateur, and three bordered boxes
+ * holding three rows between them is a good part of what that looks like: the eye has to start
+ * again at every border, and nothing tells it which box matters more.
+ *
+ * The banding itself is kept, because those are three different afternoons — sending training out,
+ * chasing paperwork off individual people, and duties only the PIC can discharge — and a single
+ * list sorted by days late interleaves all three and makes every one of them feel unfinished. What
+ * changed is that they are now bands inside one object rather than three objects, worst first, and
+ * an empty band is dropped rather than drawn.
  */
-function Group({ title, rows, action }: { title: string; rows: Row[]; action: { href: string; label: string } }) {
-  if (rows.length === 0) return null;
+function LateQueue({ bands }: { bands: { title: string; rows: Row[]; href: string; label: string }[] }) {
+  const live = bands.filter((b) => b.rows.length > 0);
+  if (live.length === 0) return null;
+  const total = live.reduce((n, b) => n + b.rows.length, 0);
   return (
-    <Card title={title} count={rows.length} actions={<Link href={action.href} className="btn btn-sm">{action.label}</Link>}>
+    <Card title="Late" count={total}>
+      <div className="divide-y divide-line">
+        {live.map((b) => (
+          <div key={b.title} className="py-2.5 first:pt-0 last:pb-0">
+            <div className="mb-1 flex items-baseline justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-3">
+                {b.title} <span className="font-normal tabular-nums">({b.rows.length})</span>
+              </h3>
+              <Link href={b.href} className="text-xs text-accent hover:underline">{b.label}</Link>
+            </div>
+            <BandRows rows={b.rows} href={b.href} />
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function BandRows({ rows, href }: { rows: Row[]; href: string }) {
+  return (
+    <>
       <ul className="rows">
         {rows.slice(0, 10).map((r) => (
           <li key={r.key}>
@@ -811,11 +857,11 @@ function Group({ title, rows, action }: { title: string; rows: Row[]; action: { 
         ))}
       </ul>
       {rows.length > 10 && (
-        <p className="mt-3 text-xs text-ink-3">
-          <Link href={action.href} className="underline">and {rows.length - 10} more</Link>
+        <p className="mt-2 text-xs text-ink-3">
+          <Link href={href} className="underline">and {rows.length - 10} more</Link>
         </p>
       )}
-    </Card>
+    </>
   );
 }
 
