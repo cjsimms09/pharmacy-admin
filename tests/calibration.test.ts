@@ -46,7 +46,15 @@ describe("the states that are not judgements about the logger", () => {
     const c = calibration({ name: "Pharmacy Fridge" }, TODAY);
     assert.equal(c.state, "unrecorded");
     assert.equal(c.daysLeft, null);
-    assert.match(c.says, /not a finding about the logger/);
+    /*
+     * The state stays distinct — it is not "current" and never may be — but the sentence stopped
+     * being a complaint. The owner, 17 September: "leave me alone about the fridge logger. idk when
+     * its calibration ends, I dont care." The standard asks for a certificate that can be produced,
+     * not one typed into this software, so an empty field is an arrangement rather than a failing.
+     */
+    assert.match(c.says, /kept with the logger rather than here/);
+    assert.match(c.says, /confirmed at the annual vaccine storage review/);
+    assert.doesNotMatch(c.says, /nothing here can back/);
   });
 
   test("a calibration date with no expiry cannot answer for today", () => {
@@ -84,11 +92,18 @@ describe("whether the annual statement can honestly be signed", () => {
     assert.match(r.why, /Room Temperature/);
   });
 
-  test("it cannot, when one has no certificate on file — and says that, not that it is out of calibration", () => {
+  test("REGRESSION: a logger with no dates here does not block it either, but is named", () => {
+    /*
+     * This used to refuse, which left a mark no act of his could clear — the fault this file exists
+     * among, and the reason he said "leave me alone about the fridge logger". The statement is his
+     * own, made at a review, about a logger he can go and look at; the site's job is to say what it
+     * checked and what it did not, and then get out of the way.
+     */
     const r = canAttestCalibration([fridge, { name: "Room Temperature", tracked: true }], TODAY);
-    assert.equal(r.ok, false);
+    assert.equal(r.ok, true, "an empty field is an arrangement, not a failing");
     assert.deepEqual(r.unrecorded, ["Room Temperature"]);
-    assert.match(r.why, /No certificate on file/);
+    assert.match(r.why, /Room Temperature/, "he is told which ones the software has not checked");
+    assert.match(r.why, /this software has not checked them/);
     assert.doesNotMatch(r.why, /Out of calibration/);
   });
 
@@ -106,8 +121,8 @@ describe("whether the annual statement can honestly be signed", () => {
     const dated = { name: "Pharmacy Fridge", tracked: true, calibratedOn: "2026-07-01" };
     const r = canAttestCalibration([dated], TODAY);
     assert.equal(r.ok, true);
-    assert.match(r.why, /no expiry recorded/);
-    assert.match(r.why, /check the certificate itself/);
+    assert.match(r.why, /No calibration dates are held here for Pharmacy Fridge/);
+    assert.match(r.why, /confirm it is current when you sign/);
     assert.deepEqual(r.unrecorded, [], "a date on file is not 'no certificate'");
     /* And no period is invented anywhere: two years is the common interval and still a guess. */
     assert.doesNotMatch(r.why, /two years|24 months|2 years/i);

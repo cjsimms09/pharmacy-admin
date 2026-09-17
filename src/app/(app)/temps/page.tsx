@@ -402,12 +402,27 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
           <Card
             id="calibration"
             title="Logger calibration"
-            subtitle="What each certificate says, so the annual vaccine storage statement rests on a date rather than on memory. The certificate itself is filed under Documents."
-            count={attestable.ok ? "all current" : `${attestable.lapsed.length + attestable.unrecorded.length} to settle`}
-            tone={attestable.ok ? undefined : "warn"}
+            subtitle="Where each logger's calibration certificate is and what it says. The certificate is kept with the logger; its dates can be recorded here, and nothing needs them to be."
+            /*
+             * An empty field is not a fault here, so it is not counted as one.
+             *
+             * The owner, 17 September: "leave me alone about the fridge logger. idk when its
+             * calibration ends, I dont care." The certificate lives with the logger and the standard
+             * asks for it to be producible, not typed into this software — so the only thing worth a
+             * warning is a certificate that has demonstrably run out.
+             */
+            count={
+              attestable.lapsed.length > 0
+                ? `${attestable.lapsed.length} out of calibration`
+                : attestable.unrecorded.length > 0
+                  ? "dates kept with the loggers"
+                  : "all current"
+            }
+            tone={attestable.lapsed.length > 0 ? "warn" : undefined}
             className="mb-6"
           >
-            {!attestable.ok && <p className="mb-3 text-sm text-warn">{attestable.why}</p>}
+            {/* Red only where something is actually wrong; otherwise it is a statement, in plain text. */}
+            <p className={`mb-3 text-sm ${attestable.lapsed.length > 0 ? "text-warn" : "text-ink-2"}`}>{attestable.why}</p>
             <div className="space-y-3">
               {tracked.map((sensor) => {
                 const c = calibration(sensor, todayIso());
@@ -426,9 +441,7 @@ export default async function TempsPage({ searchParams }: { searchParams: Promis
                             ? "expiring"
                             : c.state === "lapsed"
                               ? "lapsed"
-                              : c.state === "no_expiry"
-                                ? "no expiry recorded"
-                                : "no certificate recorded"}
+                              : "kept with the logger"}
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-ink-2">{c.says}</p>

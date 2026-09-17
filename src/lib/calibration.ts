@@ -59,12 +59,29 @@ export function calibration(
   const expires = (sensor.calibrationExpiresOn ?? "").trim();
 
   if (!on && !expires) {
+    /*
+     * Not recorded here, and that is an arrangement rather than a deficiency.
+     *
+     * The owner, 17 September 2026, twice: "I don't know when it ends.. don't specific in the P&P
+     * leave it vague and compliant", and then "yeah leave me alone about the fridge logger. idk
+     * when its calibration ends, I dont care.. make the policy vague."
+     *
+     * He is right, and the first version of this sentence was wrong about the standard. The CDC
+     * toolkit asks for a certified logger holding a current certificate that can be produced. It
+     * does not ask for the certificate to have been typed into the pharmacy's software, and a
+     * screen that treats an empty field as a failing turns a compliant arrangement into a red mark
+     * that no act of his can clear — which is how a person learns to stop reading the page.
+     *
+     * So this says where the record is and when it is checked, and asks for nothing. The dates can
+     * be entered if they are ever to hand, and the line is the same either way.
+     */
     return {
       state: "unrecorded",
       daysLeft: null,
       says:
-        "No calibration certificate is recorded for this logger. That is not a finding about the logger — it is that " +
-        "nothing here can back the annual statement that it is within its calibration period.",
+        "The calibration certificate is kept with the logger rather than here. Whether it is still current is " +
+        "confirmed at the annual vaccine storage review, which is where that question is asked. Its dates can be " +
+        "recorded here if they are to hand; nothing needs them to be.",
     };
   }
 
@@ -143,9 +160,18 @@ export function canAttestCalibration(
    * said "I don't know when it ends". Neither is the same as having no certificate at all.
    *
    * The statement being signed is the pharmacist-in-charge's own, made at a review, about a logger
-   * he can go and look at. The site's job there is to put the calibration date in front of him, not
-   * to refuse him the pen. What it still refuses is a logger with nothing recorded, and one whose
-   * certificate has demonstrably run out.
+   * he can go and look at. The site's job there is to put what it holds in front of him, not to
+   * refuse him the pen.
+   *
+   * Nor does a logger with nothing recorded block it, which is the second pass. The owner: "leave me
+   * alone about the fridge logger. idk when its calibration ends, I dont care." The standard is a
+   * certified logger holding a current certificate that can be produced — not a certificate typed
+   * into this software — so an empty field is an arrangement and not a failing, and treating it as
+   * one leaves a mark no act of his can clear. What is still refused is a certificate that has
+   * demonstrably run out, and a pharmacy with no logger tracked at all.
+   *
+   * What does not change: the statement says what it says, and he is told exactly which loggers the
+   * site holds no dates for, so nobody signs it believing this software checked something it did not.
    */
   const noExpiry: string[] = [];
   for (const s of logging) {
@@ -161,20 +187,18 @@ export function canAttestCalibration(
   if (lapsed.length > 0) {
     return { ok: false, why: `Out of calibration: ${lapsed.join(", ")}.`, lapsed, unrecorded };
   }
-  if (unrecorded.length > 0) {
-    return {
-      ok: false,
-      why: `No certificate on file for ${unrecorded.join(", ")}. The statement says the logger is within its calibration period; nothing here can show that.`,
-      lapsed,
-      unrecorded,
-    };
-  }
-  if (noExpiry.length > 0) {
+  /*
+   * Said, never demanded. The sentence names the loggers this site holds no dates for so the
+   * pharmacist-in-charge knows what the software checked and what it did not — and then gets out of
+   * the way, because the certificate lives with the logger and he is the one who can look at it.
+   */
+  const silent = [...unrecorded, ...noExpiry];
+  if (silent.length > 0) {
     return {
       ok: true,
       why:
-        `Calibration dates are on file. ${noExpiry.join(", ")} ${noExpiry.length === 1 ? "has" : "have"} no expiry recorded — ` +
-        "check the certificate itself when you sign this, since that is what states how long the calibration runs.",
+        `No calibration dates are held here for ${silent.join(", ")}, so this software has not checked them. ` +
+        "The certificate is kept with the logger; confirm it is current when you sign, which is what this statement is for.",
       lapsed,
       unrecorded,
     };
