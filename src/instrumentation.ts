@@ -57,6 +57,16 @@ export async function register() {
        */
       const { collapseDuplicateInboxRows } = await import("./lib/inbox-dedupe-store");
       await collapseDuplicateInboxRows();
+      /*
+       * And the rebate statement that describes where the pharmacy stands.
+       *
+       * A May 2025 sample was filed 47 minutes after the July 2026 breakdown and took its place, so
+       * the standing rate, the achieved compliance and the distance to the next band were all
+       * sixteen months old. Filing now refuses to let an older statement do that; this puts the one
+       * already on file back. A query when there is nothing to do.
+       */
+      const { correctStandingRebateStatement } = await import("./lib/rebate-report-store");
+      await correctStandingRebateStatement();
       const { failOrphanedNadacJob } = await import("./lib/nadac-job");
       await failOrphanedNadacJob();
       const { failOrphanedDirectoryJob } = await import("./lib/drug-directory-job");

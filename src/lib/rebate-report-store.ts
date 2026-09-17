@@ -209,7 +209,25 @@ export async function fileRebateReport(
    * it: the rate depends on a scrubbed compliance ratio whose exclusions McKesson does not publish.
    * Only the statement knows what was actually achieved, so the statement is what sets it.
    */
-  if (rate !== null) {
+  /*
+   * Is this the newest statement the pharmacy holds, or an older one arriving late?
+   *
+   * Settled once, here, because three things downstream depend on the answer and they must agree.
+   * Comparing period end dates — not filing times — is the whole point: see the note below.
+   */
+  const storedPeriodTo = await (async (): Promise<string | null> => {
+    try {
+      const prev = (await getSettings()).mck_rebate_last_statement;
+      return prev ? ((JSON.parse(prev) as { periodTo?: string }).periodTo ?? null) : null;
+    } catch {
+      /* Unparseable: treat it as nothing on file, so a good statement can always take its place. */
+      return null;
+    }
+  })();
+  /* No period on the statement means it cannot claim to be the newest one. It is still booked. */
+  const isLatest = storedPeriodTo === null || (s.periodTo !== null && s.periodTo >= storedPeriodTo);
+
+  if (rate !== null && isLatest) {
     const before = (await getSettings()).mck_generic_rebate_rate;
     await setSetting("mck_generic_rebate_rate", String(rate));
     parts.push(
@@ -234,10 +252,30 @@ export async function fileRebateReport(
     standing: whereYouStand(report).lines,
     tierCount: report.ladder.gcr.length,
   });
-  await setSetting("mck_rebate_last_statement", settlement);
+  /*
+   * "Latest" means latest by period, not latest to be opened.
+   *
+   * Both writes below were unconditional, and that is a filing system that believes whatever it was
+   * handed most recently. On 5 September 2026 the July 2026 breakdown was filed at 21:45 and a May
+   * 2025 sample at 22:32, so the pharmacy's standing — rate, achieved compliance, how far to the
+   * next band — was a sixteen-month-old sample, and the site had no way to notice.
+   *
+   * An older statement is still worth reading and still belongs in the books (below, on its own
+   * dates). What it must not do is describe where the pharmacy stands now.
+   */
+  if (isLatest) {
+    await setSetting("mck_rebate_last_statement", settlement);
+  } else {
+    parts.push(
+      `it covers ${s.periodFrom} to ${s.periodTo} and the statement on file covers up to ${storedPeriodTo}, ` +
+        `so it was read and booked but did not replace where the pharmacy stands`,
+    );
+  }
   // And against the supplier it belongs to, which is where every screen now reads it from.
   if (supplier) {
-    await db.update(schema.suppliers).set({ rebateStatementJson: settlement }).where(eq(schema.suppliers.id, supplier.id));
+    if (isLatest) {
+      await db.update(schema.suppliers).set({ rebateStatementJson: settlement }).where(eq(schema.suppliers.id, supplier.id));
+    }
     await postRebateToTheBooks(s, supplier, meta.documentId ?? null, user);
   }
 
@@ -441,4 +479,67 @@ export async function postRebateToTheBooks(
       `${statement.paidOn ? `, and ${statement.paidOn.slice(0, 7)} on the cash account` : " — no payment date on it, so nothing is on the cash account yet"}.` +
       (superseded !== null ? ` It replaces an earlier statement for the same period at ${money(superseded)}.` : ""),
   };
+}
+
+/**
+ * Puts the newest rebate statement back in charge, when an older one has taken its place.
+ *
+ * `fileRebateReport` now refuses to let an older statement describe where the pharmacy stands, but
+ * that rule arrived after the damage. On 5 September 2026 the July 2026 breakdown was filed at
+ * 21:45 and a May 2025 sample at 22:32; the sample won, and the pharmacy's standing rate, achieved
+ * compliance and distance to the next band were all a sixteen-month-old document's. The code fix
+ * stops it recurring and does nothing at all about the row that is already wrong.
+ *
+ * So this runs at boot, with the other corrections of known-wrong data. It is cheap: the booked
+ * rebate expenses already record the period of every statement ever read, so finding the newest one
+ * is a query, and only when that is newer than what is standing does a single PDF get re-read.
+ *
+ * Nothing is booked twice. `fileRebateReport` is idempotent on the books — the expense and the cash
+ * receipt are keyed on supplier and period — so re-reading the newest statement corrects the
+ * standing figures and leaves the money exactly where it was.
+ */
+export async function correctStandingRebateStatement(): Promise<{ moved: boolean; says: string }> {
+  const settings = await getSettings();
+  const standingPeriodTo = ((): string | null => {
+    try {
+      const prev = settings.mck_rebate_last_statement;
+      return prev ? ((JSON.parse(prev) as { periodTo?: string }).periodTo ?? null) : null;
+    } catch {
+      return null;
+    }
+  })();
+  if (!standingPeriodTo) return { moved: false, says: "No rebate statement is on file." };
+
+  /* Every statement ever booked, newest period first. `invoiceDate` is the period end. */
+  const booked = await db.query.expenses.findMany({
+    columns: { invoiceNumber: true, invoiceDate: true, documentId: true },
+  });
+  const rebates = booked
+    .filter((e) => (e.invoiceNumber ?? "").startsWith("REBATE|") && e.invoiceDate && e.documentId)
+    .sort((a, b) => (a.invoiceDate! < b.invoiceDate! ? 1 : -1));
+  const newest = rebates[0];
+  if (!newest || newest.invoiceDate! <= standingPeriodTo) {
+    return { moved: false, says: `The statement standing is the newest on file (to ${standingPeriodTo}).` };
+  }
+
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, newest.documentId!) });
+  if (!doc) {
+    return { moved: false, says: `A newer statement to ${newest.invoiceDate} is booked, but its document is gone, so nothing could be re-read.` };
+  }
+  const { readFile } = await import("./files");
+  const { pdfText } = await import("./pdf-text");
+  let text = "";
+  try {
+    text = pdfText(await readFile(doc.storageKey));
+  } catch {
+    return { moved: false, says: `A newer statement to ${newest.invoiceDate} is booked, but its document could not be read.` };
+  }
+  if (!looksLikeRebateReport(text)) {
+    return { moved: false, says: `A newer statement to ${newest.invoiceDate} is booked, but its document no longer reads as a rebate breakdown.` };
+  }
+
+  const filed = await fileRebateReport(text, { documentId: doc.id }, { name: "the standing-statement correction" });
+  return filed.stored
+    ? { moved: true, says: `The standing rebate statement moved from ${standingPeriodTo} to ${newest.invoiceDate}.` }
+    : { moved: false, says: `A newer statement to ${newest.invoiceDate} is booked, but re-reading it did not pass its own checks, so nothing was changed.` };
 }
