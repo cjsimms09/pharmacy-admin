@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import "server-only";
-import { and, eq, gte, lte, isNull, or, sql, inArray } from "drizzle-orm";
+import { and, eq, gte, lte, isNull, isNotNull, or, sql, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { FROM_SUMMARY } from "./invoice-summary-store";
@@ -1514,6 +1514,64 @@ export async function backfillInvoiceLines(
     }
   }
   return { invoices: invoicesDone, linesRead, unreadable, unreconciled, byModel };
+}
+
+/**
+ * Reads again the invoices the reader itself recorded as not adding up.
+ *
+ * `backfillInvoiceLines` above selects only invoices with no lines at all, which is right for what it
+ * is for and leaves a gap this found: when the reader gets better, the invoices it previously got
+ * wrong are exactly the ones it will not look at again. Four ParMed invoices were recorded short by
+ * $1.15, $0.13, $1.57 and $4.83, every one of them sales tax the reader did not know was tax
+ * (invoice-tax.ts). The reader was fixed and all four would have gone on saying "short" for ever.
+ *
+ * Narrow on purpose. It reads only invoices carrying a recorded shortfall — an invoice whose read is
+ * already known to be incomplete, so a re-read has nothing to lose and `replacesStoredLines` still
+ * refuses to trade lines that add up for a read that cannot prove the same.
+ *
+ * No model. These already have rule-read lines; what was missing was arithmetic, not vision, and a
+ * button that quietly spends money on every press is a button that gets pressed once.
+ */
+export async function rereadShortInvoices(
+  opts: { user?: { id?: string | null; name: string } } = {},
+): Promise<{ checked: number; nowBalance: number; recovered: number; stillShort: number }> {
+  const rows = await db.query.supplierInvoices.findMany({
+    where: isNotNull(schema.supplierInvoices.linesShortCents),
+  });
+  const { readFile } = await import("./files");
+  let checked = 0;
+  let nowBalance = 0;
+  let recovered = 0;
+  let stillShort = 0;
+  for (const row of rows) {
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, row.documentId) });
+    if (!doc) continue;
+    const was = row.linesShortCents ?? 0;
+    try {
+      const text = textOf(await readFile(doc.storageKey));
+      if (!text) continue;
+      checked++;
+      await writeInvoiceLines(row.id, text, { allowModel: false, user: opts.user });
+      /*
+       * Read back from the row rather than from the return value.
+       *
+       * `writeInvoiceLines` reports what it read; the shortfall is what the store decided and wrote,
+       * and those are two different questions. Asking the row asks the one that matters — what the
+       * invoice now says about itself on his screen.
+       */
+      const after = await db.query.supplierInvoices.findFirst({
+        where: eq(schema.supplierInvoices.id, row.id),
+        columns: { linesShortCents: true },
+      });
+      if (!after?.linesShortCents) {
+        nowBalance++;
+        recovered += was;
+      } else stillShort++;
+    } catch {
+      /* Unreadable now and unreadable before: it keeps the shortfall it already had. */
+    }
+  }
+  return { checked, nowBalance, recovered, stillShort };
 }
 
 /** How many invoices the line reader has never been run on. */

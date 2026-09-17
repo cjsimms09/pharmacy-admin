@@ -44,6 +44,19 @@ export async function register() {
        */
       const { unlearnCourierLinks } = await import("./lib/payer-links");
       await unlearnCourierLinks();
+      /*
+       * And the inbox rows the same class of bug left behind.
+       *
+       * Two dedupes were looking their keys up the wrong way while the sweep ran twice an hour over
+       * mail it had already read: 1,822 inbox rows for 180 delivered attachments. The leaks stopped
+       * on 17 September; the rows did not go anywhere on their own, and an arrivals list that
+       * counts one delivery twenty-eight times is not a list anybody can use to see what is late.
+       *
+       * Here rather than on the nightly pass for the reason above it — a correction of known-wrong
+       * data does not wait for a quiet moment — and it costs one query when there is nothing to do.
+       */
+      const { collapseDuplicateInboxRows } = await import("./lib/inbox-dedupe-store");
+      await collapseDuplicateInboxRows();
       const { failOrphanedNadacJob } = await import("./lib/nadac-job");
       await failOrphanedNadacJob();
       const { failOrphanedDirectoryJob } = await import("./lib/drug-directory-job");
@@ -325,6 +338,28 @@ export async function register() {
        * asked, the check for a Schedule II line filed as ordinary was being run over silence and
        * reported clean.
        */
+      /*
+       * And the invoices the reader itself recorded as not adding up.
+       *
+       * The gap the other two leave between them: an invoice with lines that do not reach its
+       * printed total is never looked at again by either, so every improvement to the reader
+       * arrives too late for exactly the invoices that needed it. Four ParMed invoices sat short
+       * by $1.15, $0.13, $1.57 and $4.83 — all of it sales tax, all of it readable the moment the
+       * reader knew what tax was.
+       *
+       * Rules only, like the rest of this tick. An invoice already known not to balance has
+       * nothing to lose by being read again, and `replacesStoredLines` still refuses to trade
+       * lines that add up for a read that cannot prove the same.
+       */
+      const { rereadShortInvoices } = await import("./lib/invoices");
+      const s2 = await rereadShortInvoices({ user: { name: "the nightly re-read" } });
+      await setSetting(
+        "invoice_short_reread_result",
+        `${new Date().toISOString()}: ${s2.checked} read again, ${s2.nowBalance} now balance` +
+          (s2.recovered ? ` (${(s2.recovered / 100).toFixed(2)} explained)` : "") +
+          `, ${s2.stillShort} still short`,
+      );
+
       const { fillLineSchedules } = await import("./lib/line-schedule-backfill");
       const f = await fillLineSchedules();
       await setSetting(

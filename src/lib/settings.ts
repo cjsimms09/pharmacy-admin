@@ -426,6 +426,13 @@ export const SETTING_KEYS = [
   /** What the nightly pass could newly say about lines already read: see line-schedule-backfill.ts. */
   "line_schedules_backfill_result",
   /**
+   * The nightly re-read of invoices recorded as not adding up to their printed total.
+   *
+   * The gap between the other two: neither looks at an invoice whose lines fall short, so every
+   * improvement to the reader arrived too late for exactly the invoices that needed it.
+   */
+  "invoice_short_reread_result",
+  /**
    * What the remittances taught the site about who a BIN belongs to, on the last nightly pass.
    *
    * The owner: "the system needs to learn." Kept so the learning can be read back rather than only

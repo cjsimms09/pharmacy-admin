@@ -183,7 +183,24 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
         client.search({ seen: false }, { uid: true }),
         client.search({ since: recentSince }, { uid: true }).catch(() => [] as number[]),
       ]);
-      const uids = [...new Set([...(unseen || []), ...(recent || [])])].sort((a, b) => a - b).slice(-80);
+      /*
+       * Unread mail is never dropped to fit a cap. Read mail is.
+       *
+       * This was one line — every uid from both searches, `.slice(-80)` — and the slice was the fifth
+       * silent door in this file. `seen: false` finds an unread message however old it is, and then
+       * the slice threw it away again for not being among the newest eighty: with eight McKesson
+       * invoices and a dozen reports a day, eighty uids is about three days. An unread message that
+       * fell behind that was invisible for ever, and nothing anywhere said so. The owner watched a
+       * rebate breakdown sit in his inbox while the site reported it had never come.
+       *
+       * So the two searches are now bounded differently, because they mean different things. Unread
+       * is a promise — it takes the OLDEST first, so a backlog drains over successive sweeps instead
+       * of the same newest few being re-read while the tail starves. Read-and-recent is a courtesy
+       * against somebody opening their mail before the sweep does, and that one may be capped.
+       */
+      const unseenUids = [...new Set(unseen || [])].sort((a, b) => a - b);
+      const recentUids = [...new Set(recent || [])].filter((u) => !unseenUids.includes(u)).sort((a, b) => a - b);
+      const uids = [...unseenUids.slice(0, 200), ...recentUids.slice(-80)].sort((a, b) => a - b);
       for (const uid of uids) {
         try {
           const msg = await client.fetchOne(String(uid), { source: true, envelope: true }, { uid: true });
