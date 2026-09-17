@@ -73,7 +73,17 @@ export type LineParse = {
    * "$112.77 somewhere". A person can act on the first; the second is a puzzle.
    */
   unrecognised: string[];
-  /** Sum of the extended amounts read, for checking against the invoice total. */
+  /**
+   * Charges on the invoice that are not products: freight on a drop ship, and nothing else so far.
+   *
+   * Counted towards the printed total, so an invoice carrying one can still balance, and kept out of
+   * every drug's cost — carriage is a cost of the delivery, not of what was delivered. Folding $7.50
+   * of freight into a $38.70 line would make that powder look a fifth dearer than it was, and would
+   * do it differently on every invoice depending on what else shipped that day.
+   */
+  charges: { description: string; amountCents: number }[];
+  chargesCents: number;
+  /** Sum of the extended amounts read, for checking against the invoice total. Products only. */
   totalCents: number;
   /**
    * Whether the lines read add up to the total printed on the invoice.
@@ -92,6 +102,21 @@ export type LineParse = {
 
 const money = (s: string): number => Math.round(Number(s.replace(/[$,]/g, "")) * 100);
 const MONEY = String.raw`[\d,]+\.\d{2}`;
+
+/**
+ * A non-drug charge on a McKesson invoice: an item number where an NDC would be, and no NDC anywhere.
+ *
+ * Deliberately narrow. It requires the item number to be printed twice, which is what their drop
+ * ship layout does and what a real product line never does, so a product can never fall in here and
+ * lose its NDC. Anything else without an NDC stays unrecognised and says so.
+ */
+const MCK_CHARGE = new RegExp(
+  String.raw`^(\d{3}-\d{4})\1` + // the item number, printed twice, where the NDC would be
+    String.raw`\s+\d+(?:\.\d+)?\*?[A-Z]{2}\s+` + // quantity and unit
+    String.raw`(.*?)` + // what the charge is
+    String.raw`\s+(${MONEY})` + // rate
+    String.raw`\s+(${MONEY})\s*$`, // amount
+);
 
 /**
  * McKesson: NDC, item number and document number printed as one run of digits, then the quantity
@@ -125,8 +150,23 @@ const MCK = new RegExp(
    */
   String.raw`^(\d{5}-\d{4}-\d{2}|\d{6}-\d{5}|\d{14})` + // NDC, a UPC on a front-end item, or a GTIN-14
     String.raw`\s*(\d{3}-\d{4})` + // McKesson item number
-    String.raw`\d{9}` + // document number, not kept
-    String.raw`\s+(\d+)\*?([A-Z]{2})\s+` + // quantity, an optional asterisk, unit of measure
+    /*
+     * The document number, which a drop ship does not print at all.
+     *
+     * A McKesson drop ship invoice of 17 September 2026 — a Drop Ship Invoice, $46.20, the goods sent
+     * straight from the manufacturer rather than out of a warehouse. Its item lines carry the NDC and
+     * the item number and then nothing: no nine-digit document number, and a quantity printed
+     * "1.000EA" where a warehouse line prints "0*EA". Two differences, and the pattern required both,
+     * so no format claimed the invoice at all — not one line, not even an unreadable one. $38.70 of
+     * diltiazem powder reached the cost of no drug, and the invoice sat with a total and nothing
+     * under it.
+     *
+     * The fourth time a McKesson line of an unexpected shape has cost a whole invoice, after the
+     * missing AWP column, the two-letter rebate flag and the GTIN-14. The lesson has not changed:
+     * every column on this layout is optional except the two the line's own arithmetic is checked on.
+     */
+    String.raw`(?:\d{9})?` + // document number, not kept, and not printed on a drop ship
+    String.raw`\s+(\d+(?:\.\d+)?)\*?([A-Z]{2})\s+` + // quantity, an optional asterisk, unit of measure
     String.raw`(.*?)` + // description
     /*
      * The AWP column, where the line prints one.
@@ -565,6 +605,8 @@ export function parseInvoiceLines(
   packagesOf?: PackagesOf,
 ): LineParse {
   const out: InvoiceLineRead[] = [];
+  /* Freight and the like: counted towards the invoice total, never towards a drug. */
+  const charges: { description: string; amountCents: number }[] = [];
   const unreadable: string[] = [];
   let format: LineParse["format"] = null;
   const sections: LineParse["sections"] = [];
@@ -648,6 +690,30 @@ export function parseInvoiceLines(
       format = "ipd";
       out.push(line0);
       pending.push(line0);
+      continue;
+    }
+
+    /*
+     * A charge that is not a drug: freight on a drop ship.
+     *
+     * McKesson's drop ship invoice prints carriage as an item line with an item number, a quantity
+     * and a unit — "294-8743294-8743  1.000EA DROP SHIP FREIGHT  7.50  7.50" — and no NDC, because
+     * it is not a product. It has to be read or the invoice cannot balance: $38.70 of goods against
+     * a $46.20 total fails the all-or-nothing rule and throws the drug line away with it, which is
+     * how a $46.20 invoice ended up with nothing under it at all.
+     *
+     * And it must not become a drug's cost. Carriage is a cost of the delivery, not of the
+     * diltiazem; folding it in would make that powder look 19% dearer than it was and would do it
+     * differently on every invoice depending on what else shipped that day.
+     *
+     * So it is counted towards the total and kept out of the lines. Tried before the item pattern
+     * because a doubled item number can look like the front of an NDC run.
+     */
+    const charge = MCK_CHARGE.exec(line);
+    if (charge) {
+      const [, , desc, , ext] = charge;
+      charges.push({ description: desc.trim(), amountCents: money(ext) });
+      format = format ?? "mckesson";
       continue;
     }
 
@@ -822,6 +888,7 @@ export function parseInvoiceLines(
   // A half left open — the last subtotal never printed, or the page it was on did not read — is
   // not silently treated as one kind or the other; those lines keep a null and say nothing.
   const totalCents = out.reduce((n, l) => n + l.extendedCents, 0);
+  const chargesCents = charges.reduce((n, ch) => n + ch.amountCents, 0);
 
   /*
    * What looked like an item row and was claimed by nothing.
@@ -843,7 +910,9 @@ export function parseInvoiceLines(
     sections,
     totalCents,
     printedTotalCents,
-    reconciles: printedTotalCents === null || out.length === 0 ? null : totalCents === printedTotalCents,
+    charges,
+    chargesCents,
+    reconciles: printedTotalCents === null || out.length === 0 ? null : totalCents + chargesCents === printedTotalCents,
   };
 }
 
