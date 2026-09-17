@@ -1824,7 +1824,20 @@ export async function invoiceCounts(): Promise<InvoiceCounts> {
  */
 export type InvoiceIssue = {
   key: string;
-  severity: "blocking" | "warn";
+  /**
+   * How loudly this is said, and "noted" is the one that earns its keep.
+   *
+   * There were two levels and both of them interrupted him. A $1.49 overbill — real, correctly
+   * found, 52 of 53 invoices agreeing across 576 drugs — sat on his list under a sentence that
+   * literally read "it is here to be seen rather than to be done". A row that says of itself that
+   * there is nothing to do does not belong on a list of things to do, and the second time he was
+   * shown it he said so: "stil getting these".
+   *
+   * So `noted` is counted, kept, and shown on the invoices page where somebody looking at invoices
+   * will find it — and never on Today. The money is counted identically either way; what changes is
+   * whether it takes up one of the few lines a person reads in the morning.
+   */
+  severity: "blocking" | "warn" | "noted";
   title: string;
   detail: string;
   /** Where the fix is, when the site can offer one. */
@@ -2094,7 +2107,14 @@ async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
     const over = `$${(prices.overbilledCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     out.push({
       key: "prices-disagree",
-      severity: worthChasing ? "blocking" : "warn",
+      /*
+       * Below his own floor this is `noted`, not `warn`.
+       *
+       * The row already said "it is here to be seen rather than to be done", and it was still on his
+       * morning list — which is how a list of things to do becomes a list of things to scroll past.
+       * Above the floor it is blocking, as before, and the figure is counted in both cases.
+       */
+      severity: worthChasing ? "blocking" : "noted",
       title: hasOverbill
         ? `${over} billed above what was booked in`
         : `${n} purchase${n === 1 ? "" : "s"} where the invoice and the delivery disagree`,
@@ -2135,7 +2155,7 @@ async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
     });
   }
 
-  const rank = { blocking: 0, warn: 1 };
+  const rank = { blocking: 0, warn: 1, noted: 2 };
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 

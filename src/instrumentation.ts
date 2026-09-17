@@ -67,6 +67,28 @@ export async function register() {
        */
       const { correctStandingRebateStatement } = await import("./lib/rebate-report-store");
       await correctStandingRebateStatement();
+
+      /*
+       * A day's re-read is forgotten on start-up, so a deploy always gets one.
+       *
+       * The invoice re-read runs once per calendar day, which is right for a scheduled pass and
+       * wrong for the thing it exists to do. Every one of these fixes follows the same shape: the
+       * reader learns something, and the invoices it previously got wrong are re-read on the next
+       * pass. But if the day's pass has already run — and it runs early — a reader improvement
+       * deployed at four in the afternoon waits until tomorrow, while the owner looks at the invoice
+       * it just learned to read and is told nothing was recognised on it.
+       *
+       * That happened today, exactly. The McKesson drop ship of 17 September reads perfectly now
+       * ($38.70 of diltiazem, $7.50 of freight, $46.20, balances to the cent) and the site still
+       * said "not one line was recognised", because the pass was marked done at breakfast.
+       *
+       * Clearing the marker is one setting write and does not block the boot: the work itself still
+       * happens on the idle tick, where it belongs. A restart is what a deploy is, so this makes
+       * "deploy a better reader" and "re-read what it got wrong" the same action.
+       */
+      const { setSetting } = await import("./lib/settings");
+      await setSetting("invoice_lines_backfill_on", "");
+      await setSetting("daily_check_on", "");
       const { failOrphanedNadacJob } = await import("./lib/nadac-job");
       await failOrphanedNadacJob();
       const { failOrphanedDirectoryJob } = await import("./lib/drug-directory-job");

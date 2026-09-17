@@ -215,6 +215,16 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     late work, where the morning glance already goes.
   */
   for (const p of invoiceProblems) {
+    /*
+       A `noted` issue is counted and kept, and never shown here.
+
+       These are facts below his own floor for acting — a $1.49 overbill against $30 — and one of
+       them sat on this list under a sentence that read "it is here to be seen rather than to be
+       done". He was shown it twice and said "stil getting these". A row that says of itself there
+       is nothing to do teaches that rows on this list need not be done, which costs far more than
+       the $1.49. It is on the invoices page, where somebody looking at invoices finds it.
+    */
+    if (p.severity === "noted") continue;
     latePharmacy.push({
       key: `invoice-${p.key}`,
       title: p.title,
