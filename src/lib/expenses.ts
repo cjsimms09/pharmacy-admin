@@ -577,6 +577,24 @@ export async function bookUnbookedSuppliesInvoices(): Promise<{ booked: number; 
   const docs = await db.query.documents.findMany({ columns: { id: true, title: true, fileName: true, storageKey: true } });
   const candidates = docs.filter((d) => /invoice/i.test(d.title ?? "") || /invoice/i.test(d.fileName ?? ""));
 
+  /*
+   * Who sent each one, because this document cannot name itself.
+   *
+   * The first version of this passed no sender and relied on the page saying "Rx Systems, Inc." It
+   * does say it, and the PDF's text layer does not survive it: the extraction clips strings, so the
+   * address comes out as "SAIN, MO 63301" and the city as "WICHI, KS 67212". A test that needs the
+   * company's full name on a page that loses the end of every string fails on the one document it
+   * was written for — which it did, silently, and the $1,715 stayed off the books through a deploy
+   * I had already called a fix.
+   *
+   * The sender is not clipped. It is on the inbox row that filed the document, it is the thing
+   * `looksLikeRxSystemsInvoice` prefers when it has it, and it is how the live sweep recognises
+   * these at all.
+   */
+  const arrivals = await db.query.inboxItems.findMany({ columns: { documentId: true, fromAddress: true } });
+  const senderOf = new Map<string, string>();
+  for (const a of arrivals) if (a.documentId && a.fromAddress) senderOf.set(a.documentId, a.fromAddress);
+
   let booked = 0;
   let cents = 0;
   for (const d of candidates) {
@@ -586,11 +604,14 @@ export async function bookUnbookedSuppliesInvoices(): Promise<{ booked: number; 
     } catch {
       continue;
     }
-    /* No sender to lean on here, so it has to name itself on the page. */
-    if (!looksLikeRxSystemsInvoice(text)) continue;
+    if (!looksLikeRxSystemsInvoice(text, senderOf.get(d.id) ?? "")) continue;
     const read = readRxSystemsInvoice(text);
     if (!read.ok) continue;
-    const r = await bookSuppliesInvoice(read.invoice, { vendorName: "Rx Systems", from: "billing@rxsystems.com", documentId: d.id });
+    const r = await bookSuppliesInvoice(read.invoice, {
+      vendorName: "Rx Systems",
+      from: senderOf.get(d.id) ?? "billing@rxsystems.com",
+      documentId: d.id,
+    });
     if (r.id && !r.duplicate) {
       booked++;
       cents += read.invoice.goodsCents;
