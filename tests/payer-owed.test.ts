@@ -268,3 +268,49 @@ describe("a fill billed to two payers, settled one at a time", () => {
     assert.equal(owed.receivedCents, 10000);
   });
 });
+
+/*
+ * Whether a voucher's programme was read off the claim or decided by the default.
+ *
+ * `claimShares` splits a voucher three ways with different fees — a RedSail voucher, a Veridikal
+ * eVoucher at $2.50, a Veridikal conversion at net less fifty cents — and chooses from
+ * `evoucher_programme` where the claim says, falling back to `evoucher_message_cents > 0` meaning
+ * Veridikal. It has recorded which of the two it used in `from` since it was written, and nothing
+ * had ever read it.
+ *
+ * Measured on the live database, 17 September 2026: `evoucher_message_cents` is null on all 3,607
+ * claims, so the fall-back can only ever resolve one way. It is a default, not a fall-back, and it
+ * was deciding 7 voucher claims worth $1,802.76 — probably all RedSail, since RedSail is the only
+ * programme any claim has ever named, but decided rather than read.
+ *
+ * The day a Veridikal claim arrives with a blank programme it will be priced as a RedSail voucher
+ * and every total will still balance. A wrong figure that balances is the hardest kind to see, so
+ * the count is on the summary where the voucher money is.
+ */
+describe("a programme share priced on a default says so", () => {
+  const filled = { bin: null, name: "RedSail", dateFilled: "2026-10-01", cashPlan: false, portion: "programme" as const };
+
+  test("a share whose claim named its programme is not counted as assumed", () => {
+    const owed = owedByPayer([{ ...filled, cents: 1500, claimId: "c1", programmeAssumed: false }], [], "2026-10-02");
+    assert.deepEqual(owed.programmeAssumed, { count: 0, cents: 0 });
+  });
+
+  test("REGRESSION: a share whose programme the default chose is counted, with its money", () => {
+    const owed = owedByPayer(
+      [
+        { ...filled, cents: 1500, claimId: "c1", programmeAssumed: true },
+        { ...filled, cents: 2600, claimId: "c2", programmeAssumed: true },
+        { ...filled, cents: 9900, claimId: "c3", programmeAssumed: false },
+      ],
+      [],
+      "2026-10-02",
+    );
+    assert.deepEqual(owed.programmeAssumed, { count: 2, cents: 4100 }, "two shares, $41.00, decided rather than read");
+  });
+
+  test("a receivable that says nothing about provenance is not counted either way", () => {
+    /* Every plan share, and every share built before the flag existed. Absent is not the same as assumed. */
+    const owed = owedByPayer([{ bin: "004336", name: "Caremark", dateFilled: "2026-10-01", cents: 5000, cashPlan: false, claimId: "p1", portion: "plan" }], [], "2026-10-02");
+    assert.deepEqual(owed.programmeAssumed, { count: 0, cents: 0 });
+  });
+});

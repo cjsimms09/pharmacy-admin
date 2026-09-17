@@ -213,6 +213,14 @@ export type Receivable = {
    */
   claimId?: string | null;
   portion?: Portion;
+  /**
+   * True on a programme share whose programme the claim never named, so `claimShares` defaulted it.
+   *
+   * Carried here because the provenance is decided where the shares are split and is wanted where
+   * the summary is counted, and there is nothing in between that could work it out again. See
+   * `programmeAssumed` on OwedSummary for what it is for.
+   */
+  programmeAssumed?: boolean;
 };
 
 /**
@@ -324,6 +332,25 @@ export type OwedSummary = {
   feesOwed: FeeOwed[];
   /** Payments matched to a claim this period does not bill (outside it, or a fee claim): settle nothing here. */
   outside: { count: number; cents: number };
+  /**
+   * Voucher shares whose programme the claim never named, so the default decided which it was.
+   *
+   * `claimShares` splits a voucher three ways with different fees — a RedSail voucher, a Veridikal
+   * eVoucher at $2.50, a Veridikal conversion at net less fifty cents — and picks between them from
+   * `evoucher_programme` where the claim says, falling back to `evoucher_message_cents > 0` meaning
+   * Veridikal. The fall-back has recorded which of the two it used since it was written, in `from`,
+   * and nothing has ever read it.
+   *
+   * Measured 17 September 2026: `evoucher_message_cents` is null on all 3,607 claims, so the
+   * fall-back can only ever resolve one way. It is not a fall-back, it is a default, and on that
+   * date it was deciding 7 voucher claims worth $1,802.76 — every one of them probably RedSail,
+   * since RedSail is the only programme any claim has ever named, but decided rather than read.
+   *
+   * Surfaced because the day a Veridikal claim arrives with a blank programme, it will be priced as
+   * a RedSail voucher and the arithmetic will balance. A wrong figure that balances is the one this
+   * system has the most trouble seeing.
+   */
+  programmeAssumed: { count: number; cents: number };
   /** True where no payer has ever sent anything. The state the whole page has to survive. */
   nothingHasArrived: boolean;
   /** The headline, in words, above the table. */
@@ -423,6 +450,8 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
   /* Money that arrived beyond anything billed, because nobody billed it: the top-off. Revenue, and not a balance. */
   let topOffCount = 0;
   let topOffCents = 0;
+  /* Programme shares priced on a default rather than on a programme the claim named. See the summary field. */
+  const assumed = receivables.filter((r) => r.programmeAssumed === true);
   for (const p of received) {
     if (!p.matched) {
       /*
@@ -545,6 +574,7 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
     unaged,
     feesOwed: [...fees.values()].sort((x, y) => y.cents - x.cents),
     outside: { count: outsideCount, cents: outsideCents },
+    programmeAssumed: { count: assumed.length, cents: assumed.reduce((n, r) => n + r.cents, 0) },
     nothingHasArrived,
     says: headline({ lines, real, billedCents, receivedCents, outstandingCents, nothingHasArrived, unattachedCount, unattachedCents }),
   };

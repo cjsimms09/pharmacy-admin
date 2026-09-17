@@ -129,7 +129,24 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
         cashPlan: cashPlanFor(p.bin, p.pcn, plans) !== null,
       });
       if (owes.programme && owes.programmeCents > 0) {
-        receivables.push({ bin: null, name: owes.programme, dateFilled: f.dateFilled, cents: owes.programmeCents, cashPlan: false, claimId: p.claimId ?? null, portion: "programme" });
+        receivables.push({
+          bin: null,
+          name: owes.programme,
+          dateFilled: f.dateFilled,
+          cents: owes.programmeCents,
+          cashPlan: false,
+          claimId: p.claimId ?? null,
+          portion: "programme",
+          /*
+           * Whether the claim named its programme or the default chose one.
+           *
+           * `claimShares` has recorded this in `from` since it was written and nothing had ever read
+           * it. It matters because the two programmes carry different fees, and the field meant to
+           * tell them apart — evoucher_message_cents — is null on every claim this pharmacy holds,
+           * so the fall-back can only ever resolve one way. See OwedSummary.programmeAssumed.
+           */
+          programmeAssumed: owes.from === "column",
+        });
       }
     }
   }
