@@ -176,6 +176,15 @@ export type PLInputs = {
    */
   costUnknownFills?: number;
   costUnknownRevenueCents?: number | null;
+  /**
+   * Facilitator money the month's fills have been promised and not yet been paid.
+   *
+   * A receivable, and accrual revenue of the month that earned it. `laterMoneyCents` beside it is
+   * the same promise once it has actually arrived, so the two never overlap: the outstanding figure
+   * is the promise less what has been paid, floored at nothing, and falls to nothing as the money
+   * lands. Accrual only — on the cash account neither is revenue until the bank says so.
+   */
+  facilitatorOwedCents?: number;
   waitingFills?: number;
   waitingRevenueCents?: number | null;
   waitingCostCents?: number | null;
@@ -264,6 +273,7 @@ export function beforeBooksInputs(month: string, basis: "accrual" | "cash"): PLI
     claimsCount: 0,
     costUnknownFills: 0,
     costUnknownRevenueCents: null,
+    facilitatorOwedCents: 0,
     waitingFills: 0,
     waitingRevenueCents: null,
     waitingCostCents: null,
@@ -410,6 +420,25 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
         label: "Facilitator and top-off payments",
         amountCents: i.laterMoneyCents,
         note: "Earned on claims already dispensed and paid weeks later. Counted here because the month earned it.",
+      });
+    }
+    /*
+     * The facilitator's promise that has not arrived yet, which is a receivable and is revenue.
+     *
+     * The accrual account counts what the month earned, and a manufacturer share the facilitator has
+     * agreed to pay is earned the day the prescription went out. Waiting for the money is the cash
+     * account's question. Measured on September (`claim-lifecycle.md` rule 2, G-LC-2): 14 fills,
+     * $4,056.21, none paid — and none of it on the accrual account, which is what made rule 2 fail.
+     *
+     * Never double-counted with the line above: the outstanding figure is the promise less what has
+     * already been paid, floored at nothing, so as the money lands this line falls by exactly what
+     * that one rises.
+     */
+    if (i.facilitatorOwedCents) {
+      revenue.push({
+        label: "— of which facilitator money promised and not yet paid",
+        amountCents: i.facilitatorOwedCents,
+        note: "A manufacturer share the facilitator has agreed to pay on fills already dispensed. Earned this month; it is a receivable until the remittance arrives.",
       });
     }
     /*
@@ -611,8 +640,9 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
 
   if (i.costUnknownFills && (i.costUnknownRevenueCents ?? 0) > 0) {
     caveats.push(
-      `${i.costUnknownFills.toLocaleString("en-US")} prescriptions sold this month carry no acquisition cost, so ${formatCents(i.costUnknownRevenueCents ?? 0)} of revenue is held out of this account along with the cost that would have gone against it. ` +
-        "Counting the revenue with nothing behind it would put the whole of it into gross profit. The figure is missing from the report, not from the pharmacy — the fills are real and so is the money.",
+      `${i.costUnknownFills.toLocaleString("en-US")} prescriptions sold this month carry no acquisition cost. Their ${formatCents(i.costUnknownRevenueCents ?? 0)} of revenue is counted, because it was earned, and nothing is counted against it — ` +
+        "so gross profit below is overstated by whatever those bottles cost. The same treatment the front of shop gets, and for the same reason: the sale is a fact and the cost is simply not on file. " +
+        "Load the acquisition cost for those fills and both figures become right.",
     );
   }
 
@@ -976,11 +1006,32 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    * Auvelity, $5,071.34 of revenue and $5,071.34 of profit, a third of the month's gross and
    * twenty-six times its bottom line.
    *
-   * Both directions are wrong by the same amount, so the choice is which way to be wrong. Dropping
-   * the revenue understates the month; keeping it flatters the month. This account has said in half
-   * a dozen places that it must never quietly err in the flattering direction, so the revenue goes
-   * out with the cost and the pair is named below with the figure, which is the only version
-   * somebody can act on.
+   * Both directions are wrong by the same amount, so the choice is which way to be wrong — and the
+   * choice made here was to drop the revenue, which the money standard then measured as a fault.
+   *
+   * ── Why it now goes the other way (A, 17 September) ──
+   *
+   * `claim-lifecycle.md` rule 2 is right and this is the row it fails on (G-LC-2, $2,295.78 of
+   * September on 4 fills): *"revenue is recognised in full when the prescription is sold, whether or
+   * not its cost is known (margin is what cannot be computed)."* A sale happened; what the bottle
+   * cost is a separate fact the site has not been told. Suppressing the sale to protect the margin
+   * makes the top line wrong — and the top line is what the accountant files, what a lender is
+   * shown, and what every per-script figure divides by. None of those readers can undo it.
+   *
+   * The concern that dropped it is real and is not being dismissed: revenue with no cost against it
+   * inflates gross profit one for one, and gross profit is what decides what to stock and who to
+   * contract with. But this file already answers that exact situation, a hundred lines above, for
+   * the front of shop — retail revenue is counted in full, no cost is counted against it, and a
+   * caveat names the amount and says profit below is overstated by it. Treating an unknown-cost fill
+   * differently from an OTC sale is the inconsistency, not the fix.
+   *
+   * So: the revenue is in, the cost stays out because it is genuinely unknown, and the caveat below
+   * carries the figure and the direction. That is what `caveats` is for, in its own words — "the
+   * number is readable and useful and leans, and saying which way it leans is what lets it be
+   * trusted" — as against `missing`, which means the bottom line cannot be read at all.
+   *
+   * This overturns a deliberate, documented decision by another session. It is one commit to revert
+   * if they disagree; the reasoning above is the whole of my case.
    */
   const costUnknown = monthFills.filter((f) => f.acquisitionCents === null);
   const costUnknownRevenueCents = costUnknown.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0);
@@ -989,18 +1040,24 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    * What the month's dispensing actually brought in, per fill rather than per transmission, so a
    * coordinated claim is one bottle's revenue and not two.
    */
-  const claimsRevenueCents = mine.length ? mine.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0) : null;
+  const claimsRevenueCents = monthFills.length ? monthFills.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0) : null;
   // Kept apart as well as together: the summary can supply one side of the prescription revenue
   // and not the other, and an account that could only take all three figures or none of them was
   // one retail-only summary away from dropping every prescription. See the revenue block above.
-  const claimsRemitCents = mine.length ? mine.reduce((n, f) => n + f.remitCents, 0) : null;
-  const claimsPatientCents = mine.length ? mine.reduce((n, f) => n + f.patientPaidCents, 0) : null;
+  const claimsRemitCents = monthFills.length ? monthFills.reduce((n, f) => n + f.remitCents, 0) : null;
+  const claimsPatientCents = monthFills.length ? monthFills.reduce((n, f) => n + f.patientPaidCents, 0) : null;
   const onAccount = {
     receivableCents: monthFills.reduce((n, f) => n + f.receivableCents, 0),
     unbilledCostCents: monthFills.reduce((n, f) => n + (f.unbilledCostCents ?? 0), 0),
   };
   const dispensedCostCents = mine.length ? mine.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0) : null;
   const laterMoneyCents = monthFills.reduce((n, f) => n + f.laterPaymentsCents, 0);
+  /*
+   * The facilitator's promise that has not arrived. Accrual revenue of the month that earned it,
+   * and a receivable until the remittance lands. `facilitatorOutstandingCents` is already the
+   * promise less what has been paid, so this and `laterMoneyCents` can never overlap.
+   */
+  const facilitatorOwedCents = monthFills.reduce((n, f) => n + (f.facilitatorOutstandingCents ?? 0), 0);
 
   /* What the wholesalers billed in the month, for the stock comparison only — never as accrual cost of goods. */
   const monthLines = lines.filter((l) => l.invoiceDate?.startsWith(month));
@@ -1121,6 +1178,7 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     sales: sales ? { retailCents: sales.retailCents, retailCostCents: sales.retailCostCents ?? null, rxPatientCents: sales.rxPatientCents, rxRemitCents: sales.rxRemitCents, totalCents: sales.totalCents } : null,
     receipts,
     laterMoneyCents,
+    facilitatorOwedCents,
     claimsRevenueCents,
     claimsRemitCents,
     claimsPatientCents,

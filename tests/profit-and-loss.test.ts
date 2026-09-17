@@ -404,3 +404,80 @@ describe("the same money twice", () => {
     assert.equal(cash.costOfGoodsCents, 3_000_000);
   });
 });
+
+/*
+ * Rule 2 of the money standard, which the September dry run measured as failing:
+ * `docs/reference/claim-lifecycle.md` G-LC-2, $6,351.99 of accrual revenue understated on two
+ * counts — 4 fills whose cost is unknown ($2,295.78) and 14 facilitator promises not yet paid
+ * ($4,056.21).
+ *
+ *   "revenue is recognised in full when the prescription is sold, whether or not its cost is known
+ *    (margin is what cannot be computed) and whether or not the facilitator has paid (the promise
+ *    is a receivable)."
+ */
+describe("revenue is what the month earned, not what it can cost", () => {
+  test("a fill whose cost nobody knows still sold, so its revenue is counted", () => {
+    const pl = monthlyPL({
+      ...base,
+      sales: null,
+      claimsRevenueCents: 10_000_00,
+      claimsCount: 100,
+      costUnknownFills: 4,
+      costUnknownRevenueCents: 2_295_78,
+      dispensedCostCents: 7_000_00,
+    });
+    assert.equal(pl.revenueCents, 10_000_00, "the whole of what was sold, cost known or not");
+  });
+
+  test("and the caveat says gross profit is overstated, with the figure", () => {
+    /*
+     * The pair the account must always give together: a revenue figure that is right, and a named
+     * direction for the one that leans. Exactly how the front of shop is already treated.
+     */
+    const pl = monthlyPL({
+      ...base,
+      costUnknownFills: 4,
+      costUnknownRevenueCents: 2_295_78,
+    });
+    const said = pl.caveats.find((c) => c.includes("no acquisition cost"));
+    assert.ok(said, "the caveat is raised");
+    assert.match(said!, /\$2,295\.78 of revenue is counted/);
+    assert.match(said!, /gross profit below is overstated/);
+    assert.equal(pl.usable, true, "readable and leaning is a caveat, not a missing line");
+  });
+
+  test("a facilitator promise not yet paid is revenue of the month that earned it", () => {
+    const pl = monthlyPL({ ...base, facilitatorOwedCents: 4_056_21 });
+    const line = pl.revenue.find((l) => l.label.includes("promised and not yet paid"));
+    assert.ok(line, "the promise is on the account");
+    assert.equal(line!.amountCents, 4_056_21);
+    assert.equal(pl.revenueCents, 66_949_738 + 4_056_21);
+  });
+
+  test("the promise and the payment never overlap, because one is the other's remainder", () => {
+    /*
+     * `facilitatorOutstandingCents` is the promise less what has arrived, floored at nothing. So as
+     * money lands, the outstanding line falls by exactly what the paid line rises, and the two
+     * together are always the promise — never more.
+     */
+    const promised = 4_056_21;
+    const half = monthlyPL({ ...base, laterMoneyCents: 2_000_00, facilitatorOwedCents: promised - 2_000_00 });
+    const none = monthlyPL({ ...base, laterMoneyCents: 0, facilitatorOwedCents: promised });
+    const all = monthlyPL({ ...base, laterMoneyCents: promised, facilitatorOwedCents: 0 });
+    assert.equal(half.revenueCents, none.revenueCents, "paid or promised, the month earned the same");
+    assert.equal(all.revenueCents, none.revenueCents);
+  });
+
+  test("neither reaches the cash account, which counts only what the bank saw", () => {
+    const cash = monthlyPL({
+      ...base,
+      basis: "cash",
+      receipts: [{ kind: "third_party", amountCents: 50_000_00 }],
+      facilitatorOwedCents: 4_056_21,
+      costUnknownRevenueCents: 2_295_78,
+      costUnknownFills: 4,
+    });
+    assert.equal(cash.revenueCents, 50_000_00, "what was banked, and nothing promised");
+    assert.equal(cash.revenue.some((l) => l.label.includes("promised")), false);
+  });
+});
