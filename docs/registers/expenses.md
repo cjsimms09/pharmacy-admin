@@ -1,6 +1,6 @@
 # Every cost the business has, and whether the site sees it
 
-*Generated 2026-09-17 16:49 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
+*Generated 2026-09-17 18:01 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
 
 One line per expense category. A category with no money against it is in one of four states and the account cannot tell them apart on its own — which is why a bottom line of nearly break-even could sit above costs that had simply not arrived.
 
@@ -10,12 +10,12 @@ One line per expense category. A category with no money against it is in one of 
 | Income tax payments | balance_sheet | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Loan principal | balance_sheet | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Owner draws and distributions | balance_sheet | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
-| Drug purchases | cost_of_goods | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
+| Drug purchases | cost_of_goods | 0 | $0.00 | captured | counted from the supplier invoices themselves, never from a typed expense — the account drops any bill filed here, because it would be the same money twice |
 | Returns and credits | cost_of_goods | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Wholesaler rebates | cost_of_goods | 2 | $-20,403.76 | captured |  |
 | Accreditation and compliance | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Bad debt | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
-| Card processing and bank fees | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
+| Card processing and bank fees | operating | 0 | $0.00 | expected, not yet arrived | arrives by email from the processor; none received yet — the owner, 12 September: "same with credit card processing fees" |
 | Continuing education | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Delivery | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
 | Equipment and depreciation | operating | 0 | $0.00 | **unknown — nobody has ruled on it** |  |
@@ -39,17 +39,15 @@ One line per expense category. A category with no money against it is in one of 
 | DIR fees and price concessions | revenue_offset | 0 | $0.00 | **not captured** | arrives months later, retroactively per claim, entered by hand |
 | PSAO fees | revenue_offset | 8 | $142.20 | captured |  |
 
-**23 of 32 categories are unresolved** — nobody has said whether they exist, are coming, or do not apply:
+**21 of 32 categories are unresolved** — nobody has said whether they exist, are coming, or do not apply:
 
 - Equipment and improvements bought
 - Income tax payments
 - Loan principal
 - Owner draws and distributions
-- Drug purchases
 - Returns and credits
 - Accreditation and compliance
 - Bad debt
-- Card processing and bank fees
 - Continuing education
 - Delivery
 - Equipment and depreciation

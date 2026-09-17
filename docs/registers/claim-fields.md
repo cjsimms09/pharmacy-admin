@@ -1,6 +1,6 @@
 # Every field on a claim, and whether it is populated
 
-*Generated 2026-09-17 16:49 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
+*Generated 2026-09-17 18:01 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
 
 A claim carries facts a pharmacist acts on. A field the feed never fills is a fact the site cannot use — and one it fills but nothing reads is a fact being thrown away. Counted over the 3,607 paid in-books claims.
 

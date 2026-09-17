@@ -1,6 +1,6 @@
 # Every kind of document that arrives, and whether it is read
 
-*Generated 2026-09-17 16:49 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
+*Generated 2026-09-17 18:01 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
 
 One line per route the mailbox can place a file on. A kind that has never arrived is not a fault; a kind that arrives and is not read is money or a record going nowhere.
 

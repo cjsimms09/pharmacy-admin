@@ -49,6 +49,34 @@ const DECIDED: Record<string, { state: State; note: string }> = {
   "expense:DIR fees and price concessions": { state: "not-captured", note: "arrives months later, retroactively per claim, entered by hand" },
 
   /*
+   * The pharmacy's largest cost, which reads as nought here on purpose.
+   *
+   * On 17 September this register said "Drug purchases — 0 entries, $0.00, unknown, nobody has
+   * ruled on it", which is the worst line it could carry: the whole document exists so that a
+   * bottom line cannot sit above a cost that simply had not arrived, and the biggest cost of all
+   * was the one it could say nothing about.
+   *
+   * It is not missing. `profit-and-loss.ts` reads drug cost from the supplier invoices and says so
+   * in as many words — "Drug purchases are deliberately not read from the expenses list" — and it
+   * actively drops any bill typed into this category, warning that it would be the same money
+   * twice. The seeded category says the same thing in its own notes. So the money is captured; it
+   * is captured somewhere else, and this line should say that rather than shrug.
+   */
+  "expense:Drug purchases": {
+    state: "captured",
+    note: "counted from the supplier invoices themselves, never from a typed expense — the account drops any bill filed here, because it would be the same money twice",
+  },
+  /*
+   * The owner, 12 September 2026: "Pioneer invoices are sent to our email, we just haven't received
+   * one yet, same with credit card processing fees". The sibling category has been recorded on that
+   * sentence since it was said; this half of it never was.
+   */
+  "expense:Card processing and bank fees": {
+    state: "expected-not-yet",
+    note: "arrives by email from the processor; none received yet — the owner, 12 September: \"same with credit card processing fees\"",
+  },
+
+  /*
    * Which document settles which payer, where somebody has told us.
    *
    * Everything absent is "never-measured": the site has billed that BIN and no document has ever settled one of its

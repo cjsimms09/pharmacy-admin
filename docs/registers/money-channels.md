@@ -1,6 +1,6 @@
 # Every way money reaches the pharmacy, and whether it is traced
 
-*Generated 2026-09-17 16:49 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
+*Generated 2026-09-17 18:01 by `scripts/registers.ts`. Do not edit — edit `docs/registers/decisions.md` and run it again.*
 
 The register behind `docs/MONEY-TRACE.md`. A channel with nothing against it has either never paid or is not being read, and those are different — the second one loses money silently.
 
