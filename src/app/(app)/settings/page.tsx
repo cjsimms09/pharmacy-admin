@@ -392,8 +392,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 A total that counts the cheap half and calls itself the total is worse than no total.
                 See `ratesLookWrong`: output priced at zero hid $87.04 of a $145.69 month.
               */}
-              {ratesLookWrong(rate, used.tokensOut).wrong && (
-                <Notice kind="warn">{ratesLookWrong(rate, used.tokensOut).says}</Notice>
+              {ratesLookWrong(rate, used.tokensOut, s.ai_price_out).wrong && (
+                <Notice kind="warn">{ratesLookWrong(rate, used.tokensOut, s.ai_price_out).says}</Notice>
               )}
               <div className="overflow-x-auto">
               <table className="table mt-2">

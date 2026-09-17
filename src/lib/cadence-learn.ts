@@ -191,3 +191,26 @@ export function learnCadence(dates: (string | null | undefined)[]): Learned | nu
     says: `Measured: ${days.length} arrivals between ${from} and ${to} — usually ${typical} day${typical === 1 ? "" : "s"} apart, and it does not normally go beyond ${longest}.`,
   };
 }
+
+/**
+ * The hour of the day a feed usually lands, from its own arrivals.
+ *
+ * Null unless the arrivals carry a time and cluster tightly enough to mean anything. A feed that
+ * arrives at 04:00 one day and 18:00 the next has no usual hour, and pretending it does would put a
+ * row amber for half of every day on no evidence.
+ *
+ * The median rather than the latest, and a spread test rather than a confidence interval: this is
+ * deciding whether to draw a row amber, not pricing a bond.
+ */
+export function arrivalHour(dates: (string | null | undefined)[]): number | null {
+  const hours = dates
+    .filter((d): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}/.test(d))
+    .map((d) => Number(d.slice(11, 13)))
+    .filter((h) => Number.isFinite(h));
+  if (hours.length < 4) return null;
+  const sorted = [...hours].sort((a, b) => a - b);
+  const mid = sorted[Math.floor(sorted.length / 2)]!;
+  /* Most of them within three hours of the middle, or there is no usual hour to speak of. */
+  const close = hours.filter((h) => Math.abs(h - mid) <= 3).length;
+  return close / hours.length >= 0.7 ? mid : null;
+}

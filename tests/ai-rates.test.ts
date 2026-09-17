@@ -12,14 +12,15 @@ import { ratesLookWrong, costOf, DEFAULT_RATE_OUT } from "../src/lib/ai-spend";
  */
 describe("a rate that cannot be true", () => {
   test("output priced at nothing is reported as unbelievable, with the size of what it hides", () => {
-    const r = ratesLookWrong({ in: 5, out: 0, model: "claude-opus-5" }, 3_480_000);
+    const r = ratesLookWrong({ in: 5, out: DEFAULT_RATE_OUT, model: "claude-opus-5" }, 3_480_000, "0");
     assert.equal(r.wrong, true);
     assert.match(r.says ?? "", /\$87\.00|\$87\.04|\$87/, "it says what the free half would come to");
     assert.match(r.says ?? "", /Anthropic invoice/, "and where the true figure lives, since it is not in this building");
+    assert.match(r.says ?? "", /published rate/, "and that the page is standing in with the published rate meanwhile");
   });
 
   test("a real rate is left alone", () => {
-    assert.equal(ratesLookWrong({ in: 5, out: DEFAULT_RATE_OUT, model: "claude-opus-5" }, 3_480_000).wrong, false);
+    assert.equal(ratesLookWrong({ in: 5, out: DEFAULT_RATE_OUT, model: "claude-opus-5" }, 3_480_000, "25").wrong, false);
   });
 
   test("the month this was found in: $58.65 reported against $145.65 at the published rate", () => {

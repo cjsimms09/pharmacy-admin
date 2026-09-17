@@ -254,3 +254,43 @@ describe("the cadence, in words a person reads", () => {
     assert.equal(cadenceWords({ kind: "monthly", dayOfMonth: 21 }), "monthly, due about the 21st");
   });
 });
+
+describe("the clock, not just the calendar", () => {
+  /*
+   * The owner, 17 September 2026, looking at three rows marked Due: "whats wrong?? you havent gotten
+   * claims?" Nothing was wrong. The Rx transaction report runs at 23:31 every night, so judged on the
+   * day alone today's is due from one minute past midnight — amber through the whole working day,
+   * every day, turning green after he has gone home. A row that is amber whenever anyone looks at it
+   * is not telling anyone anything.
+   */
+  const nightly = (over: Partial<Expectation> = {}): Expectation =>
+    exp({ cadence: { kind: "daily", skipSundays: true }, arrivesByHour: 23, lastAt: "2026-09-16T23:31:00.000Z", everCount: 20, graceDays: 1, ...over });
+
+  test("before the hour it usually comes, yesterday's is the one that was owed", () => {
+    const r = judge(nightly(), "2026-09-17", 9);
+    assert.equal(r.state, "arriving", "at nine in the morning, last night's is the newest one owed");
+  });
+
+  test("after the hour, today's is owed and it says so", () => {
+    const r = judge(nightly(), "2026-09-17", 23);
+    assert.equal(r.dueOn, "2026-09-17");
+  });
+
+  test("a feed with no measurable hour is judged on the day, exactly as before", () => {
+    const r = judge(nightly({ arrivesByHour: null }), "2026-09-17", 9);
+    assert.equal(r.dueOn, "2026-09-17", "nothing is assumed about a feed whose hour was never measured");
+  });
+
+  test("the hour never rescues a feed that has actually stopped", () => {
+    /*
+     * Three days of silence from a nightly feed is still three days, whatever time it is — and it has
+     * to be counted from the last arrival, because a daily feed is due every day and "days past the
+     * due date" is never more than one. Judged that way a daily feed could never be called stopped at
+     * all: the claims export could go quiet for a week and the row would read the same as any morning.
+     */
+    const arrivals = ["2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-12", "2026-09-13"];
+    const r = judge(nightly({ lastAt: "2026-09-13T23:31:00.000Z", arrivals }), "2026-09-17", 9);
+    assert.equal(r.state, "overdue");
+    assert.equal(r.daysLate, 3, "counted from the last one that came");
+  });
+});

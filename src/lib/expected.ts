@@ -81,6 +81,22 @@ export type Expectation = {
    * into this file, and they keep saying it better as more arrive. See `cadence-learn.ts`.
    */
   arrivals?: string[];
+  /**
+   * The hour of the day this normally arrives, measured from its own arrivals.
+   *
+   * The owner, 17 September 2026, looking at three rows marked Due: "whats wrong?? you havent gotten
+   * claims?" Nothing was wrong. Two of the three were the page measuring a day against a calendar and
+   * ignoring the clock.
+   *
+   * The Rx transaction report runs at 23:31 every night. Judged on the day alone, today's is "due"
+   * from one minute past midnight and stays amber through the whole working day, every day, until it
+   * arrives after he has gone home. A row that is amber all day and green while nobody is looking is
+   * not telling anyone anything.
+   *
+   * So a daily feed is not due until the hour it usually comes has passed. Measured, like the rhythm
+   * itself — nothing is typed here, and a feed with no measurable hour is judged on the day as before.
+   */
+  arrivesByHour?: number | null;
   /** Days after the due date a real sender may take before this is called overdue. */
   graceDays: number;
   /**
@@ -261,7 +277,7 @@ function ordinal(n: number): string {
  * arrivals has no "since" to measure and reporting it as "48 days late" invents a date it was
  * working. Only then does the calendar get used, and only for things that have a calendar.
  */
-export function judge(e: Expectation, today: string): Judged {
+export function judge(e: Expectation, today: string, nowHour: number | null = null): Judged {
   /*
    * Measured beats declared, every time there is enough to measure.
    *
@@ -278,9 +294,41 @@ export function judge(e: Expectation, today: string): Judged {
       ? `Declared, not measured: ${e.arrivals.length} arrival${e.arrivals.length === 1 ? "" : "s"} on file is too few to read a rhythm from.`
       : "Declared, not measured: nothing has ever arrived, so there is no rhythm to read.");
 
-  const { last, next } = dueDates(using, today);
+  /*
+   * Today's is not due until the hour it usually arrives has passed.
+   *
+   * Only for a daily feed, and only where its own arrivals say what that hour is. The effect is that
+   * a report which reliably lands at 23:31 stops being "due" at nine in the morning — its due date is
+   * yesterday's until tonight, which is the truth and is also the only version of it that says
+   * anything when he looks.
+   */
+  const dueDay = (() => {
+    const d = dueDates(using, today);
+    if (using.kind !== "daily" || e.arrivesByHour === null || e.arrivesByHour === undefined || nowHour === null) return d;
+    if (nowHour >= e.arrivesByHour || d.last === null) return d;
+    /* Before the hour: the most recent one owed is the previous run, not today's. */
+    const previous = dueDates(using, iso(parse(d.last) - DAY));
+    return { last: previous.last, next: d.last };
+  })();
+  const { last, next } = dueDay;
   const lastDay = e.lastAt ? e.lastAt.slice(0, 10) : null;
-  const base = { ...e, using, basis, basisSays, dueOn: last, nextDueOn: next, daysLate: last ? daysBetween(last, today) : null };
+  /*
+   * One lateness, used by the verdict and by the figure beside it.
+   *
+   * For a daily feed it is days since it last came, less the run not yet owed; for everything else it
+   * is days past the date it was due. Computed once, because the first version had the state saying
+   * "stopped" and the number beside it saying "1 day" — two answers to one question, from two
+   * formulas, on the same row.
+   */
+  const lateDays =
+    using.kind === "daily"
+      ? lastDay
+        ? Math.max(0, daysBetween(lastDay, today) - 1)
+        : null
+      : last
+        ? daysBetween(last, today)
+        : null;
+  const base = { ...e, using, basis, basisSays, dueOn: last, nextDueOn: next, daysLate: lateDays };
 
   if (!e.expected) {
     return { ...base, state: "not_expected", says: e.note ?? "Not expected here, so nothing is waiting on it." };
@@ -397,7 +445,19 @@ export function judge(e: Expectation, today: string): Judged {
    * It costs nothing real: a sender with enough history to be worth chasing has enough history to be
    * measured, and the ones without it are exactly the ANDAs.
    */
-  const late = daysBetween(last, today);
+  /*
+   * For a daily feed, lateness is days since it last came — not days since the last date it was due.
+   *
+   * Found by a test asserting that a nightly feed silent since the 13th should read as stopped on the
+   * 17th. It did not, and could not: a daily feed is due every day, so the most recent due date is
+   * always today or yesterday and "days since the due date" is never more than one. With a day of
+   * grace, **a daily feed could never be reported as stopped at all** — the claims export could go
+   * quiet for a week and the row would say "due" every morning, exactly as it says on a normal day.
+   *
+   * The one shape where the calendar answers the wrong question, because it is the one where the
+   * calendar has a date every day. Counted from the last arrival, less the run not yet owed.
+   */
+  const late = lateDays ?? 0;
   if (late <= e.graceDays || basis === "declared") {
     return {
       ...base,
@@ -422,8 +482,8 @@ const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  */
 const RANK: Record<ExpectedState, number> = { overdue: 0, due_now: 1, never_arrived: 2, arriving: 3, not_yet_due: 4, not_expected: 5 };
 
-export function judgeAll(list: Expectation[], today: string): Judged[] {
-  return list.map((e) => judge(e, today)).sort((a, b) => RANK[a.state] - RANK[b.state] || (b.daysLate ?? -999) - (a.daysLate ?? -999) || a.label.localeCompare(b.label));
+export function judgeAll(list: Expectation[], today: string, nowHour: number | null = null): Judged[] {
+  return list.map((e) => judge(e, today, nowHour)).sort((a, b) => RANK[a.state] - RANK[b.state] || (b.daysLate ?? -999) - (a.daysLate ?? -999) || a.label.localeCompare(b.label));
 }
 
 /** The one-line summary for the tab itself: what a person needs to know without opening it. */

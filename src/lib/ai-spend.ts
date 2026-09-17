@@ -50,9 +50,25 @@ export async function rates(): Promise<Rates> {
     const x = Number(raw);
     return Number.isFinite(x) && x >= 0 ? x : fallback;
   };
+  /*
+   * A zero output rate is not a price. No model gives its output away.
+   *
+   * `ai_price_out` on this pharmacy's settings is the string "0", and the rule above honours a typed
+   * zero on purpose — somebody's explicit decision beats a default. But that rule was written for a
+   * figure a person meant, and this one cost real visibility: 3.48M output tokens in thirty-one days
+   * counted as free, so the site reported $58.65 for a month that comes to $145.65. Every ceiling and
+   * every "is this worth it" decision rested on the cheap half of the bill.
+   *
+   * The owner, 17 September 2026, asked what I needed from him to fix it and told me to fix it. What
+   * I do not have is his invoice, so the figure used is the published rate this site was built with
+   * rather than one I invented, and the page says which it is and asks him to confirm it. A typed
+   * zero on the input side is left alone: that one is at least conceivable on a prepaid arrangement,
+   * and it is not the one that was hiding two thirds of the bill.
+   */
+  const outTyped = n(s.ai_price_out, DEFAULT_RATE_OUT);
   return {
     in: n(s.ai_price_in, DEFAULT_RATE_IN),
-    out: n(s.ai_price_out, DEFAULT_RATE_OUT),
+    out: outTyped > 0 ? outTyped : DEFAULT_RATE_OUT,
     model: s.ai_model || "claude-opus-5",
   };
 }
@@ -75,16 +91,17 @@ export async function rates(): Promise<Rates> {
  * refuse to be quiet about it: the rate is reported as unbelievable, with what it would come to at
  * the published rate, so the decision is his with the size of it in front of him.
  */
-export function ratesLookWrong(r: Rates, tokensOut: number): { wrong: boolean; says: string | null } {
-  if (r.out > 0) return { wrong: false, says: null };
-  const atPublished = (tokensOut / 1_000_000) * DEFAULT_RATE_OUT;
+export function ratesLookWrong(r: Rates, tokensOut: number, typedOut: string | undefined): { wrong: boolean; says: string | null } {
+  const typed = (typedOut ?? "").trim();
+  /* Only worth saying where somebody typed a zero and the reader is standing in for it. */
+  if (typed === "" || Number(typed) > 0) return { wrong: false, says: null };
   return {
     wrong: true,
     says:
-      `Output is priced at $0 per million, so every figure here counts only what was sent and nothing that came back. ` +
-      `No model gives its output away, and output is the dearer half. The ${(tokensOut / 1_000_000).toFixed(2)}M output tokens in this period ` +
-      `are counted as free; at the published rate for ${r.model} they are ${dollars(atPublished)}. ` +
-      `Put the rates from the Anthropic invoice on this page and every cost on the site becomes true at once.`,
+      `Output on this page is priced at $${r.out} per million, which is the published rate for ${r.model} — not the $0 on file. ` +
+      `A zero output rate is not a price: no model gives its output away, and output is the dearer half of the bill. ` +
+      `With the $0 believed, the ${(tokensOut / 1_000_000).toFixed(2)}M output tokens in this period counted as free — ${dollars((tokensOut / 1_000_000) * r.out)} of this period's cost, which is why every figure here was the cheap half of the truth. ` +
+      `Put the real rates from the Anthropic invoice in the boxes below and this note goes away.`,
   };
 }
 

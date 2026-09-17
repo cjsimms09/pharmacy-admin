@@ -78,7 +78,22 @@ async function load(today: string): Promise<ExpectedNow> {
     list.push(d);
     daysByRoute.set(k, list);
   }
-  const route = (k: string) => ({ ...(byRoute.get(k) ?? { n: 0, at: null }), days: daysByRoute.get(k) ?? [] });
+  /*
+   * The hour of day each route usually lands, measured from its own timestamps.
+   *
+   * A report that runs at 23:31 is not late at nine in the morning, and saying it is puts a row amber
+   * through the whole working day, every day. See arrivalHour.
+   */
+  const stamps = await c.execute("select routed_as as k, received_at as at from inbox_items where received_at >= date('now', '-60 days')");
+  const stampsByRoute = new Map<string, string[]>();
+  for (const r of stamps.rows) {
+    const k = String(r.k ?? "");
+    const at = str(r.at);
+    if (!at) continue;
+    stampsByRoute.set(k, [...(stampsByRoute.get(k) ?? []), at]);
+  }
+  const { arrivalHour } = await import("./cadence-learn");
+  const route = (k: string) => ({ ...(byRoute.get(k) ?? { n: 0, at: null }), days: daysByRoute.get(k) ?? [], hour: arrivalHour(stampsByRoute.get(k) ?? []) });
   const table = (r: { rows: Record<string, unknown>[] }) => ({ n: num(r.rows[0]?.n), at: str(r.rows[0]?.at) });
 
   /*
@@ -180,6 +195,13 @@ async function load(today: string): Promise<ExpectedNow> {
     daysOf("select distinct substr(uploaded_at, 1, 10) as d from documents where file_name like '%ransaction%istory%' order by d desc limit 60"),
   ]);
 
+  /* When each PioneerRx pull last ran: the arrival, for feeds whose content is dated a day behind. */
+  const pullRows = await c.execute("select key, value from settings where key in ('pioneer_pull_claims_on','pioneer_pull_on_hand_on')");
+  const pullRan = {
+    claims: str(pullRows.rows.find((r) => r.key === "pioneer_pull_claims_on")?.value),
+    onHand: str(pullRows.rows.find((r) => r.key === "pioneer_pull_on_hand_on")?.value),
+  };
+
   const t = {
     claims: table(claims),
     onHand: table(onHand),
@@ -201,7 +223,14 @@ async function load(today: string): Promise<ExpectedNow> {
       whyItMatters: "Every reimbursement figure on the site is built from these fills. A day missing is a day of income nobody can see.",
       cadence: { kind: "daily", skipSundays: true },
       graceDays: 1,
-      lastAt: t.claims.at,
+      /*
+       * When the export last ran, not the newest fill on it.
+       *
+       * A daily export of yesterday's fills is always a day behind by design, so judged on the
+       * newest fill date this row said "Due" every single day of its life. What is being asked is
+       * whether the export arrived, and the pull records exactly that.
+       */
+      lastAt: pullRan.claims ?? t.claims.at,
       everCount: t.claims.n,
       expected: true,
       arrivals: claimDays,
@@ -213,6 +242,7 @@ async function load(today: string): Promise<ExpectedNow> {
       from: "PioneerRx",
       whyItMatters: "Without a count nothing can be told short, and the shelf value in the books is last week's.",
       cadence: { kind: "daily", skipSundays: true },
+      arrivesByHour: route("on_hand").hour,
       graceDays: 1,
       lastAt: t.onHand.at ?? route("on_hand").at,
       everCount: t.onHand.n + route("on_hand").n,
@@ -226,6 +256,7 @@ async function load(today: string): Promise<ExpectedNow> {
       from: "PioneerRx",
       whyItMatters: "What each fill was charged and reversed — the detail behind a claim that a remittance is checked against.",
       cadence: { kind: "daily", skipSundays: true },
+      arrivesByHour: route("rx_transactions").hour,
       graceDays: 2,
       lastAt: route("rx_transactions").at,
       everCount: route("rx_transactions").n,
@@ -239,6 +270,7 @@ async function load(today: string): Promise<ExpectedNow> {
       from: "the card terminal",
       whyItMatters: "It banks the day's card takings and carries the card mix.",
       cadence: { kind: "daily", skipSundays: true },
+      arrivesByHour: route("card_batch").hour,
       graceDays: 2,
       lastAt: t.cardBatches.at ?? route("card_batch").at,
       everCount: Math.max(t.cardBatches.n, route("card_batch").n),
@@ -255,6 +287,7 @@ async function load(today: string): Promise<ExpectedNow> {
       from: "McKesson",
       whyItMatters: "What was bought at what price — the other half of every margin on the site.",
       cadence: { kind: "daily", skipSundays: true },
+      arrivesByHour: route("purchase_drilldown").hour,
       graceDays: 2,
       lastAt: route("purchase_drilldown").at,
       everCount: route("purchase_drilldown").n,
@@ -571,6 +604,6 @@ async function load(today: string): Promise<ExpectedNow> {
     });
   }
 
-  const rows = judgeAll(list, today);
+  const rows = judgeAll(list, today, new Date().getHours());
   return { readAt: new Date().toISOString(), rows, summary: expectedSummary(rows) };
 }
