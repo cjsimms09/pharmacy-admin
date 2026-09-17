@@ -108,7 +108,7 @@ export async function fileAccessHealthPayment(
   }
 
   /*
-   * The origination fees (AH) under "PSAO fees" and the recoupments (CS) under "Chargebacks and audit recoveries", each
+   * The origination fees (AH) under "PBM fees" and the recoupments (CS) under "Chargebacks and audit recoveries", each
    * booked once with no paid date: the deposit is already net of them. Neither under DIR: a month with them on file has
    * still not had its DIR entered (profit-and-loss.ts lists DIR missing on the DIR category alone).
    */

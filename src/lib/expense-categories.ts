@@ -49,11 +49,25 @@ export const SEED_CATEGORIES: SeedCategory[] = [
       "Clawed back by a plan after the claim was paid. Not an operating cost: it is revenue the pharmacy was told it had and then did not. Kept apart so the dispensing margin is not quietly flattered by it. If the plan took it out of a remittance, leave the paid date blank: the cash account already sees it in the smaller deposit, and a paid date would count it twice there.",
   },
   {
-    name: "PSAO fees",
+    /*
+     * Called "PSAO fees" until 17 September 2026, when the owner said: "PBM fees are being labeled
+     * as PSAO fees which isnt correct."
+     *
+     * He is right, and the distinction is his to make: a PSAO fee is what this pharmacy pays Health
+     * Mart Atlas for contracting and network access, and it does not arrive as a deduction from one
+     * plan's remittance. What is actually booked here is an origination fee taken out of a named
+     * PBM's payment — Caremark's, OptumRx's — on that PBM's own EFT. Whoever keeps the money, it is
+     * a concession on that plan's payment, and filing it against the PSAO attributes the cost to the
+     * wrong party on every report that groups by category.
+     *
+     * The accounting treatment does not change and must not: still a revenue offset, still with no
+     * paid date, because the deposit already arrives net of it. Only the name was wrong.
+     */
+    name: "PBM fees",
     kind: "revenue_offset",
     sortOrder: 42,
     notes:
-      "What the PSAO takes out of plan payments before they reach the bank — Health Mart Atlas's origination fee on each EFT. Out of revenue, like DIR, and kept apart from it: a month with these on file has still not had its DIR entered. Booked from the AccessHealth payment reports with no paid date, because the deposit already arrives net.",
+      "Taken out of a plan's payment before it reaches the bank — the origination fee on each EFT, against the PBM whose payment it came out of. Out of revenue, like DIR, and kept apart from it: a month with these on file has still not had its DIR entered. Booked from the AccessHealth payment reports with no paid date, because the deposit already arrives net.",
   },
   {
     name: "Chargebacks and audit recoveries",

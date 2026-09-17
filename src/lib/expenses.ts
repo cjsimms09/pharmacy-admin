@@ -20,6 +20,38 @@ export type Vendor = typeof schema.vendors.$inferSelect;
 export type Expense = typeof schema.expenses.$inferSelect;
 
 /**
+ * Categories this site named wrongly, renamed in place rather than added beside.
+ *
+ * Seeding is by name, which is right for leaving a category somebody has renamed alone — and wrong
+ * for one the site itself got wrong, because a corrected seed then creates a second category and
+ * splits the history across both. The eight origination fees already on file point at a row by id;
+ * renaming that row carries them with it and leaves no orphan.
+ *
+ * "PSAO fees" → "PBM fees", 17 September 2026. The owner: "PBM fees are being labeled as PSAO fees
+ * which isnt correct." A PSAO fee is what the pharmacy pays Health Mart Atlas for contracting and
+ * network access; what is booked here is an origination fee deducted from a named PBM's own EFT.
+ *
+ * Only renames where the new name is free, so it can never merge two categories somebody is using,
+ * and only touches rows the site created (`builtIn`).
+ */
+const RENAMED_CATEGORIES: { from: string; to: string }[] = [{ from: "PSAO fees", to: "PBM fees" }];
+
+async function renameMiscalledCategories(): Promise<void> {
+  const rows = await db.query.expenseCategories.findMany({ columns: { id: true, name: true, builtIn: true } });
+  const byName = new Map(rows.map((r) => [r.name.trim().toLowerCase(), r]));
+  for (const { from, to } of RENAMED_CATEGORIES) {
+    const old = byName.get(from.toLowerCase());
+    if (!old || !old.builtIn) continue;
+    if (byName.get(to.toLowerCase())) continue;
+    const seed = SEED_CATEGORIES.find((c) => c.name === to);
+    await db
+      .update(schema.expenseCategories)
+      .set({ name: to, notes: seed?.notes ?? undefined })
+      .where(eq(schema.expenseCategories.id, old.id));
+  }
+}
+
+/**
  * Puts the standard chart of accounts in place, once.
  *
  * An empty chart gets filled badly — bills go into "other" for three months and the account that
@@ -27,6 +59,7 @@ export type Expense = typeof schema.expenses.$inferSelect;
  * renamed is left alone rather than duplicated.
  */
 export async function seedCategories(): Promise<{ added: number }> {
+  await renameMiscalledCategories();
   const held = await db.query.expenseCategories.findMany({ columns: { name: true } });
   const have = new Set(held.map((c) => c.name.trim().toLowerCase()));
   const missing = SEED_CATEGORIES.filter((c) => !have.has(c.name.toLowerCase()));
@@ -508,5 +541,68 @@ export async function bookSuppliesInvoice(
     says:
       `${ctx.vendorName} invoice ${i.invoiceNumber} of ${i.invoiceDate}: ${money(i.goodsCents)} booked to ${category.name}. ` +
       `The invoice totals ${money(i.totalCents)}; the ${money(i.freightCents)} of freight is deductible on their own terms and is not counted as spending.`,
+  };
+}
+
+/**
+ * Books any supplies invoice already on file that never reached the account.
+ *
+ * The Rx Systems invoice of 15 September 2026 arrived by email on the 16th and was recorded as "A
+ * PDF this does not recognise. Filed as a document." The reader reads it perfectly — invoice
+ * 1440395, $1,715.00 of goods, $406.00 of freight, $2,121.00 total, and the arithmetic ties — and
+ * `looksLikeRxSystemsInvoice` says yes on the stored file today. So the sweep's own branch for it
+ * should have fired and did not.
+ *
+ * I do not know why, and this comment is not going to pretend otherwise. The most likely cause is
+ * that this message was caught in the duplication window of 16–17 September, where the same
+ * attachment was re-filed twice an hour and that one message alone collected twenty inbox rows; the
+ * surviving row is simply one that recorded "unrecognised". What I can say for certain is what it
+ * cost: $1,715.00 of supply spending that was in no month's accrual, on a page the owner went
+ * looking at — "im looking for a supplies charge in accural and dont see it."
+ *
+ * So rather than a theory, a sweep. Every document on file is offered to the reader, and anything it
+ * reads and ties is booked. `bookSuppliesInvoice` is keyed on `RXS-<invoice number>`, so this is
+ * idempotent by construction: a bill already on the books is recognised and left alone, and running
+ * it every night cannot double-count a cent.
+ *
+ * Bounded by the same two things as the other corrections: only documents whose name or title
+ * suggests an invoice are opened, and the reader refuses anything whose goods, freight and extras
+ * do not equal its printed total.
+ */
+export async function bookUnbookedSuppliesInvoices(): Promise<{ booked: number; cents: number; says: string }> {
+  const { looksLikeRxSystemsInvoice, readRxSystemsInvoice } = await import("./rx-systems-invoice");
+  const { readFile } = await import("./files");
+  const { pdfText } = await import("./pdf-text");
+
+  const docs = await db.query.documents.findMany({ columns: { id: true, title: true, fileName: true, storageKey: true } });
+  const candidates = docs.filter((d) => /invoice/i.test(d.title ?? "") || /invoice/i.test(d.fileName ?? ""));
+
+  let booked = 0;
+  let cents = 0;
+  for (const d of candidates) {
+    let text = "";
+    try {
+      text = pdfText(await readFile(d.storageKey));
+    } catch {
+      continue;
+    }
+    /* No sender to lean on here, so it has to name itself on the page. */
+    if (!looksLikeRxSystemsInvoice(text)) continue;
+    const read = readRxSystemsInvoice(text);
+    if (!read.ok) continue;
+    const r = await bookSuppliesInvoice(read.invoice, { vendorName: "Rx Systems", from: "billing@rxsystems.com", documentId: d.id });
+    if (r.id && !r.duplicate) {
+      booked++;
+      cents += read.invoice.goodsCents;
+    }
+  }
+
+  return {
+    booked,
+    cents,
+    says:
+      booked === 0
+        ? "Every supplies invoice on file is already on the books."
+        : `${booked} supplies invoice${booked === 1 ? "" : "s"} booked, ${`$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} of goods that had reached no month's accrual.`,
   };
 }

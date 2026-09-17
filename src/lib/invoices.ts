@@ -1871,19 +1871,19 @@ export async function invoiceCounts(): Promise<InvoiceCounts> {
 export type InvoiceIssue = {
   key: string;
   /**
-   * How loudly this is said, and "noted" is the one that earns its keep.
+   * How loudly this is said. Two levels, and a third was tried and removed the same afternoon.
    *
-   * There were two levels and both of them interrupted him. A $1.49 overbill — real, correctly
-   * found, 52 of 53 invoices agreeing across 576 drugs — sat on his list under a sentence that
-   * literally read "it is here to be seen rather than to be done". A row that says of itself that
-   * there is nothing to do does not belong on a list of things to do, and the second time he was
-   * shown it he said so: "stil getting these".
+   * A $1.49 overbill — real, correctly found, 52 of 53 invoices agreeing across 576 drugs — sat on
+   * his morning list under a sentence that read "it is here to be seen rather than to be done". I
+   * added a quieter level, `noted`, and moved it to its own heading on the invoices page. He said:
+   * "alert still there."
    *
-   * So `noted` is counted, kept, and shown on the invoices page where somebody looking at invoices
-   * will find it — and never on Today. The money is counted identically either way; what changes is
-   * whether it takes up one of the few lines a person reads in the morning.
+   * He was right and the third level was the wrong fix. The invoices page already had a price-check
+   * card saying that exact thing with the rows under it, so the quiet heading was the same fact a
+   * second time on the same page. The answer was to stop emitting the duplicate, not to whisper it,
+   * and a severity nothing uses is exactly the kind of thing that makes this site feel built-up.
    */
-  severity: "blocking" | "warn" | "noted";
+  severity: "blocking" | "warn";
   title: string;
   detail: string;
   /** Where the fix is, when the site can offer one. */
@@ -2151,31 +2151,39 @@ async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
     const hasOverbill = prices.overbilledCents > 0;
     const worthChasing = prices.overbilledCents >= MIN_WORTH_CHASING_CENTS;
     const over = `$${(prices.overbilledCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    out.push({
-      key: "prices-disagree",
-      /*
-       * Below his own floor this is `noted`, not `warn`.
-       *
-       * The row already said "it is here to be seen rather than to be done", and it was still on his
-       * morning list — which is how a list of things to do becomes a list of things to scroll past.
-       * Above the floor it is blocking, as before, and the figure is counted in both cases.
-       */
-      severity: worthChasing ? "blocking" : "noted",
-      title: hasOverbill
-        ? `${over} billed above what was booked in`
-        : `${n} purchase${n === 1 ? "" : "s"} where the invoice and the delivery disagree`,
-      detail:
-        `PioneerRx records every delivery as it is booked in, and the wholesaler sends its own invoice. ` +
-        `${prices.agreeing} of ${prices.checked} invoices agree throughout, across ${prices.linesCompared} drugs. ` +
-        (hasOverbill
-          ? `The rest do not, and the invoices come to ${over} more than PioneerRx booked in against them. The rows say which of it is a price, which is a drug billed and never booked in, and which could not be told apart.` +
-            (worthChasing
-              ? ""
-              : ` That is under the $${(MIN_WORTH_CHASING_CENTS / 100).toFixed(0)} you set as worth chasing, so it is here to be seen rather than to be done — the money is counted either way.`)
-          : `No invoice comes to more than was booked in; what differs is which drug the money is against, which every margin below it is computed from.`),
-      href: "/inventory/invoices",
-      action: "See what differs",
-    });
+    /*
+     * Below his own floor, this is not an issue at all — and the reason is duplication, not volume.
+     *
+     * The invoices page already carries a price-check card of its own: "52 of 53 invoices agree
+     * across 576 drugs, 1 thing does not, and the invoices come to $1.49 more than was booked in",
+     * with the rows under it saying which is a price, which is a drug billed and never booked in,
+     * and which could not be told apart. That card is the right home for this and always was.
+     *
+     * So the summary was the same fact a second time — on the same page as the card, and on Today as
+     * well. I tried demoting it to a quieter heading and he said, correctly, that the alert was
+     * still there. A quieter duplicate is still a duplicate. Above his $30 floor it is blocking and
+     * belongs everywhere it appears; below it, the page that exists to say it says it.
+     *
+     * Nothing about the money changes: `prices.overbilledCents` is computed and displayed either
+     * way, and the floor is his own — "have to lose more than $30".
+     */
+    if (worthChasing) {
+      out.push({
+        key: "prices-disagree",
+        severity: "blocking",
+        title: hasOverbill
+          ? `${over} billed above what was booked in`
+          : `${n} purchase${n === 1 ? "" : "s"} where the invoice and the delivery disagree`,
+        detail:
+          `PioneerRx records every delivery as it is booked in, and the wholesaler sends its own invoice. ` +
+          `${prices.agreeing} of ${prices.checked} invoices agree throughout, across ${prices.linesCompared} drugs. ` +
+          (hasOverbill
+            ? `The rest do not, and the invoices come to ${over} more than PioneerRx booked in against them. The rows say which of it is a price, which is a drug billed and never booked in, and which could not be told apart.`
+            : `No invoice comes to more than was booked in; what differs is which drug the money is against, which every margin below it is computed from.`),
+        href: "/inventory/invoices",
+        action: "See what differs",
+      });
+    }
   }
 
   /*
@@ -2201,7 +2209,7 @@ async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
     });
   }
 
-  const rank = { blocking: 0, warn: 1, noted: 2 };
+  const rank = { blocking: 0, warn: 1 };
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 

@@ -126,9 +126,9 @@ describe("the report's remittance-level adjustments", () => {
     const { post, held } = adjustmentPostings(r.report);
     assert.deepEqual(post.map((a) => [a.key, a.amountCents, a.on, a.plan, a.category]), [
       ["AHADJ|EFT-12345678|CS|1234567", 33, "2026-09-04", "PLAN ONE", "Chargebacks and audit recoveries"],
-      ["AHADJ|EFT-12345678|AH|530", 116, "2026-09-04", "PLAN ONE", "PSAO fees"],
-      ["AHADJ|EFT-12345678|AH|530#2", 50, "2026-09-04", "PLAN ONE", "PSAO fees"],
-      ["AHADJ|EFT-12345678|AH|777", 200, "2026-09-04", "PLAN ONE", "PSAO fees"],
+      ["AHADJ|EFT-12345678|AH|530", 116, "2026-09-04", "PLAN ONE", "PBM fees"],
+      ["AHADJ|EFT-12345678|AH|530#2", 50, "2026-09-04", "PLAN ONE", "PBM fees"],
+      ["AHADJ|EFT-12345678|AH|777", 200, "2026-09-04", "PLAN ONE", "PBM fees"],
     ]);
     assert.deepEqual(held, []);
   });

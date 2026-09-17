@@ -1064,23 +1064,22 @@ export default async function InvoicesPage({
         and each says what to do rather than only what is wrong.
       */}
       {/*
-        Two lists, because "needs attention" and "worth knowing" are different promises.
+        One list.
 
-        Everything used to be one card called Needs attention, including rows whose own text said
-        there was nothing to do — a $1.49 overbill against a $30 floor he set himself. The count on
-        that card is the number a person decides by, and padding it with facts that need no decision
-        is how the card stops being read. The noted ones are still here, still counted, under a
-        heading that does not claim they are work.
+        A second card here held the sub-threshold facts under "Counted, and below the line you set
+        for acting" — which was the same fact as the price-check card further down this very page,
+        said twice. He read it and said "alert still there", which is the right answer to a quieter
+        duplicate. Nothing emits that level any more, so there is one card again.
       */}
-      {issues.some((i) => i.severity !== "noted") && (
+      {issues.length > 0 && (
         <Card
           tone={issues.some((i) => i.severity === "blocking") ? "crit" : "warn"}
           title="Needs attention"
-          count={issues.filter((i) => i.severity !== "noted").length}
+          count={issues.length}
           className="mt-4 mb-6"
         >
           <ul className="rows">
-            {issues.filter((i) => i.severity !== "noted").map((i) => (
+            {issues.map((i) => (
               <li key={i.key} className="flex flex-wrap items-start justify-between gap-2 py-2">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-baseline gap-2">
@@ -1094,22 +1093,6 @@ export default async function InvoicesPage({
                 {i.href && (
                   <Link href={i.href} className="btn btn-sm shrink-0">{i.action ?? "Open"}</Link>
                 )}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
-      {issues.some((i) => i.severity === "noted") && (
-        <Card title="Counted, and below the line you set for acting" className="mb-6">
-          <ul className="rows">
-            {issues.filter((i) => i.severity === "noted").map((i) => (
-              <li key={i.key} className="flex flex-wrap items-start justify-between gap-2 py-2">
-                <div className="min-w-0">
-                  <span className="text-sm font-medium">{i.title}</span>
-                  <p className="mt-0.5 text-xs text-ink-3">{i.detail}</p>
-                </div>
-                {i.href && <Link href={i.href} className="btn btn-sm shrink-0">{i.action ?? "Open"}</Link>}
               </li>
             ))}
           </ul>

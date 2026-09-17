@@ -102,7 +102,7 @@ const money = (c: number) => `${c < 0 ? "-" : ""}$${(Math.abs(c) / 100).toLocale
  *
  * Agreed with session 1 (money map section 12): an **AH — Origination Fee** is a fee the network keeps back from the
  * plans' money, so it reduces what the prescriptions earned. It is a revenue offset on the accrual account, in the
- * EFT's month, the treatment DIR fees get, under "PSAO fees". On the cash account nothing is booked, because the
+ * EFT's month, the treatment DIR fees get, under "PBM fees". On the cash account nothing is booked, because the
  * deposit is already net of it.
  *
  * A **CS — Adjustment** is the X12 PLB code a payer uses to take back an earlier overpayment (Q-AH-1, answered: the owner
@@ -117,7 +117,15 @@ const money = (c: number) => `${c < 0 ? "-" : ""}$${(Math.abs(c) / 100).toLocale
 export type AhPosting = { key: string; code: string; plan: string; on: string; amountCents: number; description: string; category: string };
 export type AhHeld = { code: string; plan: string; reference: string | null; amountCents: number };
 
-export const AH_FEE_CATEGORY = "PSAO fees";
+/*
+ * "PBM fees", not "PSAO fees" — the owner's correction of 17 September 2026.
+ *
+ * A PSAO fee is what the pharmacy pays Health Mart Atlas for contracting and network access. This is
+ * an origination fee deducted from a named PBM's own EFT, so it is a concession on that plan's
+ * payment. See the note in expense-categories.ts. The treatment is unchanged: revenue offset, in the
+ * EFT's month, nothing on cash because the deposit already arrives net.
+ */
+export const AH_FEE_CATEGORY = "PBM fees";
 export const CS_RECOUPMENT_CATEGORY = "Chargebacks and audit recoveries";
 
 export function adjustmentPostings(report: AccessHealthPayment): { post: AhPosting[]; held: AhHeld[] } {

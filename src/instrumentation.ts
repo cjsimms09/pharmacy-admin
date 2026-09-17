@@ -76,6 +76,22 @@ export async function register() {
        * period against the period already in the expense's key — never on amount or filing order.
        */
       await attachMissingRebateDocuments();
+      /*
+       * And supply spending that reached no month's accrual.
+       *
+       * $1,715.00 of Rx Systems goods sat on file as "a PDF this does not recognise" while the
+       * reader read it perfectly, and the owner went looking for it: "im looking for a supplies
+       * charge in accural and dont see it." Keyed on the invoice number, so it cannot double-count.
+       */
+      const { bookUnbookedSuppliesInvoices, seedCategories } = await import("./lib/expenses");
+      await bookUnbookedSuppliesInvoices();
+      /*
+       * And the chart of accounts, which now renames what this site named wrongly.
+       *
+       * "PSAO fees" → "PBM fees". It ran only when somebody opened the Expenses page, and the owner
+       * was looking at the Money page when he found it.
+       */
+      await seedCategories();
 
       /*
        * A day's re-read is forgotten on start-up, so a deploy always gets one.
