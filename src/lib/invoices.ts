@@ -2782,7 +2782,27 @@ export async function storeInvoiceLines(
    */
   const halves = parsed.sections.length
     ? parsed.sections.map((s) => ({ printedCents: s.printedCents, readCents: s.readCents, lines: s.lines, what: s.controlled ? "the Schedule II half" : "the non-controlled half" }))
-    : [{ printedCents: parsed.printedTotalCents, readCents: parsed.totalCents, lines: parsed.lines.length, what: "the invoice" }];
+    : [
+        {
+          printedCents: parsed.printedTotalCents,
+          /*
+           * Charges count towards the invoice's own total, because the invoice counts them.
+           *
+           * The drop ship of 17 September prints $38.70 of goods and $7.50 of carriage and totals
+           * $46.20. The goods are the lines; the freight is a charge with no NDC, and it is read.
+           * Compared on lines alone this invoice is "short $7.50" — a named shortfall, on his list,
+           * for money that was read correctly and deliberately kept off every drug's cost.
+           *
+           * My own change, half done: `reconciles` was taught about charges and this comparison was
+           * not, so one parse produced two verdicts about the same invoice. Only the whole-invoice
+           * case adds them; a section subtotal is the invoice's own arithmetic about a half, and
+           * freight belongs to neither half.
+           */
+          readCents: parsed.totalCents + parsed.chargesCents,
+          lines: parsed.lines.length,
+          what: "the invoice",
+        },
+      ];
   const short = halves.filter((h) => h.printedCents !== null && h.readCents !== h.printedCents);
   const shortCents = short.reduce((n, h) => n + ((h.printedCents ?? 0) - h.readCents), 0);
   /* How many lines are missing, where the reader can say: the shapes it did not claim at all (`unrecognised`). */
