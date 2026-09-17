@@ -521,8 +521,20 @@ export function policies(pharmacy: string): ManualPolicy[] {
          * "Where the certificate states one" is doing real work in that sentence: some certificates
          * give an expiry date, others give the manufacturer's recommended interval, and a policy
          * that assumes the first is a policy this pharmacy can fail on paperwork it never received.
+         *
+         * And a second pass, after session 1 read the first: vague must not become a practice nobody
+         * performs. The earlier wording said the dates "are recorded against that logger" and the
+         * certificate "is filed there", both stated as fact. Neither was true on the day it was
+         * written — nothing in this system held a certificate, and no expiry had been entered. A
+         * manual asserting a practice the pharmacy does not follow is worse than one that is silent,
+         * because it is the pharmacy's own evidence against itself.
+         *
+         * So the requirement is the certificate, kept and producible, which is what the CDC toolkit
+         * actually asks for — it asks for a certified logger, not for the expiry to have been typed
+         * into a computer. What the system does with the dates is described exactly: recorded where
+         * known, said to be unknown where not.
          */
-        "Each logger is a digital data logger with a current certificate of calibration testing traceable to a recognised standard. The date of calibration, and where the certificate states one its expiry, are recorded against that logger in the pharmacy's compliance system, and the certificate itself is filed there. Whether the calibration is still current is confirmed at the annual vaccine storage review, and a logger found to be outside it is re-certified or replaced before its readings are relied on again.",
+        "Each logger is a certified digital data logger holding a current certificate of calibration testing traceable to a recognised standard, which is kept and can be produced on request. Where the certificate's dates are known they are recorded against that logger in the pharmacy's compliance system; where they are not, the record says so rather than implying otherwise. Whether the calibration is still current is confirmed at the annual vaccine storage review, and a logger found to be outside it is re-certified or replaced before its readings are relied on again.",
         /*
          * What is actually done about a reading out of range, as opposed to how it is recorded.
          *
