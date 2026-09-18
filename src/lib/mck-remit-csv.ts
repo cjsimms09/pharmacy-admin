@@ -49,3 +49,77 @@ export function looksLikeRemitDetail(text: string): boolean {
   const cols = columnsOf(text);
   return cols.has("remitnumber") && cols.has("rxnumberoradjdescription") && cols.has("matchtoclaim");
 }
+
+/** One remittance, as the summary export prints it. No patient data anywhere in this file. */
+export type SummaryRow = {
+  remitNumber: string;
+  payerName: string;
+  /** ISO. When the payer remitted, which is what the detail export's lines carry too. */
+  remitOn: string | null;
+  amountCents: number;
+  /** The payer's payment number, or null where the portal has not matched one yet. */
+  paymentNumber: string | null;
+};
+
+const splitRow = (line: string): string[] => {
+  const out: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else quoted = false; } else cur += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") { out.push(cur); cur = ""; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out.map((s) => s.trim());
+};
+
+const iso = (raw: string | undefined): string | null => {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((raw ?? "").trim());
+  return m ? `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}` : null;
+};
+
+/**
+ * Read the summary export.
+ *
+ * "Not matched" in the payment column is the portal saying it has not tied the remittance to a
+ * deposit yet; it is kept as null rather than as the string, because a null is a state and a
+ * string that happens to read "Not matched" is a number waiting to be used by mistake.
+ */
+export function readRemitSummary(text: string): { rows: SummaryRow[]; problems: string[] } {
+  const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return { rows: [], problems: ["The file is empty."] };
+
+  const header = splitRow(lines[0]).map((h) => norm(h.replace(/^"|"$/g, "")));
+  const at = (n: string) => header.indexOf(n);
+  const iRemit = at("remitnumber");
+  const iPayer = at("payername");
+  const iDate = at("remitdate");
+  const iAmt = at("remitamt");
+  const iMatch = at("paymentmatch");
+  if (iRemit < 0 || iAmt < 0) return { rows: [], problems: [`Not a remit summary: columns are ${header.join(", ")}.`] };
+
+  const rows: SummaryRow[] = [];
+  const problems: string[] = [];
+  for (let r = 1; r < lines.length; r++) {
+    const f = splitRow(lines[r]).map((s) => s.replace(/^"|"$/g, ""));
+    const remitNumber = (f[iRemit] ?? "").trim();
+    const raw = (f[iAmt] ?? "").replace(/[$,]/g, "").trim();
+    if (!remitNumber || !/^-?\d*\.?\d+$/.test(raw)) {
+      if (f.some((x) => x.length > 0)) problems.push(`Row ${r + 1} could not be read.`);
+      continue;
+    }
+    const match = (f[iMatch] ?? "").trim();
+    rows.push({
+      remitNumber,
+      payerName: (f[iPayer] ?? "").trim(),
+      remitOn: iDate >= 0 ? iso(f[iDate]) : null,
+      amountCents: Math.round(parseFloat(raw) * 100),
+      paymentNumber: match && !/^not\s*matched$/i.test(match) ? match : null,
+    });
+  }
+  return { rows, problems };
+}

@@ -10,6 +10,7 @@ import { todayIso } from "./dates";
 import { isOutOfBooks } from "./books-start";
 import { isProgrammePayer } from "./payer-owed";
 import { gateFile } from "./phi-gate";
+import { looksLikeRemitSummary } from "./mck-remit-csv";
 
 /**
  * Money that reaches a claim after it was adjudicated.
@@ -880,6 +881,63 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
         continue;
       }
 
+      const kind = classify(c.name, c.buf);
+
+      /*
+       * The remit detail export: read, never kept.
+       *
+       * This file carries a patient name column, so the gate below would refuse it — and refusing
+       * it outright would be the wrong answer, because it is also the only way to recover a
+       * fortnight of remittances in one go when the push feed has stopped. "Export Modified 835"
+       * on the portal enables for a single remittance at a time.
+       *
+       * So it is handled the way an 835 is handled: read by a parser that cannot see the column,
+       * posted, and never written to disk. `readRemitDetail` locates its columns by name and the
+       * patient column's index is never among them. The file is deleted from the folder when it
+       * has been read, and no document row is ever made for it.
+       *
+       * It needs its summary twin, which is how each remittance gets an independent figure to be
+       * judged against — without that there is no way to tell a remittance the site already holds
+       * from one it does not, and topping up a remittance line by line is how money gets counted
+       * twice.
+       */
+      if (kind.kind === "mck_remit_detail") {
+        const twin = candidates.find((o) => o !== c && looksLikeRemitSummary(o.buf.subarray(0, 4096).toString("utf8")));
+        if (!twin) {
+          out.problems.push(
+            `${c.name}: this is ProviderPay's Remit Detail export and it carries patient names, so nothing may be ` +
+              `stored from it. It also needs its Remit Summary export alongside it to be read at all — export both ` +
+              `from the same search and put them in this folder together. It has been left where it is.`,
+          );
+          continue;
+        }
+        const { importRemitDetail } = await import("./mck-remit-detail-store");
+        const r = await importRemitDetail(text, twin.buf.toString("utf8"), user);
+        if (!r.ok) {
+          out.problems.push(...r.problems.map((p) => `${c.name}: ${p}`));
+          continue;
+        }
+        out.read++;
+        out.payments += r.posted.reduce((n, p) => n + p.lines, 0);
+        out.amountCents += r.postedCents;
+        out.alsoRead.push(
+          `${c.name}: ${r.posted.length} remittance${r.posted.length === 1 ? "" : "s"} posted (${formatCents(r.postedCents)}), ` +
+            `${r.alreadyHeld.length} already held${r.unsure.length > 0 ? `, ${r.unsure.length} left alone as neither` : ""}. ` +
+            `The file itself was not kept — it names patients.`,
+        );
+        for (const u of r.unsure) {
+          out.problems.push(
+            `${c.name}: remittance ${u.remitNumber} is ${formatCents(u.summaryCents)} and the site already holds ` +
+              `${formatCents(u.heldCents)} of it, so nothing was posted for it. A remittance that is half here is a ` +
+              `question rather than a sum — ${formatCents(u.unpostedCents)} is unaccounted for either way.`,
+          );
+        }
+        out.problems.push(...r.problems.map((p) => `${c.name}: ${p}`));
+        /* Deleted rather than filed: reading it is allowed, keeping it is not. */
+        markDone(c);
+        continue;
+      }
+
       /*
        * The patient-information gate, which this folder did not have.
        *
@@ -892,9 +950,10 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
        * reason — "an 835 names patients and the site does not keep those" — but it tests for X12,
        * and a CSV walks straight past it.
        *
-       * Found on 18 September 2026 with three such files already in the folder: ProviderPay's
-       * "Remit Detail" export, downloaded from the portal by hand, 9,107 rows with a column headed
-       * "Patient name". Nothing had swept yet. The gate refuses all three.
+       * Found on 18 September 2026 with three such files already in the folder, all of them the
+       * remit detail export the branch above now reads. Anything else carrying a patient column
+       * stops here, because there is no reader for it and so no way to take the money without the
+       * names.
        *
        * Placed after the 835 branch and not before it, so the remittance path that already works
        * is untouched: an 835 carries names in segments this parser never reads, and refusing one
@@ -908,8 +967,6 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
         );
         continue;
       }
-
-      const kind = classify(c.name, c.buf);
 
       /* The payment report — what each payer actually sent. Banks the cash side. */
       if (kind.kind === "payer_payments") {
