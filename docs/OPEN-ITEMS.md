@@ -1,0 +1,510 @@
+# What is open, and who has it
+
+The owner, 12 September 2026: *"you need to be keeping track of all these things and they need to be
+corrected.. use other sessions"* — and then: *"but youre still in charge of making sure they all get
+done, do not miss any"*.
+
+So this file is the register. Every finding that is not yet fixed goes here the moment it is found,
+with the money against it and who it is waiting on. A finding that lives only in a chat message is a
+finding that gets lost, and today three of them nearly were.
+
+**Rules.** Nothing leaves this list because it got old — only because it is done, or he decided not
+to do it (and then it moves to the decided section of `DAILY-CHECK.md`). Money figures carry the date
+they were measured, because they move. Anything delegated to another session names what was asked,
+so the answer can be checked rather than taken on trust.
+
+---
+
+## Waiting on him — cannot be finished without an answer
+
+| What | Money | The question |
+|---|---|---|
+| ~~**Login almost never works**~~ **Answered and fixed, 15 September — no longer waiting on him.** | — | ~~When it fails, is it the pharmacy computer or a different one?~~ The question was the wrong one: the server was letting him in every time and his browser was not landing because the server was frozen. The sign-in page never counted as somebody using the site, a restart assumed nobody was there, and the idle clock was not reliably shared between the scheduler and the pages — so heavy background work ran while he signed in, one step at a time for up to 25 seconds, and each press cancelled the page the last one was opening. Fixed and measured: slowest of 60 sign-in requests after restart, 20 ms. See "Found 15 September". |
+| ~~**The brand book loses money**~~ **Withdrawn, 15 September — a measurement fault. He was told not to act on it.** | ~~−$2,019.24~~ → about −$37 | The −$2,019.24 was mostly six fills, and they were counted wrongly: a fill billed to two payers is two claim rows, and each row carried the full cost — Rexulti rx 900000 and Zepbound rx 900001 were each charged for their bottle twice — plus a reversed Rexulti that was never sold. Measured correctly, **Rexulti makes money on every September fill** (3–4% over cost) and **Zepbound pens lose about $30 on two Express Scripts fills** and make $22 on a third. Nothing near a don't-dispense or contract decision. Found by session 2, measured by session 1. The line "it is also the answer to 'our accrual is too low'" went with it; that question needs a fresh answer. |
+| **rx 900002, cephalexin, $23.36** | $23.36 | The fifth stale claim. The settler deliberately left it: it is the only live row on its fill, so nothing confirms the fill happened at all, and reversing it would take a whole fill off the books on no evidence. Needs him to say whether that prescription was dispensed. |
+| **8 claims where PioneerRx's cost disagrees with an invoice dated the same day** | **$419.53 overstated, all of it inside accrual COGS** | Where the pharmacy holds an invoice for the same NDC on the same day, should the site prefer the invoice over PioneerRx's `acquisition_cents` and show the difference — or leave PioneerRx's figure alone and only flag it? Nothing has been overwritten either way. **The measurement says PioneerRx is normally right**, which is what makes these eight worth asking about: across 758 solid-dose September claims with a pack size the catalogue corroborates, the median claim-to-invoice ratio is exactly 1.0000 and 487 are within 5% of it. So this is not two different cost bases — it is a few drug records whose cost was never updated when the price changed. Worst three: rx 900003 mirabegron ER 50mg, claim $297.98 against ParMed 7491190346 of the same day at $175.67 (1.70x, $122.31); rx 900004 ivermectin 3mg (1.63x, $186.57); rx 900005 doxepin 3mg (6.48x, $83.57) — and that last one carries two paid rows under two different NDCs, so it may be one of the stale rebills rather than a cost fault. Measured 12 September. |
+| **19 plans still unclassified** | the residual after 459 were adopted and 15 he decided himself | Almost all of it is the one question no document on file answers: is this employer insured, or does it fund its own plan. Needs a Form 5500 or the plan document, one plan at a time. Each row now shows what the plan pays for and whether it ever pays alone, which is what settles a card. |
+
+## Being corrected in another session
+
+| What | Money | What was asked |
+|---|---|---|
+| ~~**One authoritative pack size per NDC**~~ | — | **Done, 12 September** — `src/lib/pack-size.ts`. See the done list below. |
+
+## Decisions he made today, so nobody reopens them
+
+- **A MAC appeal needs a shortfall over $30.** His words: "thats not worth it, rather chase other
+  things wrong with site.. lets set a limit for mac claims (have to lose more than $30)". Of 117
+  below-NADAC Caremark claims worth $645.74, only 38 could be proved with an invoice and those came
+  to $95.85, the largest $6.78 — 38 verification codes typed by hand for two and a half dollars
+  each. Money under the floor is still counted and still owed; it just does not reach a worklist.
+  `MIN_WORTH_FILING_CENTS` in `mac-appeal-candidates.ts`.
+- **A reversal of a dispensing from before 1 September is forgotten.** "we are starting evrything
+  clean as of 09/01, so if it is a reversal of a claim from before 09/01 we can forget about". 23 of
+  the 28 on file. Still stored, counted apart: nothing was ever counted for them to cancel.
+- **Cardinal Health, RrcPharmaSolution and TopRx use the PioneerRx receipt as the invoice.** No
+  document is coming, so the site no longer asks for a sending address.
+- **Revenue stays recognised at pickup, not at fill.** Asked and answered on 12 September: the stock
+  is still his until the patient takes it, the cost is held out with the revenue, and an unclaimed
+  script gets reversed. $92,154.24 sits in the bin and the account says so.
+
+## Found 14 September, written to the three-line gate
+
+### The PioneerRx receipt does half the job the owner asked of it
+
+**OBSERVATION.** `pioneer_purchases.itemsJson` carries the per-drug figures of every delivery
+PioneerRx booked in — ndc11, quantity, unitCostCents, extendedCents, packSize. Exactly one module
+reads it: `invoice-price-check.ts`, which uses it to check invoices that *did* arrive. Nothing reads
+it as a cost. `product-ledger.ts`, `minimum-store.ts`, `over-nadac-store.ts`, `appeals.ts` and
+`returns-due.ts` all read `invoice_lines` and only `invoice_lines`, and `invoice_lines` is written
+only by `storeInvoiceLines` from an invoice document's own text. Invoice coverage is 51%
+($118,449.24 of $230,143.13, measured 12 September).
+
+**SHOULD BE.** The owner named two jobs for this data and the schema records both in his words:
+*"standing in for a purchase whose invoice never reached the pharmacy"*, and checking the invoices
+that did. He was explicit about the first — *"I more just wanted to use it to catch the money from
+invoices we didn't get before this was setup in September."* A delivery the pharmacy booked in, with
+the wholesaler's own per-drug figures on it, is evidence of what a drug cost whether or not the
+invoice was ever posted. That is pharmacy practice rather than an inference from this data: the
+receiving record is what a pharmacist reconciles against, and it exists precisely because the paper
+is slow.
+
+**DIFFERENCE.** The second job is built and the first is not. Roughly half the pharmacy's purchases
+by value have no per-drug cost reaching any screen that prices an order, times a return or backs an
+appeal — while the figures sit in the database, already parsed, one table away.
+
+**What this must not become.** The owner also said *"we shouldn't be taking pioneer order receipts
+as invoices, invoices are mailed to us from suppliers and that's what we have to keep"*, and the
+schema keeps them in a separate table on purpose so no query can count a delivery twice by
+forgetting a flag. So the answer is **not** to write `invoice_lines` from a receipt. It is a cost
+source that names its own authority, is visibly weaker than an invoice, and never reaches the money
+accounts unless he says so.
+
+**Money: $146,612.51, and it is not a chase.** Corrected 14 September. The first figure —
+$157,264.78 across 62 deliveries — was a raw SQL join that ignored the site's own rules, and the
+site's own answer is different in both directions. `invoicesStillOwed()` reports **0 invoices still
+to chase, $0.00**, and 50 invoices worth $146,612.51 from before the mailbox was watching, across
+four suppliers. JamsRX and Xymogen carry `invoice_from_pioneer`, so their receipts already are their
+invoices; ParMed's nine are settled; McKesson, IPC, IPD and ANDA all pre-date `filingSince`. Nothing
+is waiting on anybody, the owner has said he does not want the 1–8 September backlog chased, and
+McKesson is now sending everything — every McKesson gap is before 9 September, zero after it, 29 of
+31 deliveries invoiced since.
+
+**So the gap is real and it is not the gap it looked like.** Those 50 deliveries have no
+`invoice_lines`, therefore no per-drug cost on any screen that prices a buy or times a return. That
+is what `drug-cost-source.ts` answers and nothing reads it yet. Wiring it into the buying-side
+consumers is session 1's, by agreement on 14 September, because the consumers are its files — with
+two constraints carried from the module's docstring: `provable()` gates anything that reaches a
+payer, since a receipt is not a document the pharmacy can produce; and nothing receipt-derived may
+reach `profit-and-loss.ts`, which sources purchases from the wholesaler invoices dated in the month
+and would double-count the stock check.
+
+**The six lines with no drug code: answered, and there is nothing to build.** All six are correctly
+codeless — the field is empty rather than malformed, so `ndc11()`, `ndcFromUpc()` and the
+twelve-to-eleven reading are all inapplicable. Two McKesson front-end items, a dressing and an elbow
+support, and four Xymogen nutraceuticals; Xymogen is a supplements house and none of its catalogue is
+an NDC drug. $429.45, correctly outside every per-drug figure, and `coverage` says so in a sentence
+rather than dropping them silently as it used to.
+
+### The site had no answer to "are these two names the same wholesaler"
+
+**OBSERVATION.** The invoice proof's first real run, 14 September: 35 invoices, 35 reconcile, 0
+disagree, 0 hold no lines, 0 undated, 0 readable better now, **10 under the wrong wholesaler**, 0
+unreadable. All ten were one wholesaler written two ways — nine filed `IPC` against pages reading
+"Independent Pharmacy Cooperative", one filed `IPD` against "Independent Pharmacy Distributor".
+
+**SHOULD BE.** A check's own sentence has to be true of what it reports. "Filed under a different
+wholesaler than the page now names" was false on ten of ten.
+
+**DIFFERENCE.** Yes, and the cost is not the noise — it is that a genuine ParMed-under-Cardinal would
+have been indistinguishable from it on the screen. A row that cries wolf ten times is a row nobody
+reads on the eleventh.
+
+**Fixed 14 September.** The comparison had been written twice, in `scripts/prove-invoices.ts` and in
+`drug-cost-source.ts`, and both copies missed the same case: an acronym against its own expansion.
+`sameWholesaler` in `supplier-match.ts` is now the one answer and both call it. It works from the
+two strings rather than an alias list, because an alias list goes stale the first time a wholesaler
+is added by somebody who does not know it exists. Same shape as `sameDrugCode`: two writings of one
+thing read as two things.
+
+**Not a similarity score, deliberately.** Either these are the same company or they are not, and a
+threshold would make the answer depend on a number nobody can defend.
+
+**Pre-flight.** Physical act: boxes arriving and being booked in at the counter. Time: affects every
+period already loaded. What a pharmacist knows that the tables do not: that the receiving record is
+reconciled against, not the invoice. Whose money / already counted elsewhere: **the risk that
+matters** — `profit-and-loss.ts` sources purchases from "the wholesaler invoices dated in the
+month", so a receipt-derived cost must stay out of it or the stock-movement check double-counts.
+Worst case ranked: money, not patient harm. Could it pass for the wrong reason: yes — a receipt and
+an invoice for the same delivery must be one cost, matched on the wholesaler's own invoice number,
+which is the join `invoices-owed.ts` already uses. **Resolved since.** Both unknowns answered on 14 September. There are no older rows — every
+`pioneer_purchases` row is September 2026 and all 96 carry both columns — so no text fallback is
+carried, and a backfill of pre-September deliveries must be refused here rather than read from prose.
+548 of 554 lines have a usable NDC. **The 6 that do not were looked at on 14 September and all six
+are correctly codeless** — the field is empty rather than malformed, so `ndc11()`, `ndcFromUpc()` and
+the twelve-to-eleven reading are all inapplicable. Two McKesson front-end items, a dressing and an
+elbow support, and four Xymogen nutraceuticals; Xymogen is a supplements house and none of its
+catalogue is an NDC drug. $429.45, correctly outside every per-drug figure, and `costCoverage` says
+so in a sentence rather than dropping them silently.
+
+## Readings recorded — 14 September
+
+Rule 6 says a review that happens after the push and changes nothing leaves no commit to carry a
+`Read-By:`, and that it goes here as a line or is not recorded at all. These are those lines.
+
+**63bf908, the `Read-By:` clause itself — read by session 2, 14 September.** Session 1 asked for it
+to be read before it stood and pushed it carrying no trailer, because nobody had. Two things came
+back; the first is in the half the rule says can be believed.
+
+*"A commit without one is reliable evidence nobody else read it."* It is not, yet. It is reliable
+evidence nobody **recorded** a reading, and for the first weeks those are different: the convention
+is a day old, so an absent trailer mostly means the habit has not formed rather than that the words
+went unread. The negative is the half the rule rests on, so it is the half that has to be stated
+exactly — and a noisy negative early on invites the conclusion that the control is failing when it is
+only new. Proposed wording: absence is reliable evidence that nobody recorded a reading, and becomes
+evidence that nobody read only once the trailer is habitual.
+
+*"That gap produced three faults in one day on 14 September."* True of the three that earned the
+clause and no longer true of the day: the nine forward-dated references, the invented duration, the
+attribution of my drift to session 1, and session 1's own "began" against "became dependable" are
+four more of the same class, all found after it was written. The sentence does not say which it
+means. Not worth a count that will go stale again — worth "the three that earned this clause", which
+cannot.
+
+Neither changes what the rule does or how it is followed. Session 1 owns the wording.
+
+## Open against rule 6 itself — 14 September
+
+### It is the only control here that cannot show it ran
+
+**OBSERVATION.** Six nightly proofs each re-read a source file and print what they compared: the
+catalogue against the wholesaler's file, NADAC against the CMS files, the claims against the stored
+reports, the shelf against its own record count, the invoices against their documents. Every one can
+be asked "did you run, and on what" and answer. Rule 6 has no source to compare against — the
+instrument is a person reading — so it cannot answer either question. There is no record anywhere of
+a sentence having been read by somebody who did not write it.
+
+**SHOULD BE.** A control that cannot be shown to have run is indistinguishable from one that has
+stopped, which is the whole reason the six proofs carry their own date: a job that dies leaves a row
+that ages visibly rather than a row that looks fine. Rule 6 has the failure mode those were built to
+prevent, and it is the newest and least practised rule in the set.
+
+**DIFFERENCE.** Yes, and session 1 named it rather than papering over it — its own words, that it
+will say so to the owner rather than let it sit alongside the others as though it were the same kind
+of thing. That is right and this entry is not a complaint about it.
+
+**A partial answer, offered rather than adopted.** The rule already records the *absence*: a figure
+shipped with no second reader says so in the same breath. What nothing records is the presence. A
+`Read-By:` trailer on a commit, in the same shape as `Co-Authored-By:`, would make the question
+answerable — `git log --grep` says which work was read and by whom, and more usefully which was not.
+
+Its limits, said plainly because an attestation that oversells itself is worse than none: it records
+that the control ran, never that it ran well. It can be typed without reading, exactly as any trailer
+can. It proves nothing about a sentence's truth. What it buys is that absence stops being invisible,
+which is the same and only thing the proofs' dates buy.
+
+Session 1 owns the wording of rules 1 to 6 and this is a proposal to it, not a change to it.
+
+**Correction to the record while here.** Commit 294c729's message says *"Session 1's messages said
+the fifteenth too, and I took the date from the conversation rather than from the clock."* The first
+half is false. `git log -S"15 September"` returns five commits and all five are mine; session 1
+checked and its text says 14 September for Monday's work and 13 September for the Sunday file, both
+correct. I asserted a fault in somebody else's work while owning my own, without checking, and the
+effect of it would have been to make a drift that was mine alone look systemic. Worse than the nine
+dates, and found only because session 1 disputed it rather than accepting the company.
+
+## Found 15 September, daily check — session 1
+
+| Item | Money | State | Owner |
+|---|---|---|---|
+| **Brand book "losing $2,019.24" is a measurement fault.** Rexulti makes money on every September fill (1.033–1.040 of cost); Zepbound pens lose ~$30 on two ESI fills paid 97% of acquisition. Cause: primary+secondary pairs (Rexulti 900000, Zepbound 900001) are two claim rows each carrying the full cost, plus a reversed unsold Rexulti (900006). Found by session 2. | −$2,019.24 → ≈ −$37 | **told him not to act on it** | 1 |
+| **Below-cost totals were counted per claim row, not per fill.** $11,951.77 of September's $25,522.19 per-row below-cost sits on the 76 fills with two payer rows (2.6% of fills, 47% of the money). Every figure from the claim-remedy probes on 14 September is overstated by up to that. Nothing filed or shown from them. Router to be rebuilt on fills; COB revenue (which copay is final) is not knowable from row order alone and is not to be guessed. | up to $11,951.77 | not started | 1 |
+| **13 fills, $2,568.02, in PioneerRx and not in the site**, from 4–10 September (one $1,204.25 on the 4th). Not the day-behind timing gap — the copy and the reports both cover those days. `pioneer_claims_reconcile`. | $2,568.02 | **not diagnosed** | 1 |
+| **"$23,076.03 they have not sent"** on the McKesson chase line. All 11 deliveries are dated 14 September and McKesson invoices arrive the next day, so the true state is *expected, not yet arrived*. The sentence says more than one day supports — the eighth shape. Wants a grace day before it says "not sent". | $23,076.03 | not started | 1 |
+| Basis of reimbursement 20: no definition on this machine. Contracts (399 docs, 0 hits), PioneerRx (`Prescription.Claim.BasisOfReimbursementDetermination` is a bare column; its code tables cover reject codes only), and the feed all checked. Needs RxLocal/PioneerRx support or the NCPDP external code list. | $19,226.72 on 270 claims | waiting on an ask | him |
+| Two ParMed invoices above PioneerRx's receiving (7491405516 +$1.57, 7491384103 +$4.83). **Measured: item lines equal what was booked in to the cent; the difference sits on the total and no line — a charge, not goods.** The site's alert calls it "goods that were not booked in", which is false. Handed to 2 (`invoices.ts`). | $6.40 | alert wording with 2 | 2 |
+| **A fill-date rule for claim payments took $2,789.08 of September cash out of the cash account — withdrawn.** Committed that morning (`284547b`) so MTF refunds for August fills would sit outside the books; reported to him as "neither bottom line moved", which nobody had measured. The cash account reads the same flag and counts MTF refunds received in a month as that month's facilitator cash. Reverted and the 15 rows restored: cash revenue $230,470.88 → $233,259.96 (+$2,789.08 exactly), accrual unchanged, both bases balance, no duplicate invoice, payment or receipt. The refunds still cannot match a claim; he said that is okay. | +$2,789.08 restored | **fixed, deployed, measured** | 1 |
+| Cash cost of goods moved +$2,695.30 between the evening of 14 September and the afternoon of the 15th with no new supplier invoice marked paid and no new expense row. Most likely deliveries recorded by the morning PioneerRx pull, **not traced**. (The other cash movement, +$207.33 operating, is Alert360, a standing cost paid on the 15th — correct.) | $2,695.30 | not traced | 1 |
+| **Health Mart Atlas EFT notice: read, routed and banked.** Two notices read (EFT-31460993 $20,091.28 on 14 Sept, EFT-31455651 $24,559.62 on 11 Sept), the second end to end through the mailbox. Shares the portal report's key; run twice, banked once. | +$44,650.90 cash | **done, deployed** | 1 |
+| **A bank statement would have doubled September's third-party cash** — every deposit line banked with no source key. Now confirms a receipt already on file (exact amount, 7-day window, one-to-one) and banks only what nothing matches. No statement has been read yet, so no damage. **Verify on the first real statement**: the description format and the McKesson-as-rebate placement are unproven. | $275,121.78 of September third-party receipts protected | **fixed; first statement to be checked** | 1 |
+| **AccessHealth Payment Data PDFs are not read.** Nine on file (EFT-31415975..31455651), filed as unrecognised. Each is claim-level payment detail per plan plus 835 adjustment codes. The reader must: bank at EFT level through `bankPayerPayments`; record claim payments without doubling the old ProviderPay rows; categorise AH/E3/WU/B2/50/51/90/FB adjustments; ignore page footers read as section titles. Fill dates in this batch are 28 July – 24 August, so nothing will match a claim in these books. | EFT-31450491 **$5,942.36 not banked** by anything yet | not started | 1 |
+| **Whether the notice's date is the paid day or the deposit day** — every Health Mart Atlas EFT on file differs by 1–4 days between the two. Bank matching allows 7, so reconciliation is safe; a month-end notice could still land a deposit in the wrong month. Settles itself the first time a notice and a portal row for the same EFT are compared. | — | not proved | 1 |
+| **Credit card batches: read, routed and banked.** Eight, 3–14 Sept, $34,112.41, as counter takings on the cash account — its first counter money ever. Run twice, banked once. Returns are netted in the batch total. No batches for 1–2 Sept were forwarded. | +$34,112.41 cash | **done, deployed** | 1 |
+| **Foundation audit, 15 Sept, measured.** Cash revenue $312,023.27 accounts for itself by source: Health Mart Atlas $178,394.87 (9), direct PBMs $96,726.91 (12), card batches $34,112.41 (8), MTF $2,789.08 (15). Counted twice: 0 cross-source pairs within 7 days, 0 repeated keys, 0 repeated references. | — | **clean** | 1 |
+| **Claim reconciliation is at zero.** 1,778 September claims expecting $251,711.98 from plans; payments matched to them: 0. Partly timing (this week's PDFs pay 28 July – 24 August fills), but no feed on file can match a claim yet: notices and the portal file are deposit-level, the AccessHealth PDFs are unread, and RedSail has sent no 835. The PDF reader is the unblock for the Health Mart Atlas plans; 835s remain the only route for the direct payers. | $251,711.98 unmatched | **the main gap** | 1 |
+| **No source for card processing fees, paper cash or cheques.** The batch reports carry no fees (the owner confirmed). Cash and cheques taken at the counter have no feed at all. Both arrive only with the bank statement or the processor's monthly statement. | not measured | waiting on the statements | him |
+| **DIR, transaction fees and recoveries have no entries.** The AccessHealth PDFs carry them per EFT (AH origination fee, E3 withholding, WU recovery, B2 rebate). They reach the books when the PDF reader does. | not measured | with the PDF reader | 1 |
+| ~~**Card-fee email from staff@example.com has not arrived.**~~ **Arrived — they are batch reports, not fee statements.** See above. Searched the whole mailbox (wwfrxadmin@gmail.com), read and unread: nothing from jdarrah, nothing about merchant, processing or card fees. Either not sent, or sent to another address. | — | **waiting on him** | him |
+| **RedSail has never sent an 835.** SFTP connects; `/inbox` is empty; `/inbox/done` holds only the four test files from 9 September. The collection works end to end; the payers have not been switched over. | — | **waiting on RedSail** | him |
+| **`loadPurchasingOpportunities` (`suppliers.ts`) counts claim rows, not fills** — found by 2. A two-payer fill adds its quantity twice, so "switch and save" is overstated up to 2× on coordinated brands, which sort to the top. Same fault as the below-cost totals. | not measured | not started — goes with the router rebuild on fills | 1 |
+| **McKesson invoice 7000000008, $10,044.80, no lines** — a FreeStyle Libre line with a 14-digit GTIN the pattern did not know. Fixed in `invoice-lines.ts` (2's file; notice in HANDOFF after the fact) and re-read: 57 lines, reconciles. Deeper fault left with 2: a row with a quantity, unit and amount that matches no pattern goes nowhere, not even to unreadable. | $10,044.80 | **fixed, data re-read** | 1 → 2 |
+| **Login "never works" — it always worked.** 13 `login.success` in two minutes. A background warm-up blocked the server up to 12s between steps on a 5-second idle rule while every other job waits 90; the button gave no sign of working, so each press cancelled the page the last one opened. The first fix (`3ed700d`) was not enough: measured live, one request in six still took 25.8s, because the sign-in page never counted as activity, a restart assumed an empty site, and the idle clock was a module variable across two bundles. All three fixed (`e0` series, globalThis clock). **Measured after deploy: 60 requests over 3 minutes after restart, slowest 20 ms.** Remaining: a person arriving after 90s of true quiet can still wait for one warm-up step already running (up to ~12s); the button now says so and cannot be pressed twice. | — | **deployed and measured** | 1 |
+
+Fixed and deployed the same morning: the 8am PioneerRx pull had been running at 7pm the evening before
+(local hour, UTC date — `5782643`). This morning's pull was then run by hand; the copy is current to
+14 September. **The deploy was made while he was connected** (two sessions from 10.133.63.137) — the
+check printed "nobody on it" whatever it found, and that line was read instead of the output.
+
+## Found 16 September — what nobody is sending
+
+OBSERVATION: six of the twenty-one documents the pharmacy expects have never delivered once. Bank
+statement (0 lines on file), Veridikal's voucher report, RedSail's voucher remittance, RxRescue's
+credit memo, IPD's statement of account, the card processing statement. Measured against every route
+the mailbox has ever filed and every table their readers fill, 16 September 2026.
+
+SHOULD BE: money earned is settled by a document naming what it settles. September carries $7,762.82
+of RedSail vouchers across 46 claims, and the plan pays each of those claims net of the voucher —
+only RedSail's remittance pays the voucher itself. A statement nobody sends is revenue that ages
+without anybody noticing, because an unpaid invoice looks exactly like an unbilled one.
+
+DIFFERENCE: four of the six are money with no settling document behind it. The other two — the bank
+statement and the card processing statement — are the outside proof that what the site says arrived
+actually arrived, and nothing reconciles without them.
+
+Now on `/expected`, judged against each document's own calendar so nothing is called late before its
+date. The readers for all six exist and have been rehearsed on samples; what is absent is the
+sending. Each needs somebody set up once:
+
+| What | Who | What it settles |
+|---|---|---|
+| **Bank statement** | Emprise | Everything. No outside proof of any deposit. Due in the first week of October for September. |
+| **RedSail voucher remittance** | RedSail | $7,762.82 of September vouchers, 46 claims. Cadence not settled — nobody has said how often RedSail remits. |
+| **Veridikal voucher report** | Veridikal | eVoucher and denial-conversion money. July's was rehearsed by hand to prove the reader; nothing has come through the mailbox. |
+| **IPD statement of account** | IPD | Which invoices a credit memo settled. Aytu's top-off credits usually cover the bill, so without it a paid invoice cannot be told from an unpaid one. Forwarded to the conversation so far, never to the mailbox. |
+| **RxRescue credit memo** | RxRescue | The top-off credit, banked as third-party cash on the memo's own day. |
+| **Card processing statement** | the card processor | The month's card fees — a real expense the books do not have — and the deposits to check the batches against. |
+
+**Card takings of days with no batch: settled, 16 September.** He refused the four emails outright
+("stop asking, not sending"), so the register now banks those days itself — $14,984.24 over 9/1, 9/2,
+9/12 and 9/15 — keyed `register-card|<day>`, with a batch arriving later taking the receipt over.
+The alert and the money-waiting row are gone. An alert that repeats a request already refused costs
+the list the only thing it has.
+
+## Built 16 September — what we are expecting, and when a month is closed
+
+`/expected`, linked from Today. Everything somebody outside the building has to send, judged against
+its own **measured** rhythm rather than a cadence typed into a file: NADAC came back "100% of them on
+a Wednesday", the claims export daily bar Sunday, MTF's 835s daily. It sharpens as more arrive.
+
+Three rules keep it from crying wolf, all of them his words:
+
+- **Nothing is called overdue on a rhythm nobody measured.** To say a sender stopped is to say it
+  broke its own habit, and a habit typed into a file is not its habit. A declared cadence may say
+  "due", never "stopped". That is the general form of *"dont alert me we havent gotten an anda
+  invoice in 7 days"*.
+- **Invoices are judged by receipts, not by silence.** *"we are getting receipts from pioneer. so for
+  invoices it should use those for alerts.. but only on companies that are set to receive invoices";
+  "everything else we are usiong pioneer receipt as invoice".* One row each for ANDA, IPC, IPD,
+  McKesson and ParMed — exactly the five where `invoiceFromPioneer` is false — counted in deliveries
+  with no invoice behind them. No row at all for the rest. Nought outstanding is silent however long
+  they have been quiet, by construction rather than by a threshold.
+- **The early allowance is a share of the period.** Five days is right for a monthly statement; on
+  the card batch it meant the 14th's covered the 16th's run and the missing batch of the 15th
+  disappeared off the screen.
+
+**The month's close** is on the same page: `running` · `waiting on N` · `does not tie` · `closed`,
+and `before_books` for anything before 1 September. *"it should show month closed only once
+everything is done, money matches and everything lines up"* — every document on file with bank lines
+nothing explains is **not** closed, because saying so is a promise that the books balance.
+
+### Two things he should know
+
+| What | Note |
+|---|---|
+| **The monthly checklist was sending him to the wrong bank** | It said to fetch the operating statement "from Wells Fargo — as CSV or QFX". It is Emprise, and Emprise cannot export CSV, QFX or OFX at all, which is the whole reason that reader reads a scan. Corrected. Worth him confirming the split is as the site now has it: **Emprise** the operating account (scan only), **Wells Fargo / ProviderPay** the payer account whose history he downloads on the 1st. |
+| **Does a bank statement know its own month?** | Yes. `scanned-bank-solve.ts` takes the month from the statement's own header and refuses the file outright if it cannot read it, so a statement is filed under the right month by construction and never by upload date. |
+
+## 16 September, afternoon — five ways a document could arrive and not be there
+
+All five found in one chain, starting from *"redsail says they sent an 835 yesterday and received an
+error"*. Every one was silent: no error, no alert, no inbox line. Four are fixed and deployed; the
+fifth is a fault that had not fired yet.
+
+| What was wrong | How it showed | Fixed |
+|---|---|---|
+| **A sender's declared type could refuse a file.** Veridikal's two monthly reports, 15 Sept 21:04 and 21:08, both .xlsx declared `application/x-msexcel`. | Both dropped at the door, nothing stored, and every screen went on saying Veridikal had never sent anything. | The extension list, the size ceiling and the readers gate; a declared type never refuses on its own. `application/octet-stream` — "no idea what this is" — had always been accepted, so the least informative claim passed while a specific one was refused. |
+| **The mailbox swept only when the site was idle.** | No sweep for 80 minutes while he was using the site. Every document arrives through that sweep or the SFTP pull beside it, so both could be starved indefinitely by the pharmacy being open. | The three doors — mail, SFTP, PioneerRx — yield after 90 minutes of being starved. Housework still waits for a gap. |
+| **The sweep read only unread mail.** | He forwarded the Veridikal reports, they sat in Gmail, the sweep could not see them. Opening an email to check it sent is enough to hide it for ever. | Also fetches anything from the last three days, read or not. The message id has always been the real guard against double-reading. |
+| **A message from the mailbox's own address was dropped without a word.** | His forward is "from self" where the pharmacy address *is* the mailbox. No inbox line, no reason. | Right for a reminder coming back, wrong for a forward, and the attachment tells them apart: a reminder carries none and a forwarded report carries one. |
+| **Nothing said when a sender was turned away.** | Two refusals sat among forty inbox lines; found only because he asked about a different supplier. | An alert at "now". It is the one failure in the chain where the fault is certainly here, and nobody outside will chase it. |
+
+### Not yet fired, and would have fired in October
+
+OBSERVATION: a voucher programme's payment settles the programme's share and never the plan's, and
+the store decided which by the payment's **source** — only `copay_card` counted. RedSail's first
+remittance (15 Sept, SFTP, 46 payments, $2,011.64) imported as `plan`, payer "RedSail Technologies
+LLC", while the receivable is raised under "RedSail Technologies (RAS copay voucher)".
+
+SHOULD BE: money from a voucher programme settles the voucher, and the plan goes on owing its own
+share until the plan pays it. A remittance names its payer; that is what it is for.
+
+DIFFERENCE: for a September fill, every such payment would have settled the **plan's** receivable —
+plan showing paid when it had paid nothing, voucher line owed for ever, both wrong on one claim with
+every figure adding up. Harmless so far only because all 46 were April and May fills against books
+that begin 1 September. Fixed: `isProgrammePayer` asks the payer, not the door. Three tests.
+
+### Proved, later the same afternoon
+
+Both Veridikal reports came in through the mailbox on their own and were read: **62 eVoucher rows,
+$4,360.99** and **41 Denial Conversion rows, $4,487.92**, each with every column adding to its own
+total and every row to its own figures before anything was stored. The same sweep stored **61
+messages**, of which **55 had been sitting read and unprocessed** — including **19 supplier invoices**
+from 14–16 September. Reading an email had been enough to hide it from this site for ever.
+
+The join keys were measured rather than assumed: prescription numbers are 6 digits on both sides
+(149 voucher rows, 4,360 claims), NDCs 11 characters on both sides, and 31 of 47 distinct drugs on
+the voucher rows already appear in the claims. **No live match is proved yet** — all 149 rows are
+fills from 30 April to 25 August against books that begin 1 September. Veridikal's 27 August batch
+paid June and July fills, so September's money should arrive around late October.
+
+### A near-miss worth keeping
+
+OBSERVATION: the alert written to catch an unmatchable payment would have opened the next morning
+with *"1,934 payments, $149,798.52 cannot be matched to a claim"*.
+
+SHOULD BE: an alert fires on a fault. Every cent of that figure was August's claims being a 78-fill
+test sample, and ten more were payments against fills this pharmacy had reversed, which are recorded
+against no claim deliberately.
+
+DIFFERENCE: the whole of it. Narrowed twice — the floor is the day the books begin, not the oldest
+claim row; and a payment is stranded only where the site holds no claim on that prescription at all.
+Both narrowings came from running it against the live database before trusting it, and with them the
+true answer today is nought. **An alert that has never been run against the real data is a guess
+about the real data.**
+
+### The second near-miss of the same afternoon, and what the two have in common
+
+OBSERVATION: the payer learner — written to answer *"the system needs to learn"* — was asked, after
+it was deployed and before its nightly pass had run, what it would teach against the live database.
+One link: a BIN belongs to **"Health Mart Atlas"**.
+
+SHOULD BE: a link names the plan that owes the money. Health Mart Atlas is the PSAO the money travels
+through and owes this pharmacy nothing; its own report names the real plan in the prose beside the
+figure. Every payer name on file today is a route of that kind — ProviderPay, Health Mart Atlas,
+RedSail, the Medicare facilitator.
+
+DIFFERENCE: all of it. Unidentified claims would have been renamed after their courier, and a wrong
+name that looks settled is worse than an honest blank, because the blank is what gets asked about.
+Fixed before anything was written: a name that routes money for others teaches nothing, and only a
+payment recorded as a plan's is evidence. Today it learns nothing, which is true, and it begins the
+day a plan sends its own 835 under its own name.
+
+**What both had in common, and the rule that comes out of it.** The alert and the learner each had
+clean types, passing tests and correct arithmetic, and each was wrong about the world. Both were
+caught by running the thing against the live database — the first before it fired, the second before
+it wrote. Neither could have been caught by reading the code. So: *anything that will assert
+something to the owner is run against the live data before it is deployed, not after.*
+
+### The class, stated properly — six instances in one day
+
+Session 2's sharpening, and it is better than mine. The shape is not merely "a check that cannot
+fail". It is **an item whose stated consequence is impossible** — the sentence claims a harm that the
+system's own behaviour rules out, and nobody asked whether the harm could occur.
+
+| The sentence | Why its consequence could not happen |
+|---|---|
+| An order minimum is missing, so that wholesaler gets no card on the Buying page | `fillToMinimums` has always given a no-minimum supplier its full ranked list, and says so |
+| Eighteen price files have never arrived | One of the eighteen was the largest catalogue on the site, found under the other name it goes by |
+| Fourteen rebate ladders missing, so prices are compared gross and an order could go to the wrong wholesaler | Eight of the fourteen have no item, invoice or delivery anywhere — none of their prices is in the comparison |
+| A receipt line: "41 of 54 confirmed received" | Not one invoice on the site has a receipt; a shortfall over controlled invoices was subtracted from a total over all of them |
+| "1,934 payments, $149,798.52 cannot be matched" | Every one was August's 78-fill test sample, or a payment against a fill the pharmacy had reversed |
+| "7 messages arrived and were turned away" | Five had nothing attached, which is what most email is; two had been fixed by a forward hours earlier |
+
+The test that catches all six, and none of them is caught by reading the code: **ask the sentence
+what it would take for it to be false, and then go and see whether the data can even produce that.**
+Three of the six are mine.
+
+### Still open from this chain
+
+- **A live match is still unproved.** The chain is proved as far as posting; what nothing on file can
+  show is a voucher payment attaching to a September claim, because not one of the 149 is for a
+  September fill. The first remittance that is will settle it, and the stranded-payment alert says so
+  on the morning it does not.
+- **His four questions, unanswered:** can we reconcile Veridikal and RedSail against the claims as we
+  hold them; does AR adjust properly; do we allocate to the right payer; and do we know what is still
+  expected from another payer. The third has just been fixed and tested. The other three need
+  measuring before anything is claimed.
+
+## Mine, not yet started
+
+This heading was deleted by accident on 14 September and restored the same day. I used it as the
+anchor for the finding above and the replacement consumed it, so four tracked items sat under
+"Found 14 September" with no owner against them — in the register whose first rule is that nothing
+leaves the list except by being done or decided. An edit that takes a heading as its landmark should
+put the landmark back.
+
+(The first version of this paragraph said they had spent a day that way. They had not: it was the
+same session, a few hours. Nobody was harmed by the overstatement and it was still a figure about
+the world stated without being checked, in the paragraph about a register describing a world that
+had moved.)
+
+| What | Money | Note |
+|---|---|---|
+| ~~**Invoice coverage is 51%**~~ | — | **Superseded 14 September, see the finding above.** The figure and the framing were both wrong. `invoicesStillOwed()` reports **0 invoices to chase**: the 50 uninvoiced deliveries are from before the mailbox was watching, two of those suppliers send receipts by design, and the owner has said he does not want the 1–8 September backlog chased. It was never a chase. What it is — those deliveries carrying no per-drug purchase price — is answered by `drug-cost-source.ts` and reported on Data health. |
+| **5 September reversals cannot be matched to what they cancel** | **$1,277.03** may still be standing as revenue | 900007 on 09-04 at $461.89 and 900008 on 09-09 at $605.94 among them. `claimCancelledBy` is right to refuse: the Wegovy reversal carries an $833.52 copay the live row does not, so it could belong to either run. Each now appears on the recheck with its money. What is missing is a way for him to say which run a reversal cancels. |
+| **Payer payment cycles are prose, not days** | — | `payment_routing` holds a cycle for 20 of its 29 payers, every one the sentence the contract printed. Nothing reads a number out of it, so `promise-due.ts` falls back to measurement. One row can carry two cycles for two lines of business, and Caremark's states a sixty-day *reconciliation* cycle that says nothing about when a point-of-sale claim is paid. Parse it wrong and the site invents a deadline. |
+| **ANDA has no sending address** | — | Self-resolving: their first invoice is captured from its own page and raised in the Inbox to be named. No action unless it does not arrive. |
+
+## Done today, 12 September
+
+- **One pack size per NDC, and it refuses rather than guess.** `src/lib/pack-size.ts`. "How many
+  dispensing units are in this package" was re-derived in four places and three of them used the
+  same regex over `package_description` — `/^\s*([\d.]+)\s+[A-Z]/`, which takes the **outermost**
+  count. On this pharmacy's own claims that number differs from the truth on **404 of 3,212 fills**,
+  by factors from 0.01x to 1000x. Wegovy read 4 syringes against a true 2 mL; the estradiol cream
+  read 1 tube against 42.5 g. The fix is that the **dosage form** decides the unit, not the
+  innermost level of the text: a lidocaine patch's `30 POUCH / .7 g in 1 POUCH` is 30 patches, and a
+  cream's `1 TUBE / 42.5 g in 1 TUBE` is 42.5 grams, and those are the same shape of sentence.
+  82 claims that used to get a number now get a refusal with its reason — metered inhalers, whose
+  claim quantity is a net fill weight the FDA states nowhere (albuterol bills 8.5 g against a
+  described 200 actuations, a factor of 23.5), and oral-contraceptive kits (the claim says 84 and
+  the only number in the text is 3, a factor of 28). `claims.quantity_unit` is null on all 3,370
+  rows, so the claim's own unit can never be read and the check is arithmetic instead: 3,040 of
+  3,212 confirm, 7 are caught counting containers rather than millilitres, 83 are unproven partials
+  that are refused to any figure going to a payer. The appeal evidence page can no longer divide by
+  one unit and label the answer another — the pack and its unit are one input now.
+- **459 plans classified in 61 presses: 1,588 claims, $206,059.80.** The register went from 481
+  unclassified to 19, counting the 15 he decided himself.
+- A press showed him the page from *before* the press. `held()` keys its cached readings on a
+  fingerprint of the tables, but `fingerprint()` cached itself for two seconds — and an action
+  writes, redirects and re-renders inside two seconds. Every action on the site had it; `audit()`
+  now forgets the fingerprint.
+- 4 claims for drugs PioneerRx says were never dispensed, taken off the books: accrual net
+  −$520.55 → −$713.03, both bases still balancing to $0.00.
+- MAC appeals: a claim no MAC priced is no longer appealed (basis 06/07 only, 1,038 set aside), one
+  paid *at* NADAC is refused, one paid *above* it is flagged as the weaker argument, and a
+  shortfall of $30 or less does not reach the worklist.
+- The plan classification error named the principle and never the control. It now says the action
+  first.
+- Each plan row shows what it pays for and whether it ever pays alone — the two facts that separate
+  a manufacturer card from a benefit plan.
+- 10 invoice-vs-delivery disagreements → 0; invoices agreeing 19 of 22 → 22 of 22; lines compared
+  215 → 225. A real reader bug behind one: IPD printed a 9-digit NDC column and the reader invented
+  the missing two digits.
+- "Promised by a plan and not yet paid" no longer alerts inside a 25-day grace period measured from
+  the pharmacy's own facilitator payments. $96.89 → $0.00 alerted; nothing stopped being owed.
+
+- ParMed's reader could not cross the DESCRIPTION or NOTE columns — two invoices read as having no
+  lines, $945.87 reaching no drug. Fixed; 35 of 35 invoices now reconcile, 0 hold no lines.
+- A NovoLog invoice was filed as a Schedule II record because its schedule was unknown. The
+  invoice's own NDCs now settle the drawer where PioneerRx has nothing.
+- The Inbox re-sort could not re-decide reports, only invoices, so four McKesson reports were stuck
+  for ever — one carrying $8,526.77 of credits in a format the sweep already knew.
+- `prove-invoices.ts` checked against the invoice total while the importer uses the goods subtotal,
+  so it reported three correctly-read invoices as broken, off by exactly the freight.
+- Cardinal Health, RrcPharmaSolution and TopRx set as settled; the check that asked them for a
+  sending address now excludes settled suppliers and no longer claims an unregistered sender's
+  invoices "will not be recognised", which was not true.
+- MAC appeals: a claim no MAC priced is no longer appealed (basis of reimbursement 06/07 only —
+  1,038 claims set aside), and a claim paid *at* NADAC is refused while one paid *above* it is
+  flagged as the weaker argument. This is what Caremark's "non MAC claim" rejection was about.
+- **459 plans classified in 61 presses: 1,588 claims, $206,059.80.** The register went from 481
+  unclassified to 41.
+- A deploy takes the site down and he is usually in it. Rule written into `DAILY-CHECK.md`.
+- **"Promised by a plan and not yet paid" no longer alerts on a fill dispensed yesterday.** *"can we
+  give these time before alerting.."* The grace period is 25 days, which is the 90th percentile of
+  the 31 facilitator payments this pharmacy has actually received — its own measurement, not a
+  number anybody picked. The alert went from $96.89 on 1 fill to nothing; the $96.89 is still on the
+  tile as money owed, marked "not due yet", and chased from 6 October. Across all of September it is
+  $4,056.21 on 14 fills outstanding and none of it late. `promise-due.ts`, shared by the claims page
+  and the home page so the two cannot disagree about which dollar is a job.

@@ -1,0 +1,16 @@
+-- Every arrival says what was done with it — enforced by the compiler, not by SQLite.
+--
+-- This slot first held a table rebuild to make `routed_as` NOT NULL. SQLite cannot add the
+-- constraint in place, so it meant CREATE/INSERT/DROP/RENAME — and that would not run: it failed
+-- silently against the live database, and it broke the test harness's fresh-database setup outright,
+-- which is how I found out rather than by checking.
+--
+-- The constraint was belt to braces anyway. The braces are in `schema.ts`, where `routedAs` is
+-- `.notNull()` with no default: an insert that does not say what happened to an arrival no longer
+-- compiles. That alone caught nine sites across two files, including four in sftp-pull.ts that
+-- nothing about the original complaint would have led anybody to open.
+--
+-- So this slot does the part that matters and can be done safely: no arrival is left unanswered.
+-- A script writing to the table outside Drizzle could still leave it blank; the type system covers
+-- every path the application itself takes.
+UPDATE inbox_items SET routed_as = 'unrecognised' WHERE routed_as IS NULL;

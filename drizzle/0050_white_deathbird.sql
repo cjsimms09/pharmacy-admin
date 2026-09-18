@@ -1,0 +1,1 @@
+ALTER TABLE `suppliers` ADD `rebate_statement_json` text;

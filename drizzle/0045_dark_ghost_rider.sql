@@ -1,0 +1,1 @@
+ALTER TABLE `training_assignments` ADD `qa_signature_id` text;

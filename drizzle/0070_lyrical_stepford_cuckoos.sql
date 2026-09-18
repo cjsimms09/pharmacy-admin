@@ -1,0 +1,1 @@
+ALTER TABLE `contract_text` ADD `source` text DEFAULT 'pdf' NOT NULL;
