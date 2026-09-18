@@ -1,5 +1,6 @@
 import "server-only";
 import { db, schema } from "@/db";
+import { and, like, ne } from "drizzle-orm";
 import { readRemitDetail, detailAgreesWithSummary, type DetailRead } from "./mck-remit-detail";
 import { readRemitSummary, type SummaryRow } from "./mck-remit-csv";
 import { recordClaimPayment } from "./claim-payments";
@@ -52,6 +53,33 @@ export type DetailImport = {
 
 /** The key a detail line and an existing payment can both be reduced to. */
 const keyOf = (rx: string, on: string | null, cents: number) => `${rx.trim()}|${on ?? ""}|${cents}`;
+
+/**
+ * Take the phantom revenue back off the payments this importer posted before it knew better.
+ *
+ * The first run of it on 18 September 2026 let `revenueCents` default to the whole amount, which
+ * is what every other payment source wants and what this one must never have. A fill's revenue is
+ * `remitCents + patientPaidCents + laterPaymentsCents`; the remittance is the `remitCents`
+ * arriving, so counting it again invented profit that had never existed. 496 of the payments were
+ * *exactly* the claim's own `remitCents` — $28,645.57 of September that was not real.
+ *
+ * Sets the revenue part to nought and leaves the amount alone: the cash is right and was always
+ * right, and `receivedCents` is what the cash account reads. A query when there is nothing to do.
+ */
+export async function stopDoubleCountingRemitRevenue(): Promise<{ changed: number; centsRemoved: number }> {
+  const wrong = await db
+    .select({ id: schema.claimPayments.id, revenueCents: schema.claimPayments.revenueCents })
+    .from(schema.claimPayments)
+    .where(and(like(schema.claimPayments.reference, "ProviderPay %"), ne(schema.claimPayments.revenueCents, 0)));
+  if (wrong.length === 0) return { changed: 0, centsRemoved: 0 };
+
+  const centsRemoved = wrong.reduce((n, w) => n + (w.revenueCents ?? 0), 0);
+  await db
+    .update(schema.claimPayments)
+    .set({ revenueCents: 0 })
+    .where(and(like(schema.claimPayments.reference, "ProviderPay %"), ne(schema.claimPayments.revenueCents, 0)));
+  return { changed: wrong.length, centsRemoved };
+}
 
 /**
  * Import a detail export, using its summary twin to know what each remittance should come to.
@@ -152,6 +180,27 @@ export async function importRemitDetail(
             source: "plan",
             payer: row.payerName || null,
             amountCents: l.amountCents,
+            /*
+             * Received, and not new revenue. This is the single most expensive line in the file.
+             *
+             * A fill's revenue is `remitCents + patientPaidCents + laterPaymentsCents`
+             * (fills.ts), where `remitCents` is what the plan agreed to pay at adjudication —
+             * already counted, on the day the prescription went out. A primary remittance is that
+             * same money arriving. Letting it default to the whole amount counts it twice: once
+             * as what was earned and again as what turned up.
+             *
+             * Measured after doing exactly that on 18 September 2026: 496 of the payments posted
+             * were *exactly* the claim's own `remitCents`, $28,645.57 of September revenue that
+             * existed only because the remittance had been read. The owner found it before the
+             * audit did — "net profit is so fucking wrong and I have no faith left in this site".
+             *
+             * `laterPayments()` maps `amountCents: revenueCents ?? amountCents`, so a zero here
+             * is what keeps it off the margin while `receivedCents` still carries the cash. This
+             * is the same distinction the RxRescue credit memo already uses, and the comment
+             * there says it plainly: they differ only where a payment settles something the claim
+             * already carried. A primary plan remittance always does.
+             */
+            revenueCents: 0,
             receivedOn: l.remitOn ?? row.remitOn ?? null,
             reference: `ProviderPay ${row.payerName} ${remitNumber}`,
             documentId: opts.documentId ?? null,

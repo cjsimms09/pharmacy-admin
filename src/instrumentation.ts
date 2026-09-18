@@ -65,6 +65,17 @@ export async function register() {
        * sixteen months old. Filing now refuses to let an older statement do that; this puts the one
        * already on file back. A query when there is nothing to do.
        */
+      /*
+       * First of all, because it is the largest wrong profit figure this site has ever carried.
+       *
+       * The ProviderPay detail importer posted a fortnight of remittances on 18 September and let
+       * every one of them count as new revenue. A fill already earns `remitCents` on the day it is
+       * dispensed; the remittance is that money arriving, not more of it. 496 payments were exactly
+       * the claim's own figure — $28,645.57 of September profit that had never existed. The owner
+       * found it in minutes: "net profit is so fucking wrong and I have no faith left in this site".
+       */
+      const { stopDoubleCountingRemitRevenue } = await import("./lib/mck-remit-detail-store");
+      await stopDoubleCountingRemitRevenue();
       const { correctStandingRebateStatement, attachMissingRebateDocuments, clearRebatePaymentDates } = await import("./lib/rebate-report-store");
       /*
        * First, because it is the only wrong figure here that is a wrong PROFIT figure.
