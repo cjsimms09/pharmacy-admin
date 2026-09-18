@@ -74,8 +74,17 @@ export async function register() {
        * the claim's own figure — $28,645.57 of September profit that had never existed. The owner
        * found it in minutes: "net profit is so fucking wrong and I have no faith left in this site".
        */
-      const { stopDoubleCountingRemitRevenue } = await import("./lib/mck-remit-detail-store");
+      const { stopDoubleCountingRemitRevenue, fillRegisterFromFiledSummaries } = await import("./lib/mck-remit-detail-store");
       await stopDoubleCountingRemitRevenue();
+      /*
+       * And the register that was built after the import which would have filled it.
+       *
+       * It began empty while 1,346 payments from those remittances sat on the books, so the check
+       * that reads it reported a clean bill from no evidence at all. The summary exports were kept
+       * as documents when they were read, so the register can be filled from those rather than
+       * waiting for somebody to export them again. Does nothing once the register holds anything.
+       */
+      await fillRegisterFromFiledSummaries();
       const { correctStandingRebateStatement, attachMissingRebateDocuments, clearRebatePaymentDates } = await import("./lib/rebate-report-store");
       /*
        * First, because it is the only wrong figure here that is a wrong PROFIT figure.

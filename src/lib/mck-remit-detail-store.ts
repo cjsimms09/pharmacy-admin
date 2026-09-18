@@ -94,6 +94,68 @@ async function rememberRemittances(rows: SummaryRow[], source: string): Promise<
 }
 
 /**
+ * Fill the register from a summary export alone.
+ *
+ * The register was first written to only from the detail import, which was a mistake with a short
+ * fuse: the detail files are deleted once read, so the register could never be filled again and
+ * check 10 went blind within the hour of being built. The summary is the better source — one row
+ * per remittance, carrying the payment number, and with no patient data in it at all.
+ */
+export async function rememberRemittancesFromSummary(text: string): Promise<{ remembered: number; withoutPayment: number; problems: string[] }> {
+  const summary = readRemitSummary(text);
+  if (summary.rows.length === 0) return { remembered: 0, withoutPayment: 0, problems: summary.problems.length > 0 ? summary.problems : ["No remittances could be read from it."] };
+  await rememberRemittances(summary.rows, "providerpay remit summary");
+  return {
+    remembered: summary.rows.length,
+    withoutPayment: summary.rows.filter((r) => r.paymentNumber === null).length,
+    problems: summary.problems,
+  };
+}
+
+/**
+ * Fill an empty register from the summary exports already filed as documents.
+ *
+ * The register was built after the import that would have filled it, so it began life empty while
+ * 1,346 payments from those very remittances sat on the books — and check 10 reported a clean bill
+ * from no evidence at all. The files are not gone: every summary export read by the folder sweep
+ * is kept as a document, which is exactly the copy this needs.
+ *
+ * Only when the register is empty. Once it holds anything, the imports keep it current and a
+ * backfill re-reading old exports could only put back a payment number that has since changed.
+ */
+export async function fillRegisterFromFiledSummaries(): Promise<{ read: number; remembered: number }> {
+  const already = await db.select({ id: schema.remittanceRegister.id }).from(schema.remittanceRegister).limit(1);
+  if (already.length > 0) return { read: 0, remembered: 0 };
+
+  const docs = await db
+    .select({ storageKey: schema.documents.storageKey, title: schema.documents.title })
+    .from(schema.documents)
+    .where(eq(schema.documents.category, "report"));
+  if (docs.length === 0) return { read: 0, remembered: 0 };
+
+  const { readFile } = await import("./files");
+  const { looksLikeRemitSummary } = await import("./mck-remit-csv");
+  let read = 0;
+  let remembered = 0;
+  for (const d of docs) {
+    if (!d.storageKey) continue;
+    let text: string;
+    try {
+      text = (await readFile(d.storageKey)).toString("utf8");
+    } catch {
+      continue; // A document whose bytes are gone is not a reason to stop.
+    }
+    if (!looksLikeRemitSummary(text.slice(0, 4096))) continue;
+    read += 1;
+    const summary = readRemitSummary(text);
+    if (summary.rows.length === 0) continue;
+    await rememberRemittances(summary.rows, "providerpay remit summary (filed)");
+    remembered += summary.rows.length;
+  }
+  return { read, remembered };
+}
+
+/**
  * Remittances whose money the payer says it has sent and which no cash receipt carries.
  *
  * The question nothing could ask on 18 September, when $99,238.84 of deposits had reached the bank

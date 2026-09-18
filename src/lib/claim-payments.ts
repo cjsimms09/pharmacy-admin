@@ -967,6 +967,28 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
       }
 
       /*
+       * The remit summary fills the register on its own, without needing its detail twin.
+       *
+       * The register is what lets the site notice a remittance whose money never reached the cash
+       * account, and it was first written to only from the detail import — which meant it could
+       * not be filled at all once those files had been read and deleted, and check 10 went blind
+       * the moment it was built. The summary is the better source anyway: it is one row per
+       * remittance, it carries the payment number, and it holds no patient data.
+       *
+       * Falls through afterwards, so the file is still filed as a document as before.
+       */
+      if (kind.kind === "mck_remit_summary") {
+        const { rememberRemittancesFromSummary } = await import("./mck-remit-detail-store");
+        const r = await rememberRemittancesFromSummary(text);
+        out.alsoRead.push(
+          r.problems.length > 0
+            ? `${c.name}: ${r.problems[0]}`
+            : `${c.name}: ${r.remembered} remittance${r.remembered === 1 ? "" : "s"} recorded in the register` +
+              `${r.withoutPayment > 0 ? `, ${r.withoutPayment} of them not yet matched to a deposit by ProviderPay` : ""}.`,
+        );
+      }
+
+      /*
        * The patient-information gate, which this folder did not have.
        *
        * Everything arriving by mail or by SFTP passes `gateFile` before it is stored. A file put
