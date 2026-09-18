@@ -902,7 +902,35 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
        * twice.
        */
       if (kind.kind === "mck_remit_detail") {
-        const twin = candidates.find((o) => o !== c && looksLikeRemitSummary(o.buf.subarray(0, 4096).toString("utf8")));
+        /*
+         * The summary that covers the most of this detail, not the first one in the folder.
+         *
+         * Exports are named for the day they were downloaded, so a folder collects several with
+         * different date ranges — on 18 September it held one for 19 Aug–18 Sep and one for 1–18
+         * Sep. Pairing a fifty-one remittance detail with the twenty-eight row summary would leave
+         * twenty-three remittances with no independent figure to be judged against, and a
+         * remittance with no figure posts nothing. Silently importing half of what was asked for
+         * is worse than refusing, because nothing says it happened.
+         */
+        const { detailRemitNumbers } = await import("./mck-remit-detail");
+        const wanted = new Set(detailRemitNumbers(text));
+        let twin: (typeof candidates)[number] | undefined;
+        let bestCover = -1;
+        for (const o of candidates) {
+          if (o === c) continue;
+          const head = o.buf.subarray(0, 4096).toString("utf8");
+          if (!looksLikeRemitSummary(head)) continue;
+          const { readRemitSummary } = await import("./mck-remit-csv");
+          const cover = readRemitSummary(o.buf.toString("utf8")).rows.filter((r) => wanted.has(r.remitNumber)).length;
+          if (cover > bestCover) { bestCover = cover; twin = o; }
+        }
+        if (twin && bestCover < wanted.size) {
+          out.problems.push(
+            `${c.name}: the best Remit Summary in the folder covers ${bestCover} of its ${wanted.size} remittances. ` +
+              `The rest have no independent figure to be checked against, so nothing will be posted for them. ` +
+              `Export both files from the same search to get all of it.`,
+          );
+        }
         if (!twin) {
           out.problems.push(
             `${c.name}: this is ProviderPay's Remit Detail export and it carries patient names, so nothing may be ` +

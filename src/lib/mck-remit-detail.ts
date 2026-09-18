@@ -184,6 +184,17 @@ export function readRemitDetail(text: string): DetailRead {
 }
 
 /**
+ * The remittance numbers a detail export covers, without reading the rest of it.
+ *
+ * Used to pick which summary export in a folder belongs to this detail: exports are named for the
+ * day they were downloaded, so several date ranges collect there and the first one found is
+ * usually not the right one.
+ */
+export function detailRemitNumbers(text: string): string[] {
+  return readRemitDetail(text).byRemit.map((r) => r.remitNumber);
+}
+
+/**
  * Check each remittance's lines against the figure the summary export prints for it.
  *
  * The two files come out of the same table minutes apart, so they must agree; where they do not,
