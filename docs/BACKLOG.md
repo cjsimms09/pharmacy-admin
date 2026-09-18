@@ -25,6 +25,40 @@ The math has to be perfect — a wrong number that looks right is worse than no 
 
 ## Now
 
+### 0a. 18 September: reconciling claims perfectly, and getting the 835s to arrive on their own
+
+> *"now did we reconcile every claim we can? we need to correctly account for adjustments, this
+> will factor into cash accounting. we need to be able to reconcile claims perfectly... keep track
+> and account for fees, etc"*
+
+> *"I also need to know what companies we arent getting 835s for? and how I can change all 835s to
+> come into the SFTP that we setup.. this could be a pain in the ass and I need you to automate
+> this as much as possible. find who I need to send emails to and use email in site to request
+> changes to 835s and to bank account (EFT)"*
+
+Measured on the real database the same afternoon, after the ProviderPay detail import:
+
+- **Reconciliation, where it is possible at all.** 600 payments are for fills dispensed on or
+  after 1 September; 505 of them found their claim, 84%. The rest of the book cannot match and is
+  not a fault: claims run 5 Aug – 17 Sep while payments reference fills back to Feb 2024, and
+  *"we only have claims from 09/01"*.
+- **73 payments, $2,609.35, are for claims the site holds as `reversed`.** `findClaim` refuses to
+  attach money to a reversed claim, so these sit with no claim and nothing on any screen says so.
+  Almost certainly the brand-to-generic rebill shape fixed in `fillKey` on 17 September — the
+  money belongs to the row the prescription was re-billed on. **Open.**
+- **Remittance adjustments are not booked at all.** Every difference between the portal's remit
+  amount and what the site holds for that remittance is exactly the portal's "Adjust" column —
+  $12.40 on 9397708, $67.84 on EFT-31470757, $73.04 on EFT-31445402, and so on, about **$259
+  across September**. `readRemitDetail` skips adjustment rows because they carry no prescription
+  number, so they can be posted against no claim. They are real money the payer kept and they
+  belong on the cash side. **Open — needs a decision on where they land** (expense, or an offset
+  against third-party revenue).
+- **Which payers' 835s never arrive by themselves, and moving them to the SFTP.** **Open.**
+  Needs: the list of payers by how their remittances actually reach the pharmacy, the enrolment
+  contact for each, and drafted emails requesting both the 835 routing change and the EFT
+  details. He has asked for this to be automated as far as it can be. Nothing is sent without him
+  approving each one.
+
 ### 0. Everything he asked for on the afternoon of 16 September, and where each stands
 
 He said it plainly: *"dont just drop what you are doing, everything I say needs to be fixed.. you
