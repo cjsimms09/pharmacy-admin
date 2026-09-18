@@ -13,6 +13,7 @@ import { looksLikeSystemSales } from "./system-sales";
 import { looksLikeOnHand } from "./on-hand";
 import { looksLikeRxRescueCredit } from "./rxrescue-credit";
 import { looksLikePayerPayments } from "./payer-payments";
+import { looksLikeAccountHistory } from "./providerpay-account";
 import { pdfItems, pdfText } from "./pdf-text";
 import { copayRemitTextFromPdf } from "./copay-remit-scan";
 import { looksLikeCardStatement } from "./card-statement";
@@ -37,7 +38,7 @@ import { ALLOWED_MIME, EXCEL_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "sales_by_payment" | "empty_report" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "providerpay_account" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "sales_by_payment" | "empty_report" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -326,6 +327,23 @@ export function classify(fileName: string, buf: Buffer): Classification {
       kind: "payer_payments",
       why: "A payer payment report: what each plan deposited, by payment. Banked as cash received in the month it was deposited, once per payment number.",
       headers: ["Payment number", "Payer name", "Deposit date", "Payment amt", "Payment type"],
+    };
+  }
+  /*
+   * The ProviderPay sweep account history: the only thing that ties a bank deposit to its payers.
+   *
+   * Payers do not pay the pharmacy directly. They deposit into a Wells Fargo account McKesson
+   * holds, and McKesson sweeps it across. The bank statement shows one lump and names nobody. This
+   * file names both halves, so the lump resolves into payments and each payment into its 835.
+   *
+   * Checked after the payment report, which is the more specific of the two — both carry a payment
+   * number, and only the payment report carries a payer name and a deposit date as well.
+   */
+  if (looksLikeAccountHistory(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "providerpay_account",
+      why: "The ProviderPay sweep account history: each payer's deposit and the transfer that swept them to the bank. It is what breaks a lump deposit back into the payers behind it.",
+      headers: ["Date", "Location", "Payment number", "Description", "Amount"],
     };
   }
   /*

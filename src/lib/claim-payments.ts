@@ -896,6 +896,36 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
       }
 
       /*
+       * The sweep account history. Filed like any report, but read on the way past.
+       *
+       * Nothing posts to the ledger from it — that is still to come — so what it can do now is say
+       * what it holds instead of landing silently: how many sweeps it covers, whether every one of
+       * them balances against the deposits it took, and what is still sitting in the account
+       * un-swept. A file that arrives and says nothing is how a feed rots unnoticed.
+       */
+      if (kind.kind === "providerpay_account") {
+        const { readAccountHistory } = await import("./providerpay-account");
+        const m = readAccountHistory(text);
+        const off = m.sweeps.filter((s) => !s.agrees);
+        const money = (c: number) => `$${(c / 100).toFixed(2)}`;
+        out.alsoRead.push(
+          m.problems.length > 0
+            ? `${c.name}: ${m.problems[0]}`
+            : `${c.name}: the ProviderPay sweep account, ${m.lines.length} lines — ${money(m.depositedCents)} deposited, ` +
+              `${money(m.transferredCents)} swept to the bank across ${m.sweeps.length} transfer${m.sweeps.length === 1 ? "" : "s"}` +
+              `${off.length === 0 ? ", every one balancing" : `, ${off.length} not balancing (${off.map((s) => s.on).join(", ")})`}` +
+              `${m.awaitingTransferCents === 0 ? "" : `, ${money(m.awaitingTransferCents)} still in the account`}.`,
+        );
+        for (const s of off) {
+          out.problems.push(
+            `${c.name}: the sweep on ${s.on} moved ${money(s.transferredCents)} but took ${money(s.depositedCents)} of deposits. ` +
+              `Every other sweep in the file balances, so this one is worth looking at.`,
+          );
+        }
+        /* Falls through to be filed as a document, which is still the only copy kept. */
+      }
+
+      /*
        * A remittance that did not parse is refused, never filed.
        *
        * The owner, 11 September 2026: "i do not want the site to get patient names.. or at least to
@@ -919,9 +949,10 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
       /*
        * Everything else is kept as a document rather than refused.
        *
-       * The Wells Fargo account history is the case in point: nothing reads it into the ledger yet,
+       * The Wells Fargo account history is the case in point: nothing posts it to the ledger yet,
        * and it is still the only thing that breaks a lump deposit on the bank statement back into
-       * the payers behind it. It carries payers, payment numbers and amounts, and no patient.
+       * the payers behind it. It carries payers, payment numbers and amounts, and no patient. It is
+       * now read on the way past — see above — but the document is still what keeps it.
        */
       const { storeFile } = await import("./files");
       const { db, schema } = await import("@/db");

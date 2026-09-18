@@ -15,6 +15,12 @@
  *   a valid NPI                              ten digits with the health-industry check digit, so ordinary numbers pass
  *   a DEA number                             two letters and seven digits with its own check digit
  *   an 11-digit NDC beside a prescription    a drug and a prescription together is a patient, whatever else is removed
+ *   a payer's payment-number series          a payer's own number for a deposit into the ProviderPay sweep account.
+ *                                            Added 18 September 2026 after nine real ones were found across five
+ *                                            tracked files — a lib comment, two test files and fixtures/payer-payments.csv,
+ *                                            which is a fixture and so was meant to carry none. Each names a real
+ *                                            payment into this pharmacy's bank. Nothing here had this shape, so every
+ *                                            one of them passed every commit it was ever part of.
  *
  * ── What it deliberately does not do ──
  *
@@ -61,6 +67,8 @@ const allowed = (token: string): boolean => {
   if (/^(CK)?ACH999\d{4}$/.test(token)) return true;
   /* A memo id of the shape the IPD fixture uses: 5000 and a date. */
   if (/^5000(20\d{6})$/.test(digits)) return true;
+  /* An invented ProviderPay payment number: the 999 series, which no payer's numbering reaches. */
+  if (/^999\d{11,12}$/.test(digits)) return true;
   return false;
 };
 
@@ -141,6 +149,21 @@ export function findIdentifiers(text: string, path = "", own: string[] = []): Fi
     }
     for (const m of line.matchAll(/\b([A-Z]{2}\d{7})\b/g)) {
       if (isDea(m[1])) say(i, "DEA number", m[1], "a valid DEA registration number");
+    }
+    /*
+     * A payer's payment number, named by the series each payer issues from rather than by length.
+     *
+     * Length alone does not work, and finding that out is the point of this comment. Fourteen or fifteen digits
+     * catches every real one — and also catches every GTIN-14 barcode on a wholesaler's invoice, which is what
+     * `00357599835002` and `91654707560094` are. Written that way the rule fired 44 times on this repository, 35 of
+     * them on drug codes, and a rule that is wrong four times in five is one somebody passes `--no-verify` around.
+     *
+     * So the series are named, the way McKesson's `76` and Parmed's `748` already are above. These four cover every
+     * payer that has ever paid this pharmacy through ProviderPay; a new payer would need adding, which is a known
+     * cost and a smaller one than a check nobody trusts.
+     */
+    for (const m of line.matchAll(/\b(101000\d{9}|242071\d{9}|21000\d{9}|531011\d{8})\b/g)) {
+      say(i, "payer payment number", m[1], "a payer's own number for a deposit into this pharmacy's ProviderPay account");
     }
     /* A prescription number and a drug code on one line is a dispensing, however much else has been changed. */
     if (/\b\d{11}\b/.test(line) && /\brx\s*(#|number|no)?\b/i.test(line) && !/fixtures?|invented|test/i.test(path)) {

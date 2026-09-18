@@ -44,9 +44,33 @@ export type AccountMonth = {
    * It is also exactly why cash is dated on the transfer: this money is not in the bank yet.
    */
   awaitingTransferCents: number;
-  /** One entry per day, so a transfer can be checked against what it should have swept. */
-  byDay: { date: string; depositedCents: number; transferredCents: number; agrees: boolean }[];
+  /** One entry per transfer, so each can be checked against what it should have swept. */
+  sweeps: Sweep[];
   problems: string[];
+};
+
+/**
+ * One transfer and the deposits it actually took.
+ *
+ * A sweep empties the account, so what it moves is everything deposited since the previous sweep —
+ * not everything sharing its calendar date. Usually those are the same set and the distinction
+ * never shows. It shows when a deposit lands on a day no sweep runs: on 20 July a $2.85 LucyRx
+ * payment arrived and nothing swept that day, so it left on the 22nd inside a $14,885.16 transfer
+ * against $14,882.31 deposited on the 22nd itself. Checked per day that transfer is wrong by
+ * $2.85; checked per sweep it is exact.
+ *
+ * Measured across the pharmacy's own history — 117 lines, 41 transfers, 24 June to 17 September —
+ * all 41 balance under this rule and 39 under the per-day one.
+ */
+export type Sweep = {
+  /** The day the money left for the pharmacy's own account, and so the day it becomes cash. */
+  on: string;
+  /** What the transfer moved, held positive. */
+  transferredCents: number;
+  /** Every deposit it carried, oldest first. May span more than one day. */
+  deposits: AccountLine[];
+  depositedCents: number;
+  agrees: boolean;
 };
 
 /** "ProviderPay Transfer", however it is spaced or cased. */
@@ -55,7 +79,7 @@ const TRANSFER = /providerpay\s*transfer/i;
 /**
  * The payer, from a deposit's description.
  *
- * A deposit reads `ARGUS HEALTH SYS  101000017856767  20260831` — the payer, the payment number,
+ * A deposit reads `ARGUS HEALTH SYS  999000000000001  20260831` — the payer, the payment number,
  * then the date. Taking everything before the first long run of digits leaves the name, and leaves
  * it alone when the line is shaped differently rather than guessing at it.
  */
@@ -120,7 +144,7 @@ export function readAccountHistory(text: string): AccountMonth {
     depositedCents: 0,
     transferredCents: 0,
     awaitingTransferCents: 0,
-    byDay: [],
+    sweeps: [],
     problems: [],
   };
 
@@ -175,24 +199,50 @@ export function readAccountHistory(text: string): AccountMonth {
   }
   out.awaitingTransferCents = out.depositedCents - out.transferredCents;
 
-  /*
-   * Day by day, because that is how the sweep works and how a disagreement shows itself.
-   *
-   * The transfers net each day's deposits exactly — 04/29's $3,362.24 and $10,363.97 left together
-   * as $13,726.21. A day where they do not agree is either a sweep that crossed midnight, which is
-   * ordinary at a month end, or something worth looking at.
-   */
-  const days = new Map<string, { depositedCents: number; transferredCents: number }>();
-  for (const l of out.lines) {
-    const d = days.get(l.date) ?? { depositedCents: 0, transferredCents: 0 };
-    if (l.kind === "deposit") d.depositedCents += l.amountCents;
-    if (l.kind === "transfer") d.transferredCents += -l.amountCents;
-    days.set(l.date, d);
-  }
-  out.byDay = [...days.entries()]
-    .map(([date, d]) => ({ date, ...d, agrees: d.depositedCents === d.transferredCents }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+  out.sweeps = sweepsFrom(chronological(out.lines));
 
+  return out;
+}
+
+/**
+ * The lines oldest-first, with each day's own sequence left alone.
+ *
+ * The portal exports newest day first and, within a day, the deposits before the transfer that
+ * took them. Reversing the file line by line would put every transfer ahead of its own deposits
+ * and make all 41 of them look unexplained — which is exactly what happened when this was first
+ * measured. So the days are reordered and the order inside a day is not touched: a sweep cannot
+ * carry money that has not landed, and the file already prints them in the order they happened.
+ */
+function chronological(lines: AccountLine[]): AccountLine[] {
+  const days: { date: string; rows: AccountLine[] }[] = [];
+  for (const l of lines) {
+    const last = days[days.length - 1];
+    if (last && last.date === l.date) last.rows.push(l);
+    else days.push({ date: l.date, rows: [l] });
+  }
+  days.sort((a, b) => a.date.localeCompare(b.date));
+  return days.flatMap((d) => d.rows);
+}
+
+/**
+ * Split the history into sweeps: deposits accumulate, a transfer takes them all and closes one.
+ *
+ * Anything deposited after the last transfer is left out — it is still in the account, and
+ * `awaitingTransferCents` is where it is reported rather than being folded into a sweep it did
+ * not go out in.
+ */
+function sweepsFrom(lines: AccountLine[]): Sweep[] {
+  const out: Sweep[] = [];
+  let pending: AccountLine[] = [];
+  for (const l of lines) {
+    if (l.kind === "deposit") pending.push(l);
+    else if (l.kind === "transfer") {
+      const depositedCents = pending.reduce((n, d) => n + d.amountCents, 0);
+      const transferredCents = -l.amountCents;
+      out.push({ on: l.date, transferredCents, deposits: pending, depositedCents, agrees: depositedCents === transferredCents });
+      pending = [];
+    }
+  }
   return out;
 }
 
@@ -202,27 +252,37 @@ export function readAccountHistory(text: string): AccountMonth {
  * Given a transfer as it appears on the bank statement — a date and an amount — find the deposits
  * the sweep account says went into it, and so the payers and payment numbers behind it.
  *
- * Matched on the day, not searched across days: the sweep takes a day's deposits together, and a
- * looser match would happily explain Tuesday's lump with Thursday's payments.
+ * Found by the sweep that went out on that day, which carries everything deposited since the
+ * previous sweep. Still never searched forwards: money that landed after this transfer left is not
+ * allowed to explain it, so Tuesday's lump is never explained with Thursday's payments.
  */
 export function whatMadeUpTransfer(
   month: AccountMonth,
   transfer: { date: string; amountCents: number },
 ): { deposits: AccountLine[]; agrees: boolean; says: string } {
-  const deposits = month.lines.filter((l) => l.kind === "deposit" && l.date === transfer.date);
-  const total = deposits.reduce((n, d) => n + d.amountCents, 0);
-  const agrees = total === Math.abs(transfer.amountCents);
+  const want = Math.abs(transfer.amountCents);
+  const onDay = month.sweeps.filter((s) => s.on === transfer.date);
+  /*
+   * More than one sweep can share a date. Prefer the one whose amount is the one asked about;
+   * otherwise take the first, so the message can still say what the day did hold.
+   */
+  const sweep = onDay.find((s) => s.transferredCents === want) ?? onDay[0];
+  const deposits = sweep?.deposits ?? [];
+  const total = sweep?.depositedCents ?? 0;
+  const agrees = sweep !== undefined && sweep.transferredCents === want && sweep.agrees;
   const money = (c: number) => `$${(c / 100).toFixed(2)}`;
+  const spans = new Set(deposits.map((d) => d.date));
+  const carried = spans.size > 1 ? ` Deposited over ${[...spans].sort().join(" and ")}, swept together on ${transfer.date}.` : "";
 
   return {
     deposits,
     agrees,
     says: agrees
-      ? deposits.length === 1
-        ? `${money(total)} from ${deposits[0].payer ?? "one payer"}.`
-        : `${money(total)} from ${deposits.length} payers: ${deposits.map((d) => d.payer ?? "unnamed").join(", ")}.`
-      : deposits.length === 0
-        ? `Nothing in the ProviderPay account was deposited on ${transfer.date}, so this transfer is not explained by it. A sweep can cross midnight — the day before is worth checking.`
-        : `The deposits on ${transfer.date} come to ${money(total)}, and this transfer is ${money(Math.abs(transfer.amountCents))}. A sweep crossing midnight explains most of these.`,
+      ? (deposits.length === 1
+          ? `${money(total)} from ${deposits[0].payer ?? "one payer"}.`
+          : `${money(total)} from ${deposits.length} payers: ${deposits.map((d) => d.payer ?? "unnamed").join(", ")}.`) + carried
+      : sweep === undefined
+        ? `The ProviderPay account shows no transfer out on ${transfer.date}, so this deposit is not explained by it. A sweep can cross midnight — the day before is worth checking.`
+        : `The sweep on ${transfer.date} moved ${money(sweep.transferredCents)}, and this bank line is ${money(want)}. They are not the same transfer.`,
   };
 }
