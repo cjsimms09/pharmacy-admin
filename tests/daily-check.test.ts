@@ -16,6 +16,8 @@ const wellRun: Facts = {
   offsetsWithPaymentDates: 0,
   offsetsWithPaymentDatesCents: 0,
   doubledRebateLadders: 0,
+  paymentsCountedTwice: 0,
+  paymentsCountedTwiceCents: 0,
   today: "2026-09-17",
   now: "2026-09-17T17:00:00.000Z",
 };
@@ -34,7 +36,7 @@ describe("a well-run day", () => {
       assert.ok(c.shouldBe.length > 40, `${c.what} has no rule written`);
       assert.equal(c.difference, null);
     }
-    assert.match(summarise(checks), /^All 8 checks pass\.$/);
+    assert.match(summarise(checks), /^All 9 checks pass\.$/);
   });
 });
 
@@ -112,7 +114,7 @@ describe("the faults of 17 September 2026, as they actually were", () => {
 
 describe("the summary counts every rule", () => {
   test("eight of them, and a new one cannot be added without this noticing", () => {
-    assert.equal(runDailyCheck(wellRun).length, 8);
+    assert.equal(runDailyCheck(wellRun).length, 9);
   });
 });
 
@@ -149,7 +151,34 @@ describe("what it says when it cannot say", () => {
 
   test("summarise names what failed rather than counting silently", () => {
     const s = summarise(runDailyCheck({ ...wellRun, inboxRows: 1822, invoicesShort: 4, invoicesShortCents: 768 }));
-    assert.match(s, /2 of 8 failing/);
+    assert.match(s, /2 of 9 failing/);
     assert.match(s, /one inbox row per delivered attachment/);
+  });
+});
+
+describe("money earned and money arriving", () => {
+  /*
+   * The check written for a shape rather than a bug. Three faults in two days were all the same
+   * one — a rebate expense dated as paid, two ladders on one basket, and a fortnight of
+   * remittances posted as new revenue — and every one had correct arithmetic and passing tests.
+   */
+  test("a payment equal to the claim's own figure and still counted is a failure in money", () => {
+    const c = check(
+      { paymentsCountedTwice: 496, paymentsCountedTwiceCents: 2_864_557 },
+      "Money earned and money arriving are counted once, not twice",
+    );
+    assert.equal(c.ok, false);
+    assert.equal(c.kind, "money");
+    assert.match(c.observed, /496 payments/);
+    assert.match(c.observed, /\$28,645\.57/);
+    assert.match(c.difference!, /exists only because a remittance was read/);
+    assert.match(c.difference!, /revenueCents/, "says what to change, not just that something is wrong");
+  });
+
+  test("it passes when nothing is being added to the figure it settles", () => {
+    const c = check({}, "Money earned and money arriving are counted once, not twice");
+    assert.equal(c.ok, true);
+    assert.equal(c.difference, null);
+    assert.match(c.shouldBe, /same money arriving rather than more of it/);
   });
 });

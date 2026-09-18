@@ -65,6 +65,18 @@ export type Facts = {
    * difference. A rename is enough to create one, which is how it happened.
    */
   doubledRebateLadders: number;
+  /**
+   * Payments counted as new revenue that are the claim's own adjudicated figure arriving.
+   *
+   * A fill earns `remitCents` on the day it is dispensed. When the plan pays, that is the same
+   * money turning up, not more of it — so a payment whose amount is exactly the claim's
+   * `remitCents` and which still carries a non-zero `revenueCents` is that fill's revenue counted
+   * twice. Written as a shape rather than as one importer's bug because three separate faults in
+   * two days were this shape: a rebate expense dated as paid, two rebate ladders on one basket,
+   * and a fortnight of remittances posted as though none of the claims had ever been billed.
+   */
+  paymentsCountedTwice: number;
+  paymentsCountedTwiceCents: number;
   /** Today, so the check does not have to ask the clock and can be tested. */
   today: string;
   /** Now, ISO, for the same reason. */
@@ -277,6 +289,37 @@ export function runDailyCheck(f: Facts): Check[] {
       f.doubledRebateLadders === 0
         ? null
         : "Every rate on those baskets is being added twice, so the estimated rebate — and the profit above it — is overstated. The superseded ladders are ended at every restart; standing here means something is filing them under a new name again.",
+    kind: "money",
+  });
+
+  /*
+   * 9. Money earned and money arriving are never the same money twice.
+   *
+   * The one check on this list written for a shape rather than a bug. Three separate faults in two
+   * days were all this: a rebate expense carrying a payment date, two rebate ladders on one basket,
+   * and a fortnight of remittances posted as new revenue when the claims had already earned it —
+   * $28,645.57 of September, found by the owner in minutes and not by anything here.
+   *
+   * Every one had correct arithmetic and passing tests. None could have failed one, because each
+   * half was right on its own and the fault was the two halves meeting. So this does not test a
+   * calculation; it tests the books for the footprint such a fault leaves — a payment that is
+   * exactly the claim's own adjudicated figure and is still being added to it.
+   *
+   * It is cheap, it is general, and had it existed on Tuesday it would have caught all three.
+   */
+  checks.push({
+    what: "Money earned and money arriving are counted once, not twice",
+    shouldBe:
+      "A fill earns what the plan agreed to pay on the day it is dispensed, and the remittance is that same money arriving rather than more of it. A payment whose amount is exactly the claim's own remit figure must therefore add nothing further to that fill's revenue — `laterPayments` exists to carry the difference where a payment really is new money, and is nought where it is not.",
+    observed:
+      f.paymentsCountedTwice === 0
+        ? "no payment is being added to the figure it settles"
+        : `${f.paymentsCountedTwice} payment${f.paymentsCountedTwice === 1 ? "" : "s"} equal to the claim's own figure and still counted as revenue, ${money(f.paymentsCountedTwiceCents)} between them`,
+    ok: f.paymentsCountedTwice === 0,
+    difference:
+      f.paymentsCountedTwice === 0
+        ? null
+        : `${money(f.paymentsCountedTwiceCents)} of profit exists only because a remittance was read: the fill earned it once when it was dispensed and again when the money turned up. Net profit, gross margin and every per-drug figure above them are all that much better than the pharmacy's. Whatever posted those payments is setting revenueCents to the amount instead of to nought.`,
     kind: "money",
   });
 

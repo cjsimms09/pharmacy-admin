@@ -35,6 +35,8 @@ async function gather(): Promise<Facts> {
     offsetsWithPaymentDates,
     offsetsWithPaymentDatesCents,
     doubledRebateLadders,
+    paymentsCountedTwice,
+    paymentsCountedTwiceCents,
   ] = await Promise.all([
     one(sql`select count(*) as n from inbox_items`),
     one(sql`select count(distinct message_id) as n from inbox_items`),
@@ -73,6 +75,26 @@ async function gather(): Promise<Facts> {
                where effective_to is null
                group by supplier_id, basket, measure
               having count(*) > 1)`),
+    /*
+     * Payments that are the claim's own adjudicated figure and are still being added to it.
+     *
+     * Joined on the prescription and the day it was dispensed, which is how `laterPayments` reaches
+     * a fill, and narrowed to payments whose amount is EXACTLY the claim's `remit_cents`. Exactness
+     * is what makes this safe to act on: a payment that merely resembles the claim's figure could
+     * be a second payer or a partial, and calling either of those a double count would be its own
+     * fault. Only money in the books is judged — one dated before the books begin is recorded and
+     * counted nowhere.
+     */
+    one(sql`select count(*) as n
+              from claim_payments cp
+              join claims c on c.rx_number = cp.rx_number and c.date_filled = cp.date_filled
+             where cp.out_of_books = 0 and cp.revenue_cents <> 0
+               and cp.amount_cents = c.remit_cents and cp.amount_cents <> 0`),
+    one(sql`select coalesce(sum(cp.revenue_cents), 0) as n
+              from claim_payments cp
+              join claims c on c.rx_number = cp.rx_number and c.date_filled = cp.date_filled
+             where cp.out_of_books = 0 and cp.revenue_cents <> 0
+               and cp.amount_cents = c.remit_cents and cp.amount_cents <> 0`),
   ]);
 
   const settings = await getSettings();
@@ -98,6 +120,8 @@ async function gather(): Promise<Facts> {
     offsetsWithPaymentDates,
     offsetsWithPaymentDatesCents,
     doubledRebateLadders,
+    paymentsCountedTwice,
+    paymentsCountedTwiceCents,
     today: todayIso(),
     now: new Date().toISOString(),
   };
