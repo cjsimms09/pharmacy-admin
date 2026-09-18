@@ -9,6 +9,7 @@ import { formatCents } from "./money";
 import { todayIso } from "./dates";
 import { isOutOfBooks } from "./books-start";
 import { isProgrammePayer } from "./payer-owed";
+import { gateFile } from "./phi-gate";
 
 /**
  * Money that reaches a claim after it was adjudicated.
@@ -876,6 +877,35 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
             `${c.name}: nothing was posted from it, so it has been left in the folder rather than deleted. ` +
               `It is the only copy here, and ProviderPay still holds the original.`,
           );
+        continue;
+      }
+
+      /*
+       * The patient-information gate, which this folder did not have.
+       *
+       * Everything arriving by mail or by SFTP passes `gateFile` before it is stored. A file put
+       * in the watched folder by hand did not, and the folder is the one route a person uses
+       * deliberately — so the only door without the lock was the one most likely to be opened.
+       *
+       * It matters because of what the fallback below does: a file nothing recognises is filed as
+       * a document, bytes and all. The guard further down refuses an unparsed 835 for exactly this
+       * reason — "an 835 names patients and the site does not keep those" — but it tests for X12,
+       * and a CSV walks straight past it.
+       *
+       * Found on 18 September 2026 with three such files already in the folder: ProviderPay's
+       * "Remit Detail" export, downloaded from the portal by hand, 9,107 rows with a column headed
+       * "Patient name". Nothing had swept yet. The gate refuses all three.
+       *
+       * Placed after the 835 branch and not before it, so the remittance path that already works
+       * is untouched: an 835 carries names in segments this parser never reads, and refusing one
+       * here would throw away the feed to protect against a risk it does not have.
+       */
+      const gate = gateFile(c.name, c.buf);
+      if (!gate.ok) {
+        out.problems.push(
+          `${c.name}: ${gate.reason} It has been left in the folder and nothing was stored from it — ` +
+            `not even as a document, because filing it is what would keep the names.`,
+        );
         continue;
       }
 
