@@ -5,6 +5,7 @@ import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
+import { settledDocuments } from "@/lib/inbox-settled";
 import { whenLocal } from "@/lib/dates";
 import { hasMailPassword } from "@/lib/mailbox";
 import { allSuppliers, addressesOf, type Supplier } from "@/lib/suppliers-registry";
@@ -65,6 +66,9 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
     senderRules(),
   ]);
 
+  /* What has since taken responsibility for each arrival, read once for the page. */
+  const settled = await settledDocuments();
+
   /*
    * What the site makes of one line, worked out only where somebody asked about that line.
    *
@@ -105,6 +109,19 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
    * must promise only what it can do.
    */
   const needsAttention = (i: (typeof items)[number]) => {
+    /*
+     * Settled elsewhere, whatever the row remembers of the day it arrived.
+     *
+     * An inbox row records a decision taken on arrival. The work of dealing with a document mostly
+     * happens afterwards and somewhere else, so the two drift apart constantly: a certificate filed
+     * to a technician and an invoice booked as $1,715.00 of supplies were both finished and both
+     * still sat here asking to be dealt with.
+     *
+     * A list of outstanding work that contains finished work cannot be emptied, and a list that
+     * cannot be emptied stops being read — which is how the one item that really does need him goes
+     * past in the company of the two that do not.
+     */
+    if (i.documentId && settled.has(i.documentId)) return false;
     const o = storyOf(i).outcome;
     return o === "not_recognised" || o === "rejected" || o === "held";
   };
