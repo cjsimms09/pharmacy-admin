@@ -77,6 +77,16 @@ export type Facts = {
    */
   paymentsCountedTwice: number;
   paymentsCountedTwiceCents: number;
+  /**
+   * Remittances the payer says it has paid, whose money no cash receipt carries.
+   *
+   * The other half of the same absence. Counting a remittance twice overstates the accrual side;
+   * never banking its deposit understates the cash side, and on 18 September both were true at
+   * once — $28,645.57 too much earned, $99,238.84 too little received. A remittance with no
+   * payment number is not counted here: that is the payer saying the deposit has not happened.
+   */
+  remittancesNotBanked: number;
+  remittancesNotBankedCents: number;
   /** Today, so the check does not have to ask the clock and can be tested. */
   today: string;
   /** Now, ISO, for the same reason. */
@@ -320,6 +330,35 @@ export function runDailyCheck(f: Facts): Check[] {
       f.paymentsCountedTwice === 0
         ? null
         : `${money(f.paymentsCountedTwiceCents)} of profit exists only because a remittance was read: the fill earned it once when it was dispensed and again when the money turned up. Net profit, gross margin and every per-drug figure above them are all that much better than the pharmacy's. Whatever posted those payments is setting revenueCents to the amount instead of to nought.`,
+    kind: "money",
+  });
+
+  /*
+   * 10. Money the payer says it has sent has reached the cash account.
+   *
+   * The mirror of the check above, and it exists because both were true at the same moment: on 18
+   * September the accrual side carried $28,645.57 that had never been earned twice and the cash
+   * side was missing $99,238.84 that had genuinely arrived. One overstated profit, the other
+   * understated it, and neither showed anywhere.
+   *
+   * The cash side is banked from the payer payment report, not from the remittance — deliberately,
+   * because banking both would double it. The cost of that is this: when the payment report is not
+   * pulled, cash simply stops, and nothing notices. The register now holds each remittance's
+   * payment number, so "posted but never banked" is a question with an answer.
+   */
+  checks.push({
+    what: "Money the payer says it has sent has reached the cash account",
+    shouldBe:
+      "A remittance carrying a payment number is the payer saying that deposit has been made, and the deposit is banked from the payer payment report under that same number. Every remittance with a payment number should therefore have cash banked against it. One without a payment number is not owed yet and is not counted here.",
+    observed:
+      f.remittancesNotBanked === 0
+        ? "every remittance with a payment number has its cash"
+        : `${f.remittancesNotBanked} remittance${f.remittancesNotBanked === 1 ? "" : "s"} paid and not banked, ${money(f.remittancesNotBankedCents)} between them`,
+    ok: f.remittancesNotBanked === 0,
+    difference:
+      f.remittancesNotBanked === 0
+        ? null
+        : `${money(f.remittancesNotBankedCents)} has reached the bank and the cash account does not know. Cash profit, and every figure drawn from it, is that much worse than the pharmacy's. The payer payment report for those dates has not been read — it is the Payments export on the ProviderPay portal, and reading it banks them under the payment numbers they already carry.`,
     kind: "money",
   });
 

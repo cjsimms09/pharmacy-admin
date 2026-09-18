@@ -3691,3 +3691,46 @@ export const setupDismissals = sqliteTable("setup_dismissals", {
   dismissedBy: text("dismissed_by").notNull(),
   dismissedAt: text("dismissed_at").notNull().default(now()),
 });
+
+/**
+ * One row per remittance, so cash and claims can be told when they fall out of step.
+ *
+ * On 18 September 2026 the accrual side was overstated by $28,645.57 and the cash side understated
+ * by $99,238.84 at the same moment, and nothing on any screen said either. The owner found both,
+ * which is the failure.
+ *
+ * They were the same absence. The site holds what each prescription earned (`claimPayments`) and
+ * what was deposited (`cashReceipts`), and nothing joined them: the remittance's own number, what
+ * it came to, and the payer's payment number that the deposit also carries. Without that join,
+ * "this remittance is posted and its money has never been banked" is not a question anything can
+ * ask — so a fortnight of deposits went missing in silence.
+ *
+ * This holds no money and feeds no account. It is a register, and it must stay one: the moment a
+ * profit figure reads from here there are two places claiming to know what a remittance was worth,
+ * which is the shape of every expensive fault this site has had.
+ */
+export const remittanceRegister = sqliteTable(
+  "remittance_register",
+  {
+    id: text("id").primaryKey(),
+    /** ProviderPay's own number for the remittance. Its identity: one row per remittance. */
+    remitNumber: text("remit_number").notNull(),
+    payerName: text("payer_name").notNull(),
+    /** ISO. When the payer remitted. */
+    remitOn: text("remit_on"),
+    amountCents: integer("amount_cents").notNull(),
+    /**
+     * The payer's payment number, which the cash receipt for this money also carries.
+     *
+     * Null is a real state and not a gap: it is ProviderPay saying it has not matched this
+     * remittance to a deposit yet, and so no cash should be expected for it. Four of September's
+     * twenty-eight were in that state on the day this was written.
+     */
+    paymentNumber: text("payment_number"),
+    /** Which export it was read from, so a changed feed is visible rather than silent. */
+    source: text("source").notNull(),
+    firstSeenAt: text("first_seen_at").notNull().default(now()),
+    lastSeenAt: text("last_seen_at").notNull().default(now()),
+  },
+  (t) => [uniqueIndex("remittance_register_number_idx").on(t.remitNumber), index("remittance_register_payment_idx").on(t.paymentNumber)],
+);

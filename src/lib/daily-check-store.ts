@@ -97,6 +97,14 @@ async function gather(): Promise<Facts> {
                and cp.amount_cents = c.remit_cents and cp.amount_cents <> 0`),
   ]);
 
+  /*
+   * Asked of the register rather than written as SQL here, because the rule for what counts as
+   * "not banked" belongs beside the register that answers it — and a second copy of that rule is
+   * how two places end up disagreeing about the same money.
+   */
+  const { remittancesNotBanked: notBankedRows } = await import("./mck-remit-detail-store");
+  const notBanked = await notBankedRows();
+
   const settings = await getSettings();
   const standingRebatePeriodTo = ((): string | null => {
     try {
@@ -122,6 +130,8 @@ async function gather(): Promise<Facts> {
     doubledRebateLadders,
     paymentsCountedTwice,
     paymentsCountedTwiceCents,
+    remittancesNotBanked: notBanked.length,
+    remittancesNotBankedCents: notBanked.reduce((n, r) => n + r.amountCents, 0),
     today: todayIso(),
     now: new Date().toISOString(),
   };

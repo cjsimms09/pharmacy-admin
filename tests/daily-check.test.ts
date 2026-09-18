@@ -18,6 +18,8 @@ const wellRun: Facts = {
   doubledRebateLadders: 0,
   paymentsCountedTwice: 0,
   paymentsCountedTwiceCents: 0,
+  remittancesNotBanked: 0,
+  remittancesNotBankedCents: 0,
   today: "2026-09-17",
   now: "2026-09-17T17:00:00.000Z",
 };
@@ -36,7 +38,7 @@ describe("a well-run day", () => {
       assert.ok(c.shouldBe.length > 40, `${c.what} has no rule written`);
       assert.equal(c.difference, null);
     }
-    assert.match(summarise(checks), /^All 9 checks pass\.$/);
+    assert.match(summarise(checks), /^All 10 checks pass\.$/);
   });
 });
 
@@ -113,8 +115,8 @@ describe("the faults of 17 September 2026, as they actually were", () => {
 });
 
 describe("the summary counts every rule", () => {
-  test("eight of them, and a new one cannot be added without this noticing", () => {
-    assert.equal(runDailyCheck(wellRun).length, 9);
+  test("ten of them, and a new one cannot be added without this noticing", () => {
+    assert.equal(runDailyCheck(wellRun).length, 10);
   });
 });
 
@@ -151,7 +153,7 @@ describe("what it says when it cannot say", () => {
 
   test("summarise names what failed rather than counting silently", () => {
     const s = summarise(runDailyCheck({ ...wellRun, inboxRows: 1822, invoicesShort: 4, invoicesShortCents: 768 }));
-    assert.match(s, /2 of 9 failing/);
+    assert.match(s, /2 of 10 failing/);
     assert.match(s, /one inbox row per delivered attachment/);
   });
 });
@@ -180,5 +182,32 @@ describe("money earned and money arriving", () => {
     assert.equal(c.ok, true);
     assert.equal(c.difference, null);
     assert.match(c.shouldBe, /same money arriving rather than more of it/);
+  });
+
+  /*
+   * The other half of the same absence, and the reason both checks exist rather than one. On 18
+   * September the accrual side carried $28,645.57 that was never earned twice and the cash side
+   * was missing $99,238.84 that had genuinely arrived — one overstating profit, one understating
+   * it, neither visible anywhere.
+   */
+  test("a remittance the payer has paid and nothing has banked is a failure in money", () => {
+    const c = check(
+      { remittancesNotBanked: 9, remittancesNotBankedCents: 9_923_884 },
+      "Money the payer says it has sent has reached the cash account",
+    );
+    assert.equal(c.ok, false);
+    assert.equal(c.kind, "money");
+    assert.match(c.observed, /9 remittances paid and not banked/);
+    assert.match(c.observed, /\$99,238\.84/);
+    assert.match(c.difference!, /cash account does not know/);
+    assert.match(c.difference!, /Payments export/, "names the file that fixes it");
+  });
+
+  test("a remittance with no payment number is not counted as unbanked", () => {
+    // ProviderPay writes "Not matched" until a deposit is tied to the remittance. That is the payer
+    // saying the money has not moved, so there is nothing for the cash account to be missing.
+    const c = check({}, "Money the payer says it has sent has reached the cash account");
+    assert.equal(c.ok, true);
+    assert.match(c.shouldBe, /not owed yet/);
   });
 });

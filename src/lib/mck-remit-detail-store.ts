@@ -1,9 +1,10 @@
 import "server-only";
 import { db, schema } from "@/db";
-import { and, like, ne } from "drizzle-orm";
+import { and, like, ne, eq, isNotNull } from "drizzle-orm";
 import { readRemitDetail, detailAgreesWithSummary, type DetailRead } from "./mck-remit-detail";
 import { readRemitSummary, type SummaryRow } from "./mck-remit-csv";
 import { recordClaimPayment } from "./claim-payments";
+import { newId } from "./crypto";
 
 /**
  * Posting the ProviderPay remit detail export, one whole remittance at a time.
@@ -53,6 +54,77 @@ export type DetailImport = {
 
 /** The key a detail line and an existing payment can both be reduced to. */
 const keyOf = (rx: string, on: string | null, cents: number) => `${rx.trim()}|${on ?? ""}|${cents}`;
+
+/**
+ * Put every remittance in the register, whether or not its claims were posted.
+ *
+ * Upserted on the remittance number, which is its identity: the same export downloaded twice, or
+ * two overlapping date ranges, must leave one row. The payment number is refreshed each time
+ * because it changes — ProviderPay writes "Not matched" until the deposit is tied to it, and the
+ * day that becomes a number is the day cash should be expected.
+ */
+async function rememberRemittances(rows: SummaryRow[], source: string): Promise<void> {
+  if (rows.length === 0) return;
+  const at = new Date().toISOString();
+  for (const r of rows) {
+    const existing = await db
+      .select({ id: schema.remittanceRegister.id })
+      .from(schema.remittanceRegister)
+      .where(eq(schema.remittanceRegister.remitNumber, r.remitNumber))
+      .limit(1);
+    if (existing.length > 0) {
+      await db
+        .update(schema.remittanceRegister)
+        .set({ payerName: r.payerName, remitOn: r.remitOn, amountCents: r.amountCents, paymentNumber: r.paymentNumber, source, lastSeenAt: at })
+        .where(eq(schema.remittanceRegister.remitNumber, r.remitNumber));
+    } else {
+      await db.insert(schema.remittanceRegister).values({
+        id: newId(),
+        remitNumber: r.remitNumber,
+        payerName: r.payerName,
+        remitOn: r.remitOn,
+        amountCents: r.amountCents,
+        paymentNumber: r.paymentNumber,
+        source,
+        firstSeenAt: at,
+        lastSeenAt: at,
+      });
+    }
+  }
+}
+
+/**
+ * Remittances whose money the payer says it has sent and which no cash receipt carries.
+ *
+ * The question nothing could ask on 18 September, when $99,238.84 of deposits had reached the bank
+ * and the cash account knew about none of them. A remittance with no payment number is left out:
+ * that is ProviderPay saying the deposit has not happened, which is money not yet owed to the cash
+ * account rather than money missing from it.
+ *
+ * Reads only. It judges nothing and changes nothing — it reports a disagreement between two feeds
+ * that should agree.
+ */
+export async function remittancesNotBanked(): Promise<{ remitNumber: string; payerName: string; remitOn: string | null; amountCents: number; paymentNumber: string }[]> {
+  const rows = await db
+    .select()
+    .from(schema.remittanceRegister)
+    .where(isNotNull(schema.remittanceRegister.paymentNumber));
+  if (rows.length === 0) return [];
+
+  const banked = await db
+    .select({ sourceKey: schema.cashReceipts.sourceKey })
+    .from(schema.cashReceipts)
+    .where(eq(schema.cashReceipts.outOfBooks, false));
+  const keys = banked.map((b) => (b.sourceKey ?? "").toLowerCase());
+
+  return rows
+    .filter((r) => {
+      const n = (r.paymentNumber ?? "").trim().toLowerCase();
+      return n.length > 0 && !keys.some((k) => k.includes(n));
+    })
+    .map((r) => ({ remitNumber: r.remitNumber, payerName: r.payerName, remitOn: r.remitOn, amountCents: r.amountCents, paymentNumber: r.paymentNumber! }))
+    .sort((a, b) => b.amountCents - a.amountCents);
+}
 
 /**
  * Take the phantom revenue back off the payments this importer posted before it knew better.
@@ -123,6 +195,15 @@ export async function importRemitDetail(
   }
 
   const byNumber = new Map<string, SummaryRow>(summary.rows.map((r) => [r.remitNumber, r]));
+
+  /*
+   * The register first, and for every remittance in the summary rather than only the ones posted.
+   *
+   * Its whole purpose is to know about money that has NOT arrived, so recording only what was
+   * imported would leave exactly the rows that matter out of it. Written before anything posts so
+   * a failure half way through still leaves the register able to say what was expected.
+   */
+  await rememberRemittances(summary.rows, "providerpay remit summary");
 
   const existing = await db
     .select({ rx: schema.claimPayments.rxNumber, on: schema.claimPayments.dateFilled, cents: schema.claimPayments.amountCents })
