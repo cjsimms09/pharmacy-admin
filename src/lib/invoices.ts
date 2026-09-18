@@ -1014,7 +1014,21 @@ export async function fileInvoice(
       invoiceNumber = r.invoiceNumber?.trim() || invoiceNumber;
       if (/^\d{4}-\d{2}-\d{2}$/.test(r.invoiceDate ?? "")) invoiceDate = r.invoiceDate;
     } catch (e) {
-      basis = `${basis} It could not be read automatically either: ${e instanceof Error ? e.message : String(e)}. Held with the Schedule II records until somebody says otherwise.`;
+      /*
+       * The model not being called is not the document failing to be read.
+       *
+       * This appended "It could not be read automatically either" to every basis, including one that
+       * had just said the invoice read fine and balanced to its printed total — two sentences in a
+       * row contradicting each other on the owner's screen. The thrown error is usually `NotAsked`,
+       * which is the site obeying his own rule that nothing spends on his behalf unless he presses
+       * the button. That is a fact about this site, not a fault in the invoice, and saying it the
+       * other way is how a pharmacist stops believing the rest of the sentence.
+       */
+      const { NotAsked } = await import("./ai-gate");
+      basis =
+        e instanceof NotAsked
+          ? `${basis} A model reading was not attempted: nothing here reaches the model unless you press for it. Open the invoice and press the button if you want it read that way.`
+          : `${basis} It could not be read automatically either: ${e instanceof Error ? e.message : String(e)}. Held with the Schedule II records until somebody says otherwise.`;
     }
   }
 
@@ -1932,14 +1946,36 @@ async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
      * that misstates where a record is kept is worse than no message: it is the one thing on the
      * page somebody would act on without going and looking.
      */
-    const held = unconfirmed.filter((r) => r.schedule === "unknown").length;
+    /*
+     * "Unknown schedule" and "could not be read" are not the same thing, and this said they were.
+     *
+     * A McKesson invoice of 18 September 2026 read perfectly — 47 lines, balancing to its printed total. Forty-six
+     * carry the class R, which is legend and not controlled. One line carries no class at all: a
+     * $15.72 box of pen needles, which is a device and has no schedule to print. The invoice is
+     * therefore held as unknown, correctly, and the owner was told it "could not be read" — of a
+     * document the site had read completely. He went looking for what to fix and found nothing wrong
+     * with it, because nothing was.
+     *
+     * So the two are separated by what was actually read off the page. Held-and-read is the common
+     * case and the one with an easy answer: somebody says what the unclassed line is and it moves.
+     */
+    const heldRows = unconfirmed.filter((r) => r.schedule === "unknown");
+    const heldUnread = heldRows.filter((r) => (r.linesRead ?? 0) === 0).length;
+    const heldRead = heldRows.length - heldUnread;
+    const held = heldRows.length;
     const placed = unconfirmed.length - held;
     const one = unconfirmed.length === 1;
+    const heldWhy =
+      heldRead > 0 && heldUnread === 0
+        ? `${heldRead === 1 ? "It was read in full and balances to its printed total; a line on it carries no item class, so what it carries has not been settled" : `${heldRead} were read in full, but a line on each carries no item class`}, and ${heldRead === 1 ? "it is" : "they are"} held with the Schedule II records — the safe place, not necessarily the right one. `
+        : heldUnread > 0 && heldRead === 0
+          ? `${heldUnread === 1 ? "It could not be read, so it is" : "None could be read, so they are"} held with the Schedule II records — the safe place, not necessarily the right one. `
+          : `${heldRead} read in full with a line carrying no item class, and ${heldUnread} that could not be read at all, held with the Schedule II records. `;
     const where =
       held > 0 && placed > 0
-        ? `${held} could not be read and ${held === 1 ? "is" : "are"} held with the Schedule II records — the safe place, not necessarily the right one. The other ${placed} ${placed === 1 ? "was" : "were"} read and filed by what ${placed === 1 ? "it carries" : "they carry"}. `
+        ? `${heldWhy}The other ${placed} ${placed === 1 ? "was" : "were"} read and filed by what ${placed === 1 ? "it carries" : "they carry"}. `
         : held > 0
-          ? `${one ? "It could not be read, so it is" : "None could be read, so they are"} held with the Schedule II records — the safe place, not necessarily the right one. `
+          ? heldWhy
           : `${one ? "It was" : "They were"} read and filed by what ${one ? "it carries" : "they carry"}, and ${one ? "is" : "are"} waiting only for you to agree with the reading. `
     out.push({
       key: "unconfirmed",
@@ -2626,7 +2662,12 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
         basis = `${basis} ${r.basis} The reading was not certain, so this is held for a person to confirm.`;
       }
     } catch (e) {
-      basis = `${basis} It could not be read automatically either: ${e instanceof Error ? e.message : String(e)}.`;
+      /* Same distinction as the filing path above: the model not being called is not a bad document. */
+      const { NotAsked } = await import("./ai-gate");
+      basis =
+        e instanceof NotAsked
+          ? `${basis} A model reading was not attempted: nothing here reaches the model unless you press for it.`
+          : `${basis} It could not be read automatically either: ${e instanceof Error ? e.message : String(e)}.`;
     }
   }
 

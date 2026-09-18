@@ -594,6 +594,24 @@ export async function register() {
     await whenIdle("sftp", sftpTick, { evenWhenBusy: true });
     await whenIdle("pioneer", pioneerTick, { evenWhenBusy: true });
     await whenIdle("invoice-lines", invoiceLinesTick);
+    /*
+     * What each supplier's settled draws say about how it collects.
+     *
+     * `learnCadence` was being run and thrown away, so the site worked out afresh every time when a
+     * wholesaler draws and for which days — which is not a system getting smarter, it is one with a
+     * good memory for the last five seconds. Re-learned rather than appended, so a supplier that
+     * changes its terms is followed rather than averaged with its own past.
+     */
+    await whenIdle("draw-cadence", async () => {
+      try {
+        const { learnDrawCadences } = await import("./lib/draw-cadence-store");
+        const r = await learnDrawCadences();
+        const { setSetting } = await import("./lib/settings");
+        await setSetting("draw_cadence_result", `${new Date().toISOString()}: ${r.says}`);
+      } catch {
+        /* Its stored line says when it last succeeded; a learner must never take the site down. */
+      }
+    });
     await whenIdle("data-health", dataHealthTick);
     /*
      * The morning check, after the jobs that would fix what it looks for.

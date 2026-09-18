@@ -286,6 +286,63 @@ const RULES: Rule[] = [
     why: "The alarm monitoring contract, which is a standing cost on file.",
   },
   { kind: "software", counterparty: "Square", test: /SQUAREUP/, side: "out", lands: "operating", category: "Software and systems", feed: null, why: "A Square charge." },
+  {
+    /*
+     * Kansas sales tax, drafted straight out of the account.
+     *
+     * Below the line, not a cost. The tax collected at the counter is the state's money held for a
+     * few weeks — the retail revenue on the account is already recorded before tax, so booking the
+     * draft as an expense would take it off the pharmacy twice. The site says this of the tax it
+     * already knows about ("the tax collected is the state's money and is not in this account") and
+     * had nothing to say about the payment of it.
+     *
+     * Two drafts on 1 September 2026, $1,127.66 and $39.01, neither of which the reader could place.
+     */
+    kind: "sales_tax",
+    counterparty: "Kansas Department of Revenue",
+    test: /KSDEPTOFREVENUE|KS\s*DEPT\s*OF\s*REVENUE/,
+    side: "out",
+    lands: "balance_sheet",
+    category: null,
+    feed: null,
+    why: "Sales tax drafted by the state. The money was collected at the counter and held for them, so it is not a cost of running the pharmacy.",
+  },
+  {
+    /*
+     * Rx Systems bill vials, bags and labels, and they take payment by ACH as well as by invoice.
+     *
+     * The invoice reader books the bill when it arrives by email; this is the money leaving for it.
+     * Named `alreadyCounted` so a statement reader cannot book the same supplies twice — the same
+     * treatment postage gets, and for the same reason.
+     */
+    kind: "supplies",
+    counterparty: "Rx Systems",
+    test: /RX\s*SYSTEMS/,
+    side: "out",
+    lands: "operating",
+    category: "Pharmacy supplies",
+    feed: "the Rx Systems invoices, read from their email",
+    alreadyCounted: "Pharmacy supplies, booked from the Rx Systems invoice itself",
+    why: "Vials, bags and labels. The invoice is read when it arrives, so the bank line is the same money.",
+  },
+  {
+    /*
+     * Mailers, which is postage and shipping rather than pharmacy supplies.
+     *
+     * The owner, when this was first filed under supplies: "Uline is for mailers." A vial or a label
+     * is dispensing; a mailer is getting the prescription to the patient, and it belongs with the
+     * postage that buys the stamp on it. Filed the other way it would quietly inflate the cost of
+     * dispensing and understate what delivery costs.
+     */
+    kind: "mailers",
+    counterparty: "Uline",
+    test: /ULINE/,
+    side: "out",
+    lands: "operating",
+    category: "Postage and shipping",
+    feed: null,
+    why: "Mailers and packing, bought by card — the cost of getting a prescription to a patient.",
+  },
   { kind: "software", counterparty: "Jotform", test: /JOTFORM/, side: "out", lands: "operating", category: "Software and systems", feed: null, why: "A Jotform subscription." },
 
   /* ── Money out: not a cost at all ───────────────────────────────── */

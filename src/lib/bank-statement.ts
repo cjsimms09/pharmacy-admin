@@ -20,6 +20,7 @@
  */
 
 import { readBankDescriptor } from "./bank-descriptors";
+import { invoicesPaidBy } from "./pays-invoices";
 
 export type BankLine = {
   /** YYYY-MM-DD. */
@@ -134,6 +135,15 @@ export type Placement =
   | { kind: "pays_bill"; expenseId: string; vendorName: string; why: string }
   | { kind: "pays_invoice"; invoiceId: string; supplier: string; why: string }
   /**
+   * One debit settling several invoices, found by date and amount.
+   *
+   * The owner: "You should be able to match IPC by date and amount.. you have invoice amount and
+   * billing cadance." A wholesaler that bills daily and draws on a cycle never produces a debit
+   * equal to one invoice — IPC bills twice a day — so the single-invoice rule above could never
+   * place one of theirs. See pays-invoices.ts, which refuses on ambiguity rather than choosing.
+   */
+  | { kind: "pays_invoices"; invoiceIds: string[]; supplier: string; numbers: string[]; why: string }
+  /**
    * Understood, and deliberately not booked, because the books already have this money.
    *
    * The owner: "make sure we are not duplicating!!!!! cant stress this enough". Three of this
@@ -166,7 +176,17 @@ export type MatchContext = {
   suppliers: { id: string; name: string; accountNumber?: string | null }[];
   vendors: { id: string; name: string }[];
   unpaidBills: { id: string; vendorId: string | null; vendorName: string | null; amountCents: number; invoiceDate: string }[];
-  unpaidInvoices: { id: string; supplierId: string | null; supplier: string | null; totalCents: number | null; invoiceDate: string | null }[];
+  unpaidInvoices: { id: string; invoiceNumber?: string | null; supplierId: string | null; supplier: string | null; totalCents: number | null; invoiceDate: string | null }[];
+  /**
+   * What PioneerRx booked in, as a payable alongside the emailed invoices.
+   *
+   * The owner, long before this: "everything else we are usiong pioneer receipt as invoice". It is
+   * the more complete pool by a distance — an invoice is here only if the mailbox caught it, and
+   * receiving books every delivery whoever sent it. The two IPC debits that a subset search could
+   * settle were both sets of RECEIPTS whose invoices never arrived by email, so a matcher looking
+   * only at emailed invoices could not place either.
+   */
+  receipts?: { id: string; number: string; supplier: string | null; totalCents: number | null; invoiceDate: string | null }[];
   /** Postage bills booked from purchase confirmations: what a Stamps.com debit must find to be already counted. */
   postageBills?: { amountCents: number; on: string }[];
   /**
@@ -226,6 +246,46 @@ function names(name: string): string[] {
  * money on a rehearsal of August's scan (Session 2, money map G-BANK-1). These words never name a counterparty.
  */
 const OWN_WORDS = new Set(["west", "wichita", "family", "fam", "pharmacy", "phcy", "ph", "llc", "central", "ave", "treasury", "mgmt"]);
+
+/**
+ * A supplier named by its account number, which is what the ACH descriptor actually carries.
+ *
+ * The owner: "You know cadence for suppliers so shouldn't you be able to match?" The answer was yes,
+ * and the join was missing. His IPC debits read `Independent Phar/WAREHOUSE 10689648` — Independent
+ * Pharmacy Cooperative trading under a name that shares not one word with "IPC" — and 10689648 is
+ * IPC's account number in the supplier register. Both halves were on file and nothing put them
+ * together, so eight debits a fortnight came back "a payment the site cannot tie to a bill or an
+ * invoice" while the identifier that ties them sat in the description.
+ *
+ * Digits only, both sides, so the bank's spacing and punctuation cannot break it, and six digits
+ * minimum: a four-digit account number would match a date, an invoice number or a dollar amount, and
+ * a supplier identified by coincidence is worse than one not identified at all.
+ */
+const MIN_ACCOUNT_DIGITS = 6;
+
+function namedByAccount<T extends { name: string; accountNumber?: string | null }>(description: string, rows: T[]): T | undefined {
+  const digits = description.replace(/\D/g, "");
+  if (digits.length < MIN_ACCOUNT_DIGITS) return undefined;
+  return rows.find((r) => {
+    const account = (r.accountNumber ?? "").replace(/\D/g, "");
+    return account.length >= MIN_ACCOUNT_DIGITS && digits.includes(account);
+  });
+}
+
+/**
+ * Two spellings of one supplier, compared as the pharmacy means them.
+ *
+ * Not , which needs four characters to be confident and so cannot recognise "IPC" at all —
+ * a three-letter supplier whose every invoice therefore fell out of the payment search silently.
+ * This is an equality test between two names the site already holds, not a search of free text, so
+ * folding away case and punctuation is enough and nothing is guessed.
+ */
+function sameSupplier(a: string | null, b: string | null): boolean {
+  const fold = (s: string | null) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const x = fold(a);
+  const y = fold(b);
+  return x.length > 0 && x === y;
+}
 
 function mentions(description: string, name: string): boolean {
   const d = description.toLowerCase();
@@ -378,7 +438,7 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
     if (payer) {
       return { kind: "unplaced", why: `mentions ${payer}, whose money normally arrives through the PSAO and is banked from its report; if this really is a separate payment, bank it with the form` };
     }
-    const supplier = ctx.suppliers.find((s) => mentions(d, s.name));
+    const supplier = ctx.suppliers.find((s) => mentions(d, s.name)) ?? namedByAccount(line.description, ctx.suppliers);
     if (supplier) return { kind: "deposit", receiptKind: "rebate", payer: supplier.name, why: `names ${supplier.name}: a wholesaler paying in is a rebate or a credit` };
     if (RETAIL.test(d)) return { kind: "deposit", receiptKind: "retail", payer: null, why: "reads as card or cash takings" };
     return { kind: "unplaced", why: "a deposit from nobody the site knows; bank it by hand with the payer" };
@@ -522,7 +582,52 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
   if (invByName.length === 1) return { kind: "pays_invoice", invoiceId: invByName[0].id, supplier: invByName[0].supplier!, why: `the ${invByName[0].supplier} invoice for exactly this amount` };
   if (billByName.length > 1 || invByName.length > 1) return { kind: "unplaced", why: "more than one open item has this amount and name; mark the right one paid by hand" };
   const vendor = ctx.vendors.find((v) => mentions(d, v.name));
-  const supplier = ctx.suppliers.find((s) => mentions(d, s.name));
+  const supplier = ctx.suppliers.find((s) => mentions(d, s.name)) ?? namedByAccount(line.description, ctx.suppliers);
+
+  /*
+   * One debit settling several invoices, which is how every daily biller actually pays.
+   *
+   * Everything above needs ONE open item equal to the debit. A wholesaler that bills daily and draws
+   * on a cycle never produces that: IPC bills twice a day and draws every morning, so each of their
+   * debits is the sum of a handful and equal to none of them. Eight of his debits a fortnight came
+   * back "no open invoice of theirs is for this amount" for that reason alone.
+   *
+   * `invoicesPaidBy` refuses on ambiguity rather than choosing, so this can only ever place a debit
+   * where exactly one set of that supplier's invoices adds to it. Tried last, after every rule that
+   * can name a single item, so it never overrides a certainty with a sum.
+   */
+  if (supplier) {
+    const emailed = ctx.unpaidInvoices
+      .filter((v) => v.supplierId === supplier.id || sameSupplier(v.supplier, supplier.name))
+      .filter((v) => v.totalCents !== null && v.invoiceDate !== null)
+      .map((v) => ({ id: v.id, number: v.invoiceNumber ?? v.id.slice(0, 8), on: v.invoiceDate!, cents: v.totalCents! }));
+    /*
+     * The emailed invoices first, then PioneerRx's receiving — separately, never pooled.
+     *
+     * Pooling them would let one delivery appear twice, once as the invoice that arrived by email
+     * and once as the receipt for the same goods, and a subset search would happily use both to
+     * reach a total. Tried in order instead: a set found among the invoices is the better answer
+     * because it names a document the pharmacy holds, and the receipts are the fallback for the
+     * deliveries whose invoice never came — which is most of them.
+     */
+    const received = (ctx.receipts ?? [])
+      .filter((v) => sameSupplier(v.supplier, supplier.name))
+      .filter((v) => v.totalCents !== null && v.invoiceDate !== null)
+      .map((v) => ({ id: v.id, number: v.number, on: v.invoiceDate!, cents: v.totalCents! }));
+    const fromInvoices = invoicesPaidBy(out, line.on, emailed);
+    const paid = fromInvoices.kind === "settles" ? fromInvoices : invoicesPaidBy(out, line.on, received);
+    if (paid.kind === "settles") {
+      return {
+        kind: "pays_invoices",
+        invoiceIds: paid.invoices.map((i) => i.id),
+        supplier: supplier.name,
+        numbers: paid.invoices.map((i) => i.number),
+        why: `${supplier.name}: ${paid.says}`,
+      };
+    }
+    if (paid.kind === "ambiguous") return { kind: "unplaced", why: `${supplier.name}: ${paid.says}` };
+  }
+
   if (vendor) return { kind: "unplaced", why: `names ${vendor.name} but no open bill of theirs is for this amount` };
   if (supplier) return { kind: "unplaced", why: `names ${supplier.name} but no open invoice of theirs is for this amount` };
   return { kind: "unplaced", why: "a payment the site cannot tie to a bill or an invoice" };

@@ -16,6 +16,15 @@ export type FamilyTab = { href: string; label: string };
 export const FAMILIES = {
   money: [
     { href: "/money", label: "The books" },
+    /*
+     * The bank, beside the books rather than buried under settings.
+     *
+     * "I need ability in site to go through bank statements and make sure everything is accounted
+     * for and categorized!!" It is the only figure in the building that does not come from us, so it
+     * belongs next to the accounts it proves — and a page nobody can find is a page nobody has,
+     * which this site has now learned twice in one day.
+     */
+    { href: "/money/bank-review", label: "The bank" },
     { href: "/money/monthly", label: "Statement" },
     { href: "/money/report", label: "Over time" },
   ],

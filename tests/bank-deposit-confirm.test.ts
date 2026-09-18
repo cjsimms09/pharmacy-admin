@@ -217,8 +217,15 @@ describe("two payments of the same amount from the same payer", () => {
 
 describe("the wholesaler's ACH and the facilitator's unexplained credit (G-MCK-1, G-MTF-2)", () => {
   test("REGRESSION: the statement reader gives the matcher the wholesaler's ledger, and marks an agreeing ACH's invoices paid", async () => {
+    /*
+     * The context moved to src/lib/bank-match-context.ts on 17 September 2026 so that the page, the
+     * nightly pass and any proof of the reconciliation build it the same way — a context private to
+     * one file means a check written against it is a second implementation of it. The guard follows
+     * the code: the wholesaler's ledger must still reach the matcher, wherever it is assembled.
+     */
+    const context = await readFile("src/lib/bank-match-context.ts", "utf8");
+    assert.ok(context.includes("settled: statementLines,"));
     const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
-    assert.ok(text.includes("settled: statementLines,"));
     assert.ok(text.includes(`placement.kind === "settles_ach" && placement.agrees`));
   });
 

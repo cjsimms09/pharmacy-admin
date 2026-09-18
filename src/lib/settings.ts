@@ -438,6 +438,9 @@ export const SETTING_KEYS = [
    * Kept as a line rather than a flag because a check failing for three days is a different problem
    * from one that failed this morning, and nothing else in the site could tell them apart.
    */
+  /** Each supplier's measured draw cadence, relearned nightly from settled draws (draw-cadence-store.ts). */
+  "supplier_draw_cadence",
+  "draw_cadence_result",
   "daily_check_on",
   "daily_check_result",
   /**

@@ -1693,7 +1693,18 @@ export default async function InvoicesPage({
         />
       </div>
 
-      {review.length > 0 && !filtered && (
+      {/*
+        Shown when the filter is "unconfirmed", which is the one filter that asks for exactly this.
+
+        It was hidden behind `!filtered`, and the alert about unconfirmed invoices links to
+        `?unconfirmed=1` — so following the link that says "Say what they carry" applied a filter,
+        which hid the only card carrying the control to say it. The owner: "dont see anyuthing to
+        correct or look at this?" There was nothing, and the link had taken it away.
+
+        Still hidden under every other filter, because a card about unconfirmed invoices on a search
+        for one supplier's June is a card about something else.
+      */}
+      {review.length > 0 && (!filtered || onlyUnconfirmed) && (
         <Card
           tone="warn"
           title="Read but not certain"
