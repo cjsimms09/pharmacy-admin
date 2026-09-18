@@ -20,6 +20,8 @@ const wellRun: Facts = {
   paymentsCountedTwiceCents: 0,
   remittancesNotBanked: 0,
   remittancesNotBankedCents: 0,
+  remittanceRegisterRows: 51,
+  remittancePaymentsPosted: 1346,
   today: "2026-09-17",
   now: "2026-09-17T17:00:00.000Z",
 };
@@ -201,6 +203,32 @@ describe("money earned and money arriving", () => {
     assert.match(c.observed, /\$99,238\.84/);
     assert.match(c.difference!, /cash account does not know/);
     assert.match(c.difference!, /Payments export/, "names the file that fixes it");
+  });
+
+  test("an empty register with remittances posted is a failure, not a clean bill", () => {
+    /*
+     * Exactly what this check did on the day it was written. The import had already run, the
+     * register was built afterwards, and "every remittance has its cash" was true because no
+     * remittance was known — the reassuring sentence, from no evidence at all. Pre-flight question
+     * eight, in a test: could the check pass for the wrong reason?
+     */
+    const c = check(
+      { remittanceRegisterRows: 0, remittancePaymentsPosted: 1346 },
+      "Money the payer says it has sent has reached the cash account",
+    );
+    assert.equal(c.ok, false, "a check measuring nothing must not report success");
+    assert.match(c.observed, /register holds none of them/);
+    assert.match(c.difference!, /measuring nothing/);
+  });
+
+  test("an empty register with nothing posted says so rather than failing", () => {
+    // Never measured is a state of its own: there is genuinely nothing to compare yet.
+    const c = check(
+      { remittanceRegisterRows: 0, remittancePaymentsPosted: 0 },
+      "Money the payer says it has sent has reached the cash account",
+    );
+    assert.equal(c.ok, true);
+    assert.match(c.observed, /nothing to compare/);
   });
 
   test("a remittance with no payment number is not counted as unbanked", () => {

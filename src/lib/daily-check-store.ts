@@ -105,6 +105,9 @@ async function gather(): Promise<Facts> {
   const { remittancesNotBanked: notBankedRows } = await import("./mck-remit-detail-store");
   const notBanked = await notBankedRows();
 
+  const registerRows = await one(sql`select count(*) as n from remittance_register`);
+  const remitSourced = await one(sql`select count(*) as n from claim_payments where reference like 'ProviderPay %'`);
+
   const settings = await getSettings();
   const standingRebatePeriodTo = ((): string | null => {
     try {
@@ -131,6 +134,8 @@ async function gather(): Promise<Facts> {
     paymentsCountedTwice,
     paymentsCountedTwiceCents,
     remittancesNotBanked: notBanked.length,
+    remittanceRegisterRows: registerRows,
+    remittancePaymentsPosted: remitSourced,
     remittancesNotBankedCents: notBanked.reduce((n, r) => n + r.amountCents, 0),
     today: todayIso(),
     now: new Date().toISOString(),

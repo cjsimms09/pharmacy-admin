@@ -87,6 +87,16 @@ export type Facts = {
    */
   remittancesNotBanked: number;
   remittancesNotBankedCents: number;
+  /**
+   * How many remittances the register holds at all, and how many claim payments came from one.
+   *
+   * Without these the check above passes when the register is empty, which is exactly what it did
+   * on the day it was written: the import had already run, the register was built afterwards, and
+   * "no remittance is unbanked" was true because no remittance was known. A check that cannot tell
+   * *nothing to check* from *all clear* is not a check, and this is the pair that tells them apart.
+   */
+  remittanceRegisterRows: number;
+  remittancePaymentsPosted: number;
   /** Today, so the check does not have to ask the clock and can be tested. */
   today: string;
   /** Now, ISO, for the same reason. */
@@ -351,14 +361,27 @@ export function runDailyCheck(f: Facts): Check[] {
     shouldBe:
       "A remittance carrying a payment number is the payer saying that deposit has been made, and the deposit is banked from the payer payment report under that same number. Every remittance with a payment number should therefore have cash banked against it. One without a payment number is not owed yet and is not counted here.",
     observed:
-      f.remittancesNotBanked === 0
-        ? "every remittance with a payment number has its cash"
-        : `${f.remittancesNotBanked} remittance${f.remittancesNotBanked === 1 ? "" : "s"} paid and not banked, ${money(f.remittancesNotBankedCents)} between them`,
-    ok: f.remittancesNotBanked === 0,
+      /*
+       * Never measured comes first, because it is the answer that looks most like success.
+       *
+       * Remittances have been posted and the register knows of none, so the comparison has nothing
+       * to compare and would otherwise report "every remittance has its cash" — the reassuring
+       * sentence, from no evidence at all.
+       */
+      f.remittanceRegisterRows === 0
+        ? f.remittancePaymentsPosted === 0
+          ? "no remittance has been read yet, so there is nothing to compare"
+          : `${f.remittancePaymentsPosted} payments came from a remittance and the register holds none of them, so nothing can be compared`
+        : f.remittancesNotBanked === 0
+          ? `all ${f.remittanceRegisterRows} remittances with a payment number have their cash`
+          : `${f.remittancesNotBanked} remittance${f.remittancesNotBanked === 1 ? "" : "s"} paid and not banked, ${money(f.remittancesNotBankedCents)} between them`,
+    ok: f.remittancesNotBanked === 0 && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
     difference:
-      f.remittancesNotBanked === 0
-        ? null
-        : `${money(f.remittancesNotBankedCents)} has reached the bank and the cash account does not know. Cash profit, and every figure drawn from it, is that much worse than the pharmacy's. The payer payment report for those dates has not been read — it is the Payments export on the ProviderPay portal, and reading it banks them under the payment numbers they already carry.`,
+      f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0
+        ? "The register is empty while payments posted from remittances are on the books, so this check is measuring nothing. Re-read the Remit Summary export to fill it; until then neither this check nor the cash side can be trusted."
+        : f.remittancesNotBanked === 0
+          ? null
+          : `${money(f.remittancesNotBankedCents)} has reached the bank and the cash account does not know. Cash profit, and every figure drawn from it, is that much worse than the pharmacy's. The payer payment report for those dates has not been read — it is the Payments export on the ProviderPay portal, and reading it banks them under the payment numbers they already carry.`,
     kind: "money",
   });
 
