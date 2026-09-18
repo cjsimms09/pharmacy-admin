@@ -637,6 +637,33 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
     }
     missing.push(why);
   };
+  /*
+   * Every standing cost not yet due, not only the three this list happens to name.
+   *
+   * `absent` below covers wages, rent and card fees because those were the ones somebody thought
+   * of. On 18 September the cash account quietly left out Accounting at $1,403.40 and PSAO Fees at
+   * $619.25 — both paid on the 30th, both perfectly correct to exclude, and neither mentioned
+   * anywhere. The owner read a cash net profit of $81,365.18 with $47,022.65 of standing costs
+   * silently absent from it and said the profit was wrong. He was right about the sentence even
+   * though the arithmetic was sound: a figure that omits a known cost and does not say so is a
+   * wrong figure, whatever the sum underneath it.
+   *
+   * Named by what is on file rather than by a list written here, so a cost added next month is
+   * covered the day it is entered.
+   */
+  if (i.basis === "cash") {
+    const named = new Set(caveats.join(" "));
+    for (const st of given.standing ?? []) {
+      if (st.noPaidDay) continue;
+      if (spent.has(st.categoryName)) continue;
+      if (named.has(st.categoryName)) continue;
+      if (["Wages and salaries", "Rent and occupancy", "Card processing and bank fees"].includes(st.categoryName)) continue;
+      caveats.push(
+        `${st.name} is on file at ${formatCents(st.amountCents)} a month under ${st.categoryName} and is not paid until later in the month, so the cash account does not carry it yet. The accrual account does.`,
+      );
+    }
+  }
+
   absent("Wages and salaries", "Wages and salaries. Usually the largest cost a pharmacy has — without it this account is not conservative, it is wrong.");
   absent("Rent and occupancy", "Rent and occupancy.");
   absent(
