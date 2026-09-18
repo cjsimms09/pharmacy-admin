@@ -4,6 +4,7 @@ import { and, like, ne, eq, isNotNull } from "drizzle-orm";
 import { readRemitDetail, detailAgreesWithSummary, type DetailRead } from "./mck-remit-detail";
 import { readRemitSummary, type SummaryRow } from "./mck-remit-csv";
 import { recordClaimPayment } from "./claim-payments";
+import { SITE_STARTS_ON } from "./books-start";
 import { newId } from "./crypto";
 
 /**
@@ -181,6 +182,15 @@ export async function remittancesNotBanked(): Promise<{ remitNumber: string; pay
 
   return rows
     .filter((r) => {
+      /*
+       * Remittances from before the books begin are not money the cash account is missing.
+       *
+       * The owner: "I do not want to track or keep track of payments from before 09/01.. these are
+       * test only and should not show up on any AR reports or anything." Their deposits are banked
+       * out of books or not at all, by design, so counting them here reported $251,539.57 when the
+       * real figure was $97,554.15 — and a check wrong by two thirds is one nobody reads twice.
+       */
+      if (r.remitOn !== null && r.remitOn < SITE_STARTS_ON) return false;
       const n = (r.paymentNumber ?? "").trim().toLowerCase();
       return n.length > 0 && !keys.some((k) => k.includes(n));
     })
