@@ -257,9 +257,29 @@ export type Fill = {
  */
 export const TOP_OFF_BINS = new Set(["024284"]);
 
-/** The same dispensing, whichever plan was billed. */
-export function fillKey(c: { rxNumber: string; fillNumber: number | null; dateFilled: string; ndc11: string | null }): string {
-  return [c.rxNumber.trim(), c.fillNumber ?? "", c.dateFilled, c.ndc11 ?? ""].join("|");
+/**
+ * The same dispensing, whichever plan was billed and whichever NDC it was transmitted under.
+ *
+ * ── Why the NDC came out of this ──
+ *
+ * One prescription, one fill number, one date IS one dispensing. The product code is not part of
+ * its identity: a pharmacy rebills the same bottle under a different NDC all the time — brand to
+ * generic, one relabeller to another, the cost NDC against the billed NDC — and each transmission
+ * arrives as its own row.
+ *
+ * With the NDC in the key those rows became separate fills, and the split fell exactly where it
+ * does most harm: the money lands on one leg and the acquisition cost on the other. Measured on
+ * this pharmacy's own claims, 747 of 4,067 dispensings carry more than one NDC and 746 of those
+ * have their cost on a different leg from their revenue. Eighteen per cent of everything dispensed
+ * was being counted as one fill of pure profit beside one fill of pure loss.
+ *
+ * It surfaced as a $943.75 alarm — a Schedule II stimulant "dispensed on account with nothing
+ * billed" — on a prescription whose money, $1,171.91 of it, had arrived on the other leg an hour
+ * earlier. The comment on `onAccount` in claims.ts already describes this exact failure and says
+ * grouping into fills is what prevents it. The grouping was doing the opposite.
+ */
+export function fillKey(c: { rxNumber: string; fillNumber: number | null; dateFilled: string; ndc11?: string | null }): string {
+  return [c.rxNumber.trim(), c.fillNumber ?? "", c.dateFilled].join("|");
 }
 
 export type LaterPayment = {
@@ -610,7 +630,15 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
       fillNumber: first.fillNumber,
       dateFilled: first.dateFilled,
       soldOn: rows.map((r) => r.soldOn).find((d) => d) ?? null,
-      ndc11: first.ndc11,
+      /*
+       * The product actually dispensed, which is the one whose cost was recorded.
+       *
+       * Where a dispensing was transmitted under more than one NDC, the row carrying the
+       * acquisition cost is the bottle that left the shelf; the others are the same bottle billed
+       * under another code. Taking the first row's NDC would name the fill after whichever
+       * transmission happened to sort first, which is not a fact about the medicine.
+       */
+      ndc11: rows.find((r) => (r.acquisitionCents ?? 0) > 0)?.ndc11 ?? first.ndc11,
       itemName: rows.find((r) => r.itemName)?.itemName ?? null,
       payers,
       coordinated: payers.length > 1,
