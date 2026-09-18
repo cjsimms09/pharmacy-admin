@@ -106,3 +106,59 @@ async function checks(r: SalesByPayment): Promise<string> {
 }
 
 const money = (c: number) => `${c < 0 ? "-" : ""}$${(Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Re-reads the payment-type reports that were held with nothing stored.
+ *
+ * The reader refuses a day whose figures do not hold together, which is right — a till that
+ * disagrees with itself is worse stored than absent. What it did not do was come back to a day once
+ * the reason it refused had been fixed.
+ *
+ * On 17 September 2026 it refused a day over thirty dollars, because it summed the "Other" block
+ * PioneerRx prints below the Totals: line and does not include in it. The reader is corrected; that
+ * day's takings would have stayed off the books for ever, because nothing re-reads a held report.
+ *
+ * Every reader improvement in this site has needed the same thing, and this is the third: the
+ * invoices recorded short, the supplies invoice recognised too late, and now a day's till. A reader
+ * that gets better without re-reading what it previously got wrong only fixes the future.
+ *
+ * `fileSalesByPayment` is keyed on the day, so re-reading one already stored changes nothing.
+ */
+export async function rereadHeldSalesReports(user: { userName: string }): Promise<{ read: number; stored: number; says: string }> {
+  const { db, schema } = await import("@/db");
+  const { eq } = await import("drizzle-orm");
+  const { readFile } = await import("./files");
+
+  const held = (
+    await db.query.inboxItems.findMany({
+      where: eq(schema.inboxItems.routedAs, "sales_by_payment"),
+      columns: { id: true, documentId: true, routeResult: true },
+    })
+  ).filter((i) => i.documentId && /held, nothing stored/i.test(i.routeResult ?? ""));
+
+  let read = 0;
+  let stored = 0;
+  for (const i of held) {
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, i.documentId!) });
+    if (!doc) continue;
+    read++;
+    try {
+      const r = await fileSalesByPayment({ text: (await readFile(doc.storageKey)).toString("utf8"), documentId: doc.id }, user);
+      if (r.stored) {
+        stored++;
+        await db.update(schema.inboxItems).set({ routeResult: r.says }).where(eq(schema.inboxItems.id, i.id));
+      }
+    } catch {
+      /* Still unreadable: it keeps the reason it already had, which is the honest state. */
+    }
+  }
+
+  return {
+    read,
+    stored,
+    says:
+      read === 0
+        ? "No payment-type report is being held."
+        : `${stored} of ${read} held payment-type report${read === 1 ? "" : "s"} now read and stored.`,
+  };
+}

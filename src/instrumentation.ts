@@ -102,6 +102,17 @@ export async function register() {
        * reader read it perfectly, and the owner went looking for it: "im looking for a supplies
        * charge in accural and dont see it." Keyed on the invoice number, so it cannot double-count.
        */
+      /*
+       * And a day's till held over a reader fault that has since been fixed.
+       *
+       * The payment-type reader refused 17 September over thirty dollars — it was summing the
+       * "Other" block PioneerRx prints below its Totals line and does not include in it. Nothing
+       * re-reads a held report, so that day's takings would have stayed off the books for ever.
+       * Third time this shape has bitten: a reader that gets better without re-reading what it
+       * previously got wrong only ever fixes the future.
+       */
+      const { rereadHeldSalesReports } = await import("./lib/sales-by-payment-store");
+      await rereadHeldSalesReports({ userName: "the held-report re-read" });
       const { bookUnbookedSuppliesInvoices, seedCategories } = await import("./lib/expenses");
       await bookUnbookedSuppliesInvoices();
       /*

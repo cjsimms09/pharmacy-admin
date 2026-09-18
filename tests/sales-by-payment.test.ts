@@ -79,3 +79,61 @@ describe("PioneerRx's sales by payment type", () => {
     assert.match(r.ok ? "" : r.why, /"Credit\/Debit" column is missing/);
   });
 });
+
+/**
+ * The "Other" block, which PioneerRx prints BELOW the Totals: line and does not include in it.
+ *
+ * On 17 September 2026 it carried one row — Customer A/R Payments, −$30.00 — and the reader summed
+ * every parsed row into the grand-total check. It therefore reported the report's own total as
+ * thirty dollars too high on both the card column and the Totals column, refused the whole day, and
+ * that day's takings went unrecorded because of a section the report had correctly excluded.
+ *
+ * The exclusion is right and not a quirk: a Customer A/R payment is money collected against an
+ * account billed earlier, not a sale made today. Counting it as takings would put the revenue in
+ * twice — once when the sale was rung up, again when the customer settled.
+ *
+ * Every figure here is invented; the shape and the line order are the real report's.
+ */
+const WITH_OTHER = [
+  "System Sales Totals By Payment Type",
+  "Test Pharmacy",
+  '"1 Main St, Wichita, KS 67000"',
+  "(316) 000-0000 (f) (316) 000-0001",
+  "9/14/2026 - 9/14/2026",
+  "Cash,Check,Credit/Debit,A/R / Direct Dep,Coupons,Returns (Cash/Check),Returns (Credit/Debit),Returns (A/R / DD),Returns (Coupons),Totals",
+  "Amount,Amount,Amount,Amount,Amount,Amount,Amount,Amount,Amount,Amount,Tax Collected,Tax Calculated",
+  "Retail Sales",
+  "OTC,0.0000,0.0000,200.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,180.0000,20.00,20.0000",
+  "Retail Sales Totals:,0.00,0.00,200.00,0.00,0.00,0.00,0.00,0.00,0.00,180.00,20.00,20.0000",
+  "Rx Sales",
+  "Rx Plan Customer Payments",
+  "Standard Third Party,50.0000,0.0000,100.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,150.0000,0.00,0.0000",
+  "Rx Plan Third Party Remit",
+  "Standard Third Party,,,,,,,,,,900.0000,0.00,0.0000",
+  "Rx Sales Totals:,50.00,0.00,100.00,0.00,0.00,0.00,0.00,0.00,0.00,1050.00,0.00,0.0000",
+  "Sales Adjustments",
+  "A/R Service & Finance Charges,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.00,0.0000",
+  "Sales Adjustments Totals:,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.0000",
+  "Totals:,50.00,0.00,300.00,0.00,0.00,0.00,0.00,0.00,0.00,1230.00,20.00,20.0000",
+  "Other",
+  "Customer A/R Payments,0.0000,0.0000,-30.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,-30.0000,0.00,0.0000",
+  "Other Totals:,0.00,0.00,-30.00,0.00,0.00,0.00,0.00,0.00,0.00,-30.00,0.00,0.0000",
+  "Printed On: 9/15/2026,Page 1 of 1",
+  "",
+].join("\r\n");
+
+describe("the Other block below the totals", () => {
+  test("REGRESSION: a Customer A/R payment printed under Totals: does not make the day fail to balance", () => {
+    const r = readSalesByPayment(WITH_OTHER);
+    assert.ok(r.ok, r.ok ? "" : r.why);
+  });
+
+  test("the grand total is the three sales sections, and the A/R payment is not in the takings", () => {
+    const r = readSalesByPayment(WITH_OTHER);
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    /* 200.00 retail + 100.00 Rx on the card column, and not the -30.00 below the line. */
+    assert.equal(r.report.payments.card, 30000);
+    assert.equal(r.report.payments.cash, 5000);
+  });
+});

@@ -182,7 +182,24 @@ export function readSalesByPayment(text: string): SalesByPaymentRead {
   checkTotals("Retail Sales Totals:", inSection("retail"));
   checkTotals("Rx Sales Totals:", inSection("rx"));
   checkTotals("Sales Adjustments Totals:", inSection("adjust"));
-  checkTotals("Totals:", parsed);
+  /*
+   * The grand total is the three sales sections, and deliberately not everything on the page.
+   *
+   * "Other" is printed BELOW the Totals: line and is not inside it. On 17 September 2026 it carried
+   * one row — Customer A/R Payments, −$30.00 — and summing every parsed row made the reader report
+   * the report's own total as thirty dollars too high, on both the card column and the grand total.
+   * It refused the whole day rather than store a till that disagreed with itself, and that day's
+   * takings went unrecorded because of a section PioneerRx had correctly excluded.
+   *
+   * Proved on the page itself: 218.41 + 3,273.30 + 0.00 is exactly the printed 3,491.71, and
+   * 203.18 + 33,718.27 + 0.00 is exactly the printed 33,921.45. The report adds up; the reader was
+   * adding a section the report does not.
+   *
+   * And it belongs outside: a Customer A/R payment is money collected against an account that was
+   * billed earlier, not a sale made today. Counting it as takings would put revenue in the day twice
+   * — once when the sale was rung up and again when the customer settled.
+   */
+  checkTotals("Totals:", [...inSection("retail"), ...inSection("rx"), ...inSection("adjust")]);
 
   const grand = stated.get("Totals:");
   if (problems.length || !grand) {
