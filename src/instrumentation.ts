@@ -85,6 +85,12 @@ export async function register() {
        * waiting for somebody to export them again. Does nothing once the register holds anything.
        */
       await fillRegisterFromFiledSummaries();
+      /*
+       * And IPD's statements, which were read correctly and then filed as "report" with no date —
+       * so the page needed to match a payment sat among everything with no better word for it.
+       */
+      const { refileIpdStatements } = await import("./lib/ipd-statement-store");
+      await refileIpdStatements();
       const { correctStandingRebateStatement, attachMissingRebateDocuments, clearRebatePaymentDates } = await import("./lib/rebate-report-store");
       /*
        * First, because it is the only wrong figure here that is a wrong PROFIT figure.

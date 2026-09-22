@@ -39,6 +39,32 @@ export async function fileIpdStatement(
     return { says: read.why, refused: true, payments: 0, alreadyHeld: 0, banked: 0 };
   }
   const s = read.statement;
+
+  /*
+   * Filed as what it is: IPD's statement of account, dated the day it is as of.
+   *
+   * The owner, 22 September 2026: "we need to be filing as a statement so we can use when we need
+   * to match payment". The statement that arrived on the 20th was read correctly — two settlements
+   * recorded, three due dates taken — and then sat in the drawer as a "report" with no date, among
+   * everything the site has no better word for. The mailbox decides the drawer from the document's
+   * wording before this reader runs, and IPD's page does not say "statement" the way that test
+   * wants. By the time the file reaches here there is no doubt left what it is, so this is where
+   * the drawer is settled — and every route that reads one, not only the mailbox, files it alike.
+   *
+   * Only a document still in the catch-all drawer is moved. One somebody has filed by hand stays
+   * where they put it.
+   */
+  if (input.documentId) {
+    await db
+      .update(schema.documents)
+      .set({
+        category: "supplier_statement",
+        title: `IPD statement of account${s.asOf ? ` as of ${s.asOf}` : ""}`,
+        ...(s.asOf ? { effectiveOn: s.asOf } : {}),
+      })
+      .where(and(eq(schema.documents.id, input.documentId), eq(schema.documents.category, "report")));
+  }
+
   const { recordSupplierPayment } = await import("./supplier-payments");
   const { addCashReceipt } = await import("./expenses");
 
@@ -135,4 +161,42 @@ export async function fileIpdStatement(
   const says = said.join(" ");
   await audit({ action: "supplier.ipd_statement_read", userId: by.id ?? null, userName: by.name, entity: "document", entityId: input.documentId ?? undefined, details: says });
   return { says, refused: false, payments, alreadyHeld, banked };
+}
+
+/**
+ * Move the IPD statements already filed as reports into supplier statements, dated.
+ *
+ * `fileIpdStatement` settles the drawer for every statement read from now on. This is for the ones
+ * read before it did — the 20 September statement among them — found through the inbox line that
+ * says what the router called them, and dated from the page itself rather than from when it arrived.
+ * Money is not touched: the settlements and due dates were recorded correctly the first time.
+ */
+export async function refileIpdStatements(): Promise<{ moved: number }> {
+  const items = await db.query.inboxItems.findMany({
+    where: eq(schema.inboxItems.routedAs, "ipd_statement"),
+    columns: { documentId: true },
+  });
+  const ids = [...new Set(items.map((i) => i.documentId).filter((d): d is string => !!d))];
+  if (ids.length === 0) return { moved: 0 };
+
+  const { readFile } = await import("./files");
+  const { pdfText } = await import("./pdf-text");
+  let moved = 0;
+  for (const id of ids) {
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, id), columns: { category: true, storageKey: true } });
+    if (!doc || doc.category !== "report") continue;
+    let asOf: string | null = null;
+    try {
+      const read = readIpdStatement(pdfText(await readFile(doc.storageKey)));
+      if (read.ok) asOf = read.statement.asOf;
+    } catch {
+      // The bytes are gone or unreadable; still file it as what the router already knew it was.
+    }
+    await db
+      .update(schema.documents)
+      .set({ category: "supplier_statement", title: `IPD statement of account${asOf ? ` as of ${asOf}` : ""}`, ...(asOf ? { effectiveOn: asOf } : {}) })
+      .where(and(eq(schema.documents.id, id), eq(schema.documents.category, "report")));
+    moved++;
+  }
+  return { moved };
 }
