@@ -494,6 +494,13 @@ export async function register() {
           f.filled ? ` (${Object.entries(f.bySource).map(([k, n]) => `${n} by ${k}`).join(", ")})` : ""
         }; ${f.stillSilent} still cannot be answered by any source`,
       );
+      /*
+       * And the inbox lines that still say an invoice is held for confirmation after it has settled.
+       * Written once on arrival and never rewritten, so 27 of them told him about work that did not
+       * exist. After the schedules, because settled schedules are what settle the invoices.
+       */
+      const { refreshHeldInboxLines } = await import("./lib/inbox-held-refresh");
+      await refreshHeldInboxLines();
     } catch {
       // Its result setting says what happened; a re-read that fails must never take the site down.
     }
