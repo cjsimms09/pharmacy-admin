@@ -99,7 +99,8 @@ export async function correctLinesBySupplierClass(): Promise<{ corrected: number
   const changed: { description: string | null; was: string | null; now: string }[] = [];
   for (const l of rows) {
     if (!/mckesson/i.test(l.supplier ?? "")) continue;
-    if (l.deaScheduleFrom === "the invoice's own sections" || l.deaScheduleFrom === "the supplier's own class") continue;
+    // Nor a line the pharmacy's state rule raised: blank or R on a pseudoephedrine line is the federal answer, not this store's.
+    if (l.deaScheduleFrom === "the invoice's own sections" || l.deaScheduleFrom === "the supplier's own class" || l.deaScheduleFrom === "the pharmacy's state rule") continue;
     const byClass = scheduleFromSupplierClass(l.itemClass);
     if (byClass === null || byClass === l.deaSchedule) continue;
     await db

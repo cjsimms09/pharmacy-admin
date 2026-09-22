@@ -3085,6 +3085,14 @@ export async function storeInvoiceLines(
     })
     .where(eq(schema.supplierInvoices.id, invoiceId));
 
+  /*
+   * The drawer settled against the lines just read, now rather than overnight.
+   *
+   * A pseudoephedrine invoice is filed as ordinary by every federal source, and the daily pass would
+   * leave it there for up to a day. Only ever raises: a line cannot make an invoice less controlled.
+   */
+  await applyStateScheduleAndRaise(invoiceId);
+
   return {
     stored: rows.length,
     unread: parsed.unreadable.length,
@@ -3956,4 +3964,97 @@ export async function settleSchedulesFromPioneer(user = "the PioneerRx pull"): P
             ? `; ${disagreed.length} where a person's answer differs from PioneerRx and was left alone: ${disagreed.map((d) => `${d.invoiceNumber} (filed ${d.wasSaid}, PioneerRx says ${d.pioneerSays})`).join(", ")}`
             : ""),
   };
+}
+
+/**
+ * Apply the pharmacy's state rule to one invoice's lines, then raise the invoice to its most
+ * controlled line.
+ *
+ * Two steps, in this order, for one invoice. The lines first: a pseudoephedrine line is Schedule V in
+ * this pharmacy ("Yes we treat like schedule 5", 22 September 2026), whatever the FDA directory,
+ * PioneerRx or the wholesaler's class says. Then the invoice: a Schedule III-V line on an invoice
+ * filed as carrying no controlled items is the filing error `filingDisagrees` names, and this puts
+ * it right rather than only naming it.
+ *
+ * Only ever raises, at both steps. And an invoice a person has already confirmed is left as they
+ * filed it — the disagreement is recorded on the audit trail for somebody to look at, never applied
+ * over them, the same rule `settleSchedulesFromPioneer` keeps. An invoice still "unknown" is left
+ * too: it is already in the Schedule II drawer, the most cautious one there is.
+ */
+export async function applyStateScheduleAndRaise(invoiceId: string, user = "the state schedule rule"): Promise<{ linesRaised: number; raisedTo: InvoiceSchedule | null; heldBack: boolean }> {
+  const { stateScheduleOf, higherSchedule } = await import("./state-schedule");
+  const lines = await db.query.invoiceLines.findMany({
+    where: eq(schema.invoiceLines.invoiceId, invoiceId),
+    columns: { id: true, ndc11: true, description: true, deaSchedule: true },
+  });
+  let linesRaised = 0;
+  for (const l of lines) {
+    const dir = l.ndc11 ? await db.query.drugDirectory.findFirst({ where: eq(schema.drugDirectory.ndc11, l.ndc11), columns: { substances: true } }) : null;
+    const byState = stateScheduleOf({ substances: dir?.substances ?? null, description: l.description });
+    if (!byState) continue;
+    const next = higherSchedule(l.deaSchedule, byState);
+    if (next === l.deaSchedule) continue;
+    await db
+      .update(schema.invoiceLines)
+      .set({ deaSchedule: next, deaScheduleFrom: "the pharmacy's state rule", controlled: next === "schedule_2" })
+      .where(eq(schema.invoiceLines.id, l.id));
+    l.deaSchedule = next;
+    linesRaised++;
+  }
+
+  const inv = await db.query.supplierInvoices.findFirst({
+    where: eq(schema.supplierInvoices.id, invoiceId),
+    columns: { id: true, invoiceNumber: true, schedule: true, reviewedAt: true, documentId: true, basis: true },
+  });
+  if (!inv || inv.schedule === "unknown") return { linesRaised, raisedTo: null, heldBack: false };
+  let top: string | null = null;
+  for (const l of lines) top = higherSchedule(top, l.deaSchedule);
+  const target = higherSchedule<string>(inv.schedule, top) as InvoiceSchedule | null;
+  if (!target || target === inv.schedule) return { linesRaised, raisedTo: null, heldBack: false };
+
+  if (inv.reviewedAt) {
+    await audit({
+      action: "invoice.schedule.lines_disagree",
+      userId: "system",
+      userName: user,
+      entity: "invoice",
+      entityId: inv.id,
+      details: `Confirmed as ${inv.schedule} by a person; its lines say ${target}. Left as confirmed.`,
+    });
+    return { linesRaised, raisedTo: null, heldBack: true };
+  }
+
+  const filing = FILING[target];
+  if (inv.documentId) await db.update(schema.documents).set({ category: filing.category }).where(eq(schema.documents.id, inv.documentId));
+  await db
+    .update(schema.supplierInvoices)
+    .set({
+      schedule: target,
+      basis: `${inv.basis ?? ""} Raised from ${inv.schedule} to ${filing.label} on ${todayIso()}: a line on it is ${target === "schedule_2" ? "Schedule II" : "Schedule III-V"}${linesRaised ? " under the pharmacy's state rule for pseudoephedrine" : ""}.`.trim(),
+    })
+    .where(eq(schema.supplierInvoices.id, inv.id));
+  await audit({
+    action: "invoice.schedule.raised_to_lines",
+    userId: "system",
+    userName: user,
+    entity: "invoice",
+    entityId: inv.id,
+    details: `${inv.invoiceNumber ?? inv.id}: ${inv.schedule} -> ${target}`,
+  });
+  return { linesRaised, raisedTo: target, heldBack: false };
+}
+
+/** The daily backstop: every invoice, through the same one-invoice rule. */
+export async function applyStateScheduleAndRaiseAll(): Promise<{ invoices: number; linesRaised: number; raised: { invoiceNumber: string | null; to: InvoiceSchedule }[]; heldBack: number }> {
+  const all = await db.query.supplierInvoices.findMany({ columns: { id: true, invoiceNumber: true } });
+  const raised: { invoiceNumber: string | null; to: InvoiceSchedule }[] = [];
+  let linesRaised = 0;
+  let heldBack = 0;
+  for (const inv of all) {
+    const r = await applyStateScheduleAndRaise(inv.id, "the nightly state schedule rule");
+    linesRaised += r.linesRaised;
+    if (r.raisedTo) raised.push({ invoiceNumber: inv.invoiceNumber, to: r.raisedTo });
+    if (r.heldBack) heldBack++;
+  }
+  return { invoices: all.length, linesRaised, raised, heldBack };
 }

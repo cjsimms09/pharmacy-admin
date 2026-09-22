@@ -499,6 +499,21 @@ export async function register() {
        * Written once on arrival and never rewritten, so 27 of them told him about work that did not
        * exist. After the schedules, because settled schedules are what settle the invoices.
        */
+      /*
+       * Then the drawers against their lines, with the pharmacy's state rule applied: pseudoephedrine
+       * is Schedule V here, and every federal source files it as ordinary. Each invoice is also
+       * settled the moment its lines are read; this is the backstop for everything already on file.
+       */
+      const { applyStateScheduleAndRaiseAll } = await import("./lib/invoices");
+      const raisedAll = await applyStateScheduleAndRaiseAll();
+      if (raisedAll.raised.length > 0 || raisedAll.linesRaised > 0) {
+        await setSetting(
+          "state_schedule_result",
+          `${new Date().toISOString()}: ${raisedAll.linesRaised} line${raisedAll.linesRaised === 1 ? "" : "s"} raised by the state rule; ` +
+            `${raisedAll.raised.length} invoice${raisedAll.raised.length === 1 ? "" : "s"} moved to a more controlled drawer` +
+            (raisedAll.heldBack ? `; ${raisedAll.heldBack} confirmed by a person and left as they are` : ""),
+        );
+      }
       const { refreshHeldInboxLines } = await import("./lib/inbox-held-refresh");
       await refreshHeldInboxLines();
     } catch {
