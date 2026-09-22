@@ -500,7 +500,28 @@ export async function knownNdcs(): Promise<(ndc11: string) => boolean> {
  */
 export async function ndcSchedules(): Promise<(ndc11: string) => string | null> {
   const rows = await db.query.drugDirectory.findMany({ columns: { ndc11: true, deaSchedule: true } });
-  const by = new Map(rows.map((r) => [r.ndc11, r.deaSchedule ?? null]));
+  return scheduleLookup(rows);
+}
+
+/**
+ * The directory as a lookup that keeps its two silences apart.
+ *
+ * An NDC the directory lists with no schedule is a drug the FDA has looked at and found
+ * uncontrolled; an NDC it has never heard of says nothing at all. `directoryCodeOf` was written to
+ * tell those apart — a blank becomes "0", an ordinary item — and never once did, because the
+ * directory stores an uncontrolled drug as NULL, not as a blank. All 206,163 of them. This lookup
+ * turned that NULL into `null`, the same answer it gives for an NDC it has never seen, so the rule
+ * waiting downstream for a blank was waiting for something that could not arrive.
+ *
+ * Measured on 22 September 2026: 161 invoice lines, $44,858.71 across 19 invoices, that no source
+ * could classify — and 134 of them were NDCs the directory lists at the exact package, positively
+ * uncontrolled. The nightly backfill reported "161 still cannot be answered by any source" every
+ * night while the answer sat in the table it was reading.
+ *
+ * So a listed drug with no schedule comes back as "", and only an unlisted one comes back null.
+ */
+export function scheduleLookup(rows: { ndc11: string; deaSchedule: string | null }[]): (ndc11: string) => string | null {
+  const by = new Map(rows.map((r) => [r.ndc11, r.deaSchedule ?? ""]));
   return (ndc11: string) => by.get(ndc11) ?? null;
 }
 export async function ndcPackages(): Promise<(productNdc9: string) => string[]> {
