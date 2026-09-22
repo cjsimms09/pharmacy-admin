@@ -3053,7 +3053,12 @@ export async function storeInvoiceLines(
     // Which half of a combined invoice the line is on, so the Schedule II items are separable
     // inside the document as well as by the folder it is filed in. See invoice-lines.ts.
     ...(() => {
-      const said = lineSchedule({ sectionControlled: l.controlled, directoryCode: directoryCodeOf(scheduleOf(l.ndc11)), deliveryCodes });
+      const said = lineSchedule({
+        sectionControlled: l.controlled,
+        supplierClass: /mckesson/i.test(meta.supplier ?? "") ? l.itemClass : null,
+        directoryCode: directoryCodeOf(scheduleOf(l.ndc11)),
+        deliveryCodes,
+      });
       return { controlled: said.controlled, deaSchedule: said.schedule, deaScheduleFrom: said.from };
     })(),
   }));

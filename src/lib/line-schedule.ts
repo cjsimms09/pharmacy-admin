@@ -53,18 +53,49 @@ export type ScheduleAnswer = {
   /** Whether this line is a Schedule II item: the question `invoice_lines.controlled` has always asked. */
   controlled: boolean | null;
   /** Which source answered, so a disagreement can be argued with rather than only noticed. */
-  from: "the invoice's own sections" | "the FDA directory" | "PioneerRx's receiving record" | null;
+  from: "the invoice's own sections" | "the supplier's own class" | "the FDA directory" | "PioneerRx's receiving record" | null;
 };
+
+/**
+ * What McKesson's item class says about a line's schedule, where it says anything.
+ *
+ * McKesson prints a class against every line it sells, and on this pharmacy's invoices the class is
+ * the schedule: X on all 81 Schedule II lines, B, D and E on every Schedule III-V line, R on 566
+ * prescription lines none of which is controlled. It is the supplier's own statement about the
+ * product it shipped, which is why it sits above the FDA directory.
+ *
+ * Found on 22 September 2026, hours after the directory was allowed to answer "not controlled": the
+ * directory lists the Xcopri titration pack with a blank schedule, and cenobamate has been Schedule
+ * V since 2020. McKesson's E was right and the directory was wrong, and a Schedule V drug was
+ * recorded as uncontrolled by a fix written that afternoon. One line in 139, and the one kind of
+ * mistake this column exists to prevent.
+ *
+ * Only the letters the invoices have proved are read. A class nobody has seen yet says nothing, and
+ * a blank says nothing either: blank is McKesson's over-the-counter class, and pseudoephedrine is
+ * over the counter federally and scheduled in some states.
+ */
+export function scheduleFromSupplierClass(cls: string | null | undefined): LineSchedule | null {
+  const c = String(cls ?? "").trim().toUpperCase();
+  if (c === "X") return "schedule_2";
+  if (c === "B" || c === "D" || c === "E") return "schedule_3_5";
+  if (c === "R") return "none";
+  return null;
+}
 
 export function lineSchedule(input: {
   /** The invoice's own half, where it prints halves: true for the Schedule II side. */
   sectionControlled?: boolean | null;
+  /** McKesson's item class for the line, where the supplier is McKesson. Nobody else prints one. */
+  supplierClass?: string | null;
   /** The DEA schedule the FDA directory registers against this line's NDC, as printed there ("2", "3", "CIV", ""). */
   directoryCode?: string | null;
   /** Every schedule PioneerRx recorded for the whole delivery this line arrived on. */
   deliveryCodes?: (string | null | undefined)[] | null;
 }): ScheduleAnswer {
   if (input.sectionControlled === true) return { schedule: "schedule_2", controlled: true, from: "the invoice's own sections" };
+
+  const byClass = scheduleFromSupplierClass(input.supplierClass);
+  if (byClass !== null) return { schedule: byClass, controlled: byClass === "schedule_2", from: "the supplier's own class" };
 
   const directory = scheduleFromDea([input.directoryCode]);
   if (directory !== "unknown") {

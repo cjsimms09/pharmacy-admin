@@ -473,7 +473,20 @@ export async function register() {
           `, ${s2.stillShort} still short`,
       );
 
-      const { fillLineSchedules } = await import("./lib/line-schedule-backfill");
+      const { fillLineSchedules, correctLinesBySupplierClass } = await import("./lib/line-schedule-backfill");
+      /*
+       * The supplier's class first, because it corrects answers the fill below would never revisit:
+       * a Schedule V drug the FDA directory calls uncontrolled is not a blank, so filling blanks
+       * cannot reach it.
+       */
+      const byClass = await correctLinesBySupplierClass();
+      if (byClass.corrected > 0) {
+        await setSetting(
+          "line_schedules_class_result",
+          `${new Date().toISOString()}: ${byClass.corrected} line${byClass.corrected === 1 ? "" : "s"} put right by McKesson's own class — ` +
+            byClass.lines.slice(0, 5).map((l) => `${l.description ?? "?"} (${l.was ?? "blank"} → ${l.now})`).join("; "),
+        );
+      }
       const f = await fillLineSchedules();
       await setSetting(
         "line_schedules_backfill_result",

@@ -47,3 +47,32 @@ describe("what the FDA directory says about an invoice line", () => {
     assert.equal(look("99999999999"), null, "never seen is null");
   });
 });
+
+describe("McKesson's own class, above the FDA directory", () => {
+  test("cenobamate is Schedule V whatever the directory says", () => {
+    /*
+     * The line that proved the order matters. The directory lists the Xcopri titration pack with a
+     * blank schedule; McKesson prints E; cenobamate has been Schedule V since 2020.
+     */
+    const a = lineSchedule({ supplierClass: "E", directoryCode: directoryCodeOf("") });
+    assert.equal(a.schedule, "schedule_3_5");
+    assert.equal(a.from, "the supplier's own class");
+  });
+
+  test("X is Schedule II, R is not controlled", () => {
+    assert.equal(lineSchedule({ supplierClass: "X" }).schedule, "schedule_2");
+    assert.equal(lineSchedule({ supplierClass: "X" }).controlled, true);
+    assert.equal(lineSchedule({ supplierClass: "R" }).schedule, "none");
+  });
+
+  test("a blank or unseen class says nothing, and the directory answers instead", () => {
+    // Blank is over the counter, and pseudoephedrine is over the counter federally while some
+    // states schedule it. A letter nobody has seen yet is not guessed at either.
+    assert.equal(lineSchedule({ supplierClass: null, directoryCode: "CII" }).schedule, "schedule_2");
+    assert.equal(lineSchedule({ supplierClass: "Q", directoryCode: directoryCodeOf("") }).from, "the FDA directory");
+  });
+
+  test("the invoice's own printed Schedule II half still outranks the class", () => {
+    assert.equal(lineSchedule({ sectionControlled: true, supplierClass: "R" }).schedule, "schedule_2");
+  });
+});

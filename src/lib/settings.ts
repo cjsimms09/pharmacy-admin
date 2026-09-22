@@ -425,6 +425,7 @@ export const SETTING_KEYS = [
   "invoice_lines_backfill_result",
   /** What the nightly pass could newly say about lines already read: see line-schedule-backfill.ts. */
   "line_schedules_backfill_result",
+  "line_schedules_class_result",
   /**
    * The nightly re-read of invoices recorded as not adding up to their printed total.
    *

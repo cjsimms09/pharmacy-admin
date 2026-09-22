@@ -37,7 +37,7 @@ export async function fillLineSchedules(): Promise<{
   /* Only the lines that have never been answered; the rest are left exactly as they are. */
   const lines = await db.query.invoiceLines.findMany({
     where: and(isNull(schema.invoiceLines.deaSchedule), isNull(schema.invoiceLines.deaScheduleFrom)),
-    columns: { id: true, invoiceId: true, ndc11: true, controlled: true },
+    columns: { id: true, invoiceId: true, ndc11: true, controlled: true, supplier: true, itemClass: true },
   });
 
   /*
@@ -62,6 +62,7 @@ export async function fillLineSchedules(): Promise<{
     const number = numberOf.get(l.invoiceId) ?? null;
     const said = lineSchedule({
       sectionControlled: l.controlled,
+      supplierClass: /mckesson/i.test(l.supplier ?? "") ? l.itemClass : null,
       directoryCode: l.ndc11 ? directoryCodeOf(scheduleOf(l.ndc11)) : null,
       deliveryCodes: number ? codesByNumber.get(number) ?? null : null,
     });
@@ -77,4 +78,35 @@ export async function fillLineSchedules(): Promise<{
   }
 
   return { looked: lines.length, filled, bySource, stillSilent: lines.length - filled };
+}
+
+/**
+ * Put right the lines McKesson's own class contradicts.
+ *
+ * `fillLineSchedules` only fills blanks, which is right for every source but this one: the
+ * supplier's class outranks the FDA directory, and a line the directory answered wrongly is not
+ * blank. The Xcopri titration pack is the case — answered "not controlled" by the directory on the
+ * evening of 22 September 2026, when cenobamate is Schedule V and McKesson prints E against it.
+ *
+ * Only answers from a weaker source are replaced. A line answered by the invoice's own printed
+ * sections keeps that answer, because nothing is better placed than the page itself.
+ */
+export async function correctLinesBySupplierClass(): Promise<{ corrected: number; lines: { description: string | null; was: string | null; now: string }[] }> {
+  const { scheduleFromSupplierClass } = await import("./line-schedule");
+  const rows = await db.query.invoiceLines.findMany({
+    columns: { id: true, supplier: true, itemClass: true, deaSchedule: true, deaScheduleFrom: true, description: true },
+  });
+  const changed: { description: string | null; was: string | null; now: string }[] = [];
+  for (const l of rows) {
+    if (!/mckesson/i.test(l.supplier ?? "")) continue;
+    if (l.deaScheduleFrom === "the invoice's own sections" || l.deaScheduleFrom === "the supplier's own class") continue;
+    const byClass = scheduleFromSupplierClass(l.itemClass);
+    if (byClass === null || byClass === l.deaSchedule) continue;
+    await db
+      .update(schema.invoiceLines)
+      .set({ deaSchedule: byClass, deaScheduleFrom: "the supplier's own class", controlled: byClass === "schedule_2" })
+      .where(eq(schema.invoiceLines.id, l.id));
+    changed.push({ description: l.description, was: l.deaSchedule, now: byClass });
+  }
+  return { corrected: changed.length, lines: changed };
 }
