@@ -6,6 +6,7 @@ import { db, schema } from "@/db";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { newId } from "@/lib/crypto";
+import { storeFile } from "@/lib/files";
 import { getSettings } from "@/lib/settings";
 import { todayIso, fmt, fmtLong } from "@/lib/dates";
 import { PrintFrame } from "@/components/print";
@@ -75,6 +76,13 @@ export default async function PowerOfAttorneyPage({
     db.query.credentials.findMany({ where: eq(schema.credentials.type, "controlled_substance_poa") }),
   ]);
 
+  /* Which of those records has its signed page behind it, so the line can say which it is. */
+  const poaDocs = await db.query.documents.findMany({
+    where: eq(schema.documents.category, "controlled_substance_poa"),
+    columns: { id: true, credentialId: true },
+  });
+  const signedCopies = new Map(poaDocs.filter((d) => d.credentialId).map((d) => [d.credentialId as string, d.id]));
+
   const active = people.filter((p) => p.active);
   const attorney = to ? people.find((p) => p.id === to) : undefined;
   /*
@@ -96,6 +104,62 @@ export default async function PowerOfAttorneyPage({
       .join(", ") || "________________________________";
   const dea = s.pharmacy_dea || "____________________";
 
+  /**
+   * Stores the signed copy, where one was chosen, against the record it belongs to.
+   *
+   * The owner, 23 September 2026: "there isnt a wya for me to upload a signed POA that i just
+   * recorded". He was right. This page's button said "Record it" and did exactly that — who, from
+   * whom, what day — and then had nowhere to put the document itself. The one artefact a DEA
+   * inspector asks to see is the signed page, and the site kept everything about it except the page.
+   *
+   * Filed against both the person and the credential, so it is reachable from the staff record and
+   * from here. The paper original still belongs with the executed 222 forms; this is the copy that
+   * can be produced without going to the cabinet.
+   */
+  async function attachSigned(fd: FormData, opts: { credentialId: string; personId: string; personName: string; signedOn: string | null; userId: string }): Promise<boolean> {
+    const file = fd.get("file");
+    if (!(file instanceof File) || file.size === 0) return false;
+    const stored = await storeFile(file);
+    await db.insert(schema.documents).values({
+      id: newId(),
+      category: "controlled_substance_poa",
+      title: `Power of attorney for DEA order forms — ${opts.personName}`,
+      fileName: file.name.slice(0, 200),
+      mimeType: stored.mimeType,
+      sizeBytes: stored.sizeBytes,
+      sha256: stored.sha256,
+      storageKey: stored.storageKey,
+      personId: opts.personId,
+      credentialId: opts.credentialId,
+      effectiveOn: opts.signedOn,
+      uploadedBy: opts.userId,
+    });
+    return true;
+  }
+
+  /** Files the signed copy against a power of attorney already recorded. */
+  async function attachToExisting(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const credentialId = String(fd.get("credentialId") ?? "");
+    const here = "/inventory/power-of-attorney";
+    const cred = credentialId ? await db.query.credentials.findFirst({ where: eq(schema.credentials.id, credentialId) }) : null;
+    if (!cred?.personId) redirect(`${here}?error=` + encodeURIComponent("That power of attorney is no longer on file."));
+    const p = await db.query.people.findFirst({ where: eq(schema.people.id, cred.personId) });
+    const stored = await attachSigned(fd, {
+      credentialId,
+      personId: cred.personId,
+      personName: p ? `${p.firstName} ${p.lastName}` : "the attorney",
+      signedOn: cred.issuedOn ?? null,
+      userId: u.id,
+    });
+    if (!stored) redirect(`${here}?error=` + encodeURIComponent("Choose the signed file first."));
+    await audit({ action: "cs.poa.document", userId: u.id, userName: u.name, entity: "person", entityId: cred.personId });
+    revalidatePath(here);
+    revalidatePath(`/staff/${cred.personId}`);
+    redirect(`${here}?ok=` + encodeURIComponent("The signed copy is filed against that power of attorney."));
+  }
+
   /** Files the signed power of attorney against the person it names. */
   async function record(fd: FormData) {
     "use server";
@@ -107,8 +171,9 @@ export default async function PowerOfAttorneyPage({
     if (!personId) redirect(`${here}&error=` + encodeURIComponent("Choose who it was granted to."));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(signedOn)) redirect(`${here}&error=` + encodeURIComponent("Put in the date it was signed."));
 
+    const id = newId();
     await db.insert(schema.credentials).values({
-      id: newId(),
+      id,
       personId,
       type: "controlled_substance_poa",
       issuer: by || null,
@@ -117,6 +182,14 @@ export default async function PowerOfAttorneyPage({
         `Power of attorney for DEA order forms, granted by ${by || "the registrant"} on ${signedOn}. ` +
         `Filed with the executed Forms 222. Remains in force until revoked in writing.`,
     });
+    const person = await db.query.people.findFirst({ where: eq(schema.people.id, personId) });
+    const filed = await attachSigned(fd, {
+      credentialId: id,
+      personId,
+      personName: person ? `${person.firstName} ${person.lastName}` : "the attorney",
+      signedOn: signedOn,
+      userId: u.id,
+    });
     await audit({ action: "cs.poa.record", userId: u.id, userName: u.name, entity: "person", entityId: personId });
     revalidatePath("/inventory/power-of-attorney");
     revalidatePath(`/staff/${personId}`);
@@ -124,7 +197,10 @@ export default async function PowerOfAttorneyPage({
     redirect(
       `${here}&ok=` +
         encodeURIComponent(
-          "Recorded. File the signed original with your executed 222 forms — not in a personnel file — and revoke it in writing the day they leave.",
+          (filed
+            ? "Recorded, and the signed copy is filed against it. "
+            : "Recorded. No signed copy was attached — you can add one from the list below at any time. ") +
+            "File the signed original with your executed 222 forms — not in a personnel file — and revoke it in writing the day they leave.",
         ),
     );
   }
@@ -303,6 +379,15 @@ export default async function PowerOfAttorneyPage({
           </Field>
           <Field label="Signed on"><input name="signedOn" type="date" defaultValue={todayIso()} className="field" /></Field>
           <Field label="Granted by"><input name="grantedBy" defaultValue={grantorName} className="field" /></Field>
+          <div className="sm:col-span-3">
+            <Field label="The signed copy, if you have it to hand">
+              <input name="file" type="file" className="field" />
+            </Field>
+            <p className="mt-1 text-xs text-ink-3">
+              A scan or a photograph. Optional — the record stands without it — and it can be added later. The paper
+              original still belongs with your executed 222 forms.
+            </p>
+          </div>
           <div className="sm:col-span-3"><button className="btn btn-primary">Record it</button></div>
         </form>
 
@@ -324,6 +409,28 @@ export default async function PowerOfAttorneyPage({
                           Print the revocation
                         </Link>
                       </>
+                    )}
+                    {/*
+                      * The signed page itself, or a way to put it here.
+                      *
+                      * A record with no document is the state this page used to leave everything in.
+                      * Saying which of the two it is, on the line itself, is what makes the gap
+                      * visible instead of something to be discovered at an inspection.
+                      */}
+                    {signedCopies.get(c.id) ? (
+                      <>
+                        {" — "}
+                        <a href={`/files/${signedCopies.get(c.id)}`} target="_blank" rel="noreferrer" className="underline">
+                          the signed copy is on file
+                        </a>
+                      </>
+                    ) : (
+                      <form action={attachToExisting} className="mt-1 flex flex-wrap items-center gap-2">
+                        <input type="hidden" name="credentialId" value={c.id} />
+                        <span className="text-ink-3">No signed copy on file.</span>
+                        <input name="file" type="file" className="field" />
+                        <button className="btn btn-sm">Attach it</button>
+                      </form>
                     )}
                   </li>
                 );
