@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { isPseudoephedrine, stateScheduleOf, higherSchedule } from "../src/lib/state-schedule";
+import { isPseudoephedrine, isEphedrine, stateScheduleOf, higherSchedule } from "../src/lib/state-schedule";
 
 /** "Yes we treat like schedule 5" — the owner, on pseudoephedrine, 22 September 2026. */
 describe("pseudoephedrine is Schedule V in this pharmacy", () => {
@@ -37,5 +37,34 @@ describe("the rule only ever raises", () => {
     assert.equal(higherSchedule(null, "none"), "none");
     assert.equal(higherSchedule("unknown", "schedule_3_5"), "schedule_3_5");
     assert.equal(higherSchedule(null, null), null);
+  });
+});
+
+/** "Ephedrine is the same" — the owner, 23 September 2026. */
+describe("ephedrine is Schedule V here too", () => {
+  test("caught by the directory's ingredients and by the brand that hides it", () => {
+    assert.equal(isEphedrine({ substances: "EPHEDRINE SULFATE" }), true);
+    assert.equal(isEphedrine({ substances: "EPHEDRINE HYDROCHLORIDE" }), true);
+    assert.equal(isEphedrine({ description: "BRONKAID CAPLETS 24CT" }), true);
+    assert.equal(stateScheduleOf({ substances: "EPHEDRINE SULFATE 25MG" }), "schedule_3_5");
+  });
+
+  test("epinephrine is NOT ephedrine, and an EpiPen is not a controlled substance", () => {
+    /*
+     * The one mistake this rule could make that would be worse than the one it prevents. Adrenaline
+     * is not scheduled anywhere, and filing it with the Schedule V records would be an error created
+     * by a guard against error.
+     */
+    for (const s of ["EPINEPHRINE", "EPINEPHRINE BITARTRATE", "RACEPINEPHRINE"]) {
+      assert.equal(isEphedrine({ substances: s }), false, s);
+      assert.equal(stateScheduleOf({ substances: s }), null, s);
+    }
+    for (const d of ["EPIPEN 2-PAK 0.3MG", "PRIMATENE MIST INHALER", "EPINEPHRINE INJ 1MG/ML"]) {
+      assert.equal(stateScheduleOf({ description: d }), null, d);
+    }
+  });
+
+  test("pseudoephedrine is still caught once, not twice over", () => {
+    assert.equal(stateScheduleOf({ substances: "PSEUDOEPHEDRINE HYDROCHLORIDE" }), "schedule_3_5");
   });
 });

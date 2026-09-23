@@ -34,9 +34,29 @@ export function isPseudoephedrine(input: { substances?: string | null; descripti
   return false;
 }
 
+/**
+ * Whether a line is an ephedrine product. The owner, 23 September 2026: "Ephedrine is the same".
+ *
+ * Kansas regulates ephedrine alongside pseudoephedrine, and the directory registers 47 packages of
+ * it — EPHEDRINE SULFATE and EPHEDRINE HYDROCHLORIDE — none of which this pharmacy has bought yet.
+ * The rule is written now so the first one is filed right on the day it arrives.
+ *
+ * The word is bounded on purpose, and this is the whole difficulty of the test. "Pseudoephedrine"
+ * contains it but is already caught above. **Epinephrine does not contain it** and must never be
+ * caught: an EpiPen is not a controlled substance, and filing adrenaline with the Schedule V
+ * records would be a real error made by a rule meant to prevent one. Bronkaid is named because it
+ * is ephedrine sulfate under a brand that does not say so. Primatene is deliberately NOT named:
+ * Primatene Mist is epinephrine.
+ */
+export function isEphedrine(input: { substances?: string | null; description?: string | null }): boolean {
+  const where = `${input.substances ?? ""} ${input.description ?? ""}`.toUpperCase();
+  if (/\bEPHEDRINE\b/.test(where)) return true;
+  return /\bBRONKAID\b/.test(where);
+}
+
 /** The schedule the state rule puts a line at, or null where it has nothing to say. */
 export function stateScheduleOf(input: { substances?: string | null; description?: string | null }): "schedule_3_5" | null {
-  return isPseudoephedrine(input) ? "schedule_3_5" : null;
+  return isPseudoephedrine(input) || isEphedrine(input) ? "schedule_3_5" : null;
 }
 
 const RANK: Record<string, number> = { none: 0, schedule_3_5: 1, schedule_2: 2 };
