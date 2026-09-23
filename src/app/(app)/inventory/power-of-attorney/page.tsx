@@ -63,6 +63,39 @@ const CAPACITY_LABEL: Record<Capacity, string> = {
   officer: "An officer of the registrant — the pharmacy is owned by a corporation or similar entity",
 };
 
+/**
+ * Stores the signed copy, where one was chosen, against the record it belongs to.
+ *
+ * The owner, 23 September 2026: "there isnt a wya for me to upload a signed POA that i just
+ * recorded". He was right. This page's button said "Record it" and did exactly that — who, from
+ * whom, what day — and then had nowhere to put the document itself. The one artefact a DEA
+ * inspector asks to see is the signed page, and the site kept everything about it except the page.
+ *
+ * Filed against both the person and the credential, so it is reachable from the staff record and
+ * from here. The paper original still belongs with the executed 222 forms; this is the copy that
+ * can be produced without going to the cabinet.
+ */
+async function attachSigned(fd: FormData, opts: { credentialId: string; personId: string; personName: string; signedOn: string | null; userId: string }): Promise<boolean> {
+  const file = fd.get("file");
+  if (!(file instanceof File) || file.size === 0) return false;
+  const stored = await storeFile(file);
+  await db.insert(schema.documents).values({
+    id: newId(),
+    category: "controlled_substance_poa",
+    title: `Power of attorney for DEA order forms — ${opts.personName}`,
+    fileName: file.name.slice(0, 200),
+    mimeType: stored.mimeType,
+    sizeBytes: stored.sizeBytes,
+    sha256: stored.sha256,
+    storageKey: stored.storageKey,
+    personId: opts.personId,
+    credentialId: opts.credentialId,
+    effectiveOn: opts.signedOn,
+    uploadedBy: opts.userId,
+  });
+  return true;
+}
+
 export default async function PowerOfAttorneyPage({
   searchParams,
 }: {
@@ -104,38 +137,6 @@ export default async function PowerOfAttorneyPage({
       .join(", ") || "________________________________";
   const dea = s.pharmacy_dea || "____________________";
 
-  /**
-   * Stores the signed copy, where one was chosen, against the record it belongs to.
-   *
-   * The owner, 23 September 2026: "there isnt a wya for me to upload a signed POA that i just
-   * recorded". He was right. This page's button said "Record it" and did exactly that — who, from
-   * whom, what day — and then had nowhere to put the document itself. The one artefact a DEA
-   * inspector asks to see is the signed page, and the site kept everything about it except the page.
-   *
-   * Filed against both the person and the credential, so it is reachable from the staff record and
-   * from here. The paper original still belongs with the executed 222 forms; this is the copy that
-   * can be produced without going to the cabinet.
-   */
-  async function attachSigned(fd: FormData, opts: { credentialId: string; personId: string; personName: string; signedOn: string | null; userId: string }): Promise<boolean> {
-    const file = fd.get("file");
-    if (!(file instanceof File) || file.size === 0) return false;
-    const stored = await storeFile(file);
-    await db.insert(schema.documents).values({
-      id: newId(),
-      category: "controlled_substance_poa",
-      title: `Power of attorney for DEA order forms — ${opts.personName}`,
-      fileName: file.name.slice(0, 200),
-      mimeType: stored.mimeType,
-      sizeBytes: stored.sizeBytes,
-      sha256: stored.sha256,
-      storageKey: stored.storageKey,
-      personId: opts.personId,
-      credentialId: opts.credentialId,
-      effectiveOn: opts.signedOn,
-      uploadedBy: opts.userId,
-    });
-    return true;
-  }
 
   /** Files the signed copy against a power of attorney already recorded. */
   async function attachToExisting(fd: FormData) {
