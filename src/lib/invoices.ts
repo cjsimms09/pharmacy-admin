@@ -3068,7 +3068,8 @@ export async function storeInvoiceLines(
    */
   const { lineSchedule, directoryCodeOf } = await import("./line-schedule");
   const { ndcSchedules } = await import("./drug-directory-store");
-  const scheduleOf = await ndcSchedules();
+  /* Only this invoice's own NDCs: a few dozen, rather than the directory's 217,773. */
+  const scheduleOf = await ndcSchedules(parsed.lines.map((l) => l.ndc11).filter((n): n is string => !!n));
   const deliveryRow = meta.invoiceNumber
     ? await db.query.pioneerPurchases.findFirst({ where: eq(schema.pioneerPurchases.invoiceNumber, meta.invoiceNumber), columns: { deaSchedules: true } })
     : null;

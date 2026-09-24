@@ -1,5 +1,6 @@
 import "server-only";
 import { db, schema } from "@/db";
+import { inArray } from "drizzle-orm";
 import { readZip } from "./zip-read";
 import { parseDirectoryProducts, parseDirectoryPackages, parseOrangeBook, buildDirectory, packageUnits, fdaClassification, type DrugDirectoryRow } from "./drug-directory";
 import { newId } from "./crypto";
@@ -498,8 +499,26 @@ export async function knownNdcs(): Promise<(ndc11: string) => boolean> {
  * It answers for the lines the directory lists and declines for everything else — a device, a front-end item, a
  * repackager's code — which is 43 of this pharmacy's 54 invoices, and declining is the honest half of the answer.
  */
-export async function ndcSchedules(): Promise<(ndc11: string) => string | null> {
-  const rows = await db.query.drugDirectory.findMany({ columns: { ndc11: true, deaSchedule: true } });
+export async function ndcSchedules(only?: string[]): Promise<(ndc11: string) => string | null> {
+  /*
+   * Ask for the NDCs wanted, not for the whole directory.
+   *
+   * This read every one of its 217,773 rows and built a Map of them on every call: 4.6 seconds
+   * cold, 1.4 warm, and a couple of hundred megabytes held while it lasted. Both callers want a
+   * few dozen NDCs — the lines of one invoice, or the handful the nightly backfill cannot place.
+   *
+   * It mattered beyond the seconds. The pharmacy computer has 7.1 GB and had 1.3 GB free with the
+   * site holding 1.35 GB of it, so the whole machine was paging and every page was slow whatever
+   * its own query cost. The owner, 24 September 2026: "every button takes 5-10 seconds or longer".
+   *
+   * Called with no list it still reads everything, because that is what "answer for any NDC" needs
+   * and no caller does it today.
+   */
+  const wanted = [...new Set((only ?? []).map((n) => String(n ?? "").trim()).filter(Boolean))];
+  const rows = await db.query.drugDirectory.findMany({
+    columns: { ndc11: true, deaSchedule: true },
+    ...(wanted.length > 0 ? { where: inArray(schema.drugDirectory.ndc11, wanted) } : {}),
+  });
   return scheduleLookup(rows);
 }
 

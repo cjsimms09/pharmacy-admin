@@ -31,14 +31,15 @@ export async function fillLineSchedules(): Promise<{
   bySource: Record<string, number>;
   stillSilent: number;
 }> {
-  const { ndcSchedules } = await import("./drug-directory-store");
-  const scheduleOf = await ndcSchedules();
-
   /* Only the lines that have never been answered; the rest are left exactly as they are. */
   const lines = await db.query.invoiceLines.findMany({
     where: and(isNull(schema.invoiceLines.deaSchedule), isNull(schema.invoiceLines.deaScheduleFrom)),
     columns: { id: true, invoiceId: true, ndc11: true, controlled: true, supplier: true, itemClass: true },
   });
+
+  /* Asked for the handful of NDCs still unanswered, not for the whole directory. */
+  const { ndcSchedules } = await import("./drug-directory-store");
+  const scheduleOf = await ndcSchedules(lines.map((l) => l.ndc11).filter((n): n is string => !!n));
 
   /*
    * The deliveries, once, keyed by the wholesaler's own invoice number.
