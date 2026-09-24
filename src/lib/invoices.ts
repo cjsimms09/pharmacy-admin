@@ -120,10 +120,49 @@ export async function scheduleFromPioneer(invoiceNumber: string | null | undefin
  */
 export async function scheduleFromInvoiceLines(invoiceId: string): Promise<{ schedule: InvoiceSchedule; basis: string } | null> {
   const lines = await db
-    .select({ ndc11: schema.invoiceLines.ndc11 })
+    .select({ ndc11: schema.invoiceLines.ndc11, itemClass: schema.invoiceLines.itemClass, supplier: schema.invoiceLines.supplier })
     .from(schema.invoiceLines)
     .where(eq(schema.invoiceLines.invoiceId, invoiceId));
   if (lines.length === 0) return null;
+
+  /*
+   * McKesson's own class first, because it is the supplier's statement about what it shipped.
+   *
+   * The directory route below gives up the moment one NDC is not listed, and the FDA lists drugs —
+   * not vitamins, not pen needles, not a sharps container. So an invoice for a single box of
+   * Tylenol could be answered by nothing at all, stayed "unknown", filed with the Schedule II
+   * records and asked the owner what was on it. Fourteen invoices had to be answered by hand that
+   * way, nearly every one of them a single over-the-counter line. He put it plainly on 24 September
+   * 2026: "i have to make them all 'this is an invoice' and tell it whats on it everytime.. its
+   * annoying".
+   *
+   * PioneerRx cannot help here, which was his first suggestion and a good one: over-the-counter
+   * merchandise is never booked into the drug file, so there is no receiving record to consult.
+   *
+   * The class is: X on all 81 Schedule II lines this pharmacy has bought, B, D or E on every
+   * Schedule III-V line, R on 566 prescription lines none of which is controlled, and blank on
+   * over-the-counter goods. No controlled line has ever carried a blank. So an invoice whose lines
+   * are all blank or R carries nothing controlled — and pseudoephedrine, which is blank and IS
+   * controlled in this state, is raised afterwards by the state rule rather than relied on here.
+   */
+  const byClass = ((): { schedule: InvoiceSchedule; basis: string } | null => {
+    if (!lines.every((l) => /mckesson/i.test(l.supplier ?? ""))) return null;
+    const classes = lines.map((l) => String(l.itemClass ?? "").trim().toUpperCase());
+    if (!classes.every((c) => c === "" || c === "R" || c === "X" || c === "B" || c === "D" || c === "E")) return null;
+    const schedule: InvoiceSchedule = classes.includes("X")
+      ? "schedule_2"
+      : classes.some((c) => c === "B" || c === "D" || c === "E")
+        ? "schedule_3_5"
+        : "none";
+    const named = classes.filter((c) => c !== "");
+    return {
+      schedule,
+      basis:
+        `McKesson prints an item class against every line, and on this invoice ${named.length === 0 ? "every line is blank, its class for over-the-counter goods" : `the classes are ${[...new Set(named)].join(", ")}`}. ` +
+        `Filed on that. The class is the supplier's own statement about what it shipped.`,
+    };
+  })();
+  if (byClass) return byClass;
 
   const ndcs = lines.map((l) => l.ndc11).filter((n): n is string => !!n);
   // A line with no NDC is a line nobody can classify, so the invoice is not settled here.
@@ -4006,7 +4045,29 @@ export async function applyStateScheduleAndRaise(invoiceId: string, user = "the 
     where: eq(schema.supplierInvoices.id, invoiceId),
     columns: { id: true, invoiceNumber: true, schedule: true, reviewedAt: true, documentId: true, basis: true },
   });
-  if (!inv || inv.schedule === "unknown") return { linesRaised, raisedTo: null, heldBack: false };
+  if (!inv) return { linesRaised, raisedTo: null, heldBack: false };
+
+  /*
+   * An invoice nobody could place is settled here if its lines can now place it.
+   *
+   * "Unknown" files with the Schedule II records and asks a person what is on it, which is the
+   * right caution and the wrong outcome when the answer is written on the invoice. Only where
+   * nobody has answered already.
+   */
+  if (inv.schedule === "unknown" && !inv.reviewedAt) {
+    const said = await scheduleFromInvoiceLines(invoiceId);
+    if (said) {
+      const f = FILING[said.schedule];
+      if (inv.documentId) await db.update(schema.documents).set({ category: f.category }).where(eq(schema.documents.id, inv.documentId));
+      await db
+        .update(schema.supplierInvoices)
+        .set({ schedule: said.schedule, needsReview: false, basis: `${inv.basis ?? ""} ${said.basis} Filed as ${f.label} on ${todayIso()} without anyone having to look.`.trim() })
+        .where(eq(schema.supplierInvoices.id, invoiceId));
+      await audit({ action: "invoice.schedule.from_lines", userId: "system", userName: user, entity: "invoice", entityId: invoiceId, details: `${inv.invoiceNumber ?? invoiceId}: unknown -> ${said.schedule}` });
+      inv.schedule = said.schedule;
+    }
+  }
+  if (inv.schedule === "unknown") return { linesRaised, raisedTo: null, heldBack: false };
   let top: string | null = null;
   for (const l of lines) top = higherSchedule(top, l.deaSchedule);
   const target = higherSchedule<string>(inv.schedule, top) as InvoiceSchedule | null;
