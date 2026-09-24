@@ -400,6 +400,24 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
     by.set(k, [...(by.get(k) ?? []), c]);
   }
 
+  /*
+   * The later payments, indexed by the fill they belong to, once.
+   *
+   * This loop used to scan every payment for every fill and rebuild the key each time: about 4,500
+   * fills against 13,300 payments is sixty million key builds, and it was four and a half seconds
+   * of a five-second page. The owner, 24 September 2026: "every button takes 5-10 seconds or longer
+   * to load.. it cant be that way".
+   *
+   * Same key, same function, same answer — computed 13,300 times instead of sixty million.
+   */
+  const laterByKey = new Map<string, LaterPayment[]>();
+  for (const p of later) {
+    const k = fillKey({ rxNumber: p.rxNumber, fillNumber: p.fillNumber, dateFilled: p.dateFilled ?? "", ndc11: p.ndc11 });
+    const at = laterByKey.get(k);
+    if (at) at.push(p);
+    else laterByKey.set(k, [p]);
+  }
+
   const out: Fill[] = [];
   for (const [key, rows] of by) {
     const payers: FillPayer[] = rows.map((r) => ({
@@ -561,7 +579,7 @@ export function groupIntoFills(claims: ClaimRow[], later: LaterPayment[] = []): 
      * to have given it, and it may arrive for a fill that went to two payers. Matching on the fill
      * is the only join that holds.
      */
-    const mine = later.filter((p) => fillKey({ rxNumber: p.rxNumber, fillNumber: p.fillNumber, dateFilled: p.dateFilled ?? "", ndc11: p.ndc11 }) === key);
+    const mine = laterByKey.get(key) ?? [];
     const laterPaymentsCents = mine.reduce((n, p) => n + p.amountCents, 0);
 
     const revenueCents = remitCents + patientPaidCents + laterPaymentsCents;
