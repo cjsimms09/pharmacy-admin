@@ -57,6 +57,40 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
   const from = `${month}-01`;
   const to = `${month}-31`;
 
+  /* ── 0. The remittances themselves ─────────────────────────────── */
+  /*
+   * The accrual half of the same portal trip, and the one nothing else can supply.
+   *
+   * The payment report below says what was deposited; this says what each claim was paid. Both are
+   * exported from the same screen minutes apart, and pulling one without the other is how September
+   * ended with the money banked and no claim knowing what it earned — or the reverse.
+   *
+   * Judged on the register rather than on a document, because the register is what the rest of the
+   * site reads: check 10 compares it against banked cash, and it can only see as far as the last
+   * export. A month with no rows in it is a month that check is passing over in silence.
+   */
+  const remits = await db.query.remittanceRegister.findMany({
+    where: and(gte(schema.remittanceRegister.remitOn, from), lte(schema.remittanceRegister.remitOn, to)),
+    columns: { amountCents: true, paymentNumber: true },
+  });
+  const remitCents = remits.reduce((n, r) => n + r.amountCents, 0);
+  const unmatched = remits.filter((r) => !r.paymentNumber).length;
+  items.push({
+    key: "provider_pay_remits",
+    name: "ProviderPay remittances — Remit Summary and Remit Detail",
+    why:
+      "What every claim was actually paid, which is the accrual side of the month and the only source for it. " +
+      "Take both: the detail carries the claim lines and the summary is what each remittance is checked against. " +
+      "Without them the month's claims show as billed and never as paid.",
+    from: "the ProviderPay portal: Data management → Remittances, search the whole month, select all, then Export → Remit Summary and Export → Remit Detail",
+    done: remits.length > 0,
+    says:
+      remits.length > 0
+        ? `${remits.length} remittances, ${money(remitCents)}${unmatched > 0 ? `, ${unmatched} not yet matched to a deposit by ProviderPay` : ""}`
+        : "no claim from this month knows what it was paid",
+    cents: remitCents || null,
+  });
+
   /* ── 1. The PSAO's payment report ──────────────────────────────── */
   const { payerPaymentsFor } = await import("./payer-payments-store");
   const payer = await payerPaymentsFor(month);
@@ -66,7 +100,7 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
     why:
       "The largest thing on the cash account by a wide margin, and the only file that says which payer sent what. " +
       "Until it is in, none of the month's payer money is on the account at all.",
-    from: "the ProviderPay portal, for the whole month",
+    from: "the ProviderPay portal: Data management → Payments, search the whole month, select all, then Export",
     done: payer.payments > 0,
     says: payer.payments > 0 ? `${payer.payments} payments, ${money(payer.cents)}` : "nothing of the month's payer money is on the account",
     cents: payer.cents || null,
@@ -83,7 +117,7 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
     why:
       "The other side of the same account: what each payer paid in, and what was swept across to the operating account. " +
       "It is what proves the deposits on the bank statement are the payments on the report and not more money.",
-    from: "the ProviderPay portal, same place as the payment report",
+    from: "the ProviderPay portal: Account summary → look up the TIN → Wells Fargo account → View history, then Export",
     done: ppAccount.length > 0,
     says: ppAccount.length > 0 ? `filed` : "the sweeps cannot be tied to the deposits",
     cents: null,
