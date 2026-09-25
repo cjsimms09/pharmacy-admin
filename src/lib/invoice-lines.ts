@@ -27,7 +27,8 @@
 import { salesTaxOnInvoice } from "./invoice-tax";
 
 export type InvoiceLineRead = {
-  ndc11: string;
+  /** The NDC, where the invoice printed one. Null where the line carries only an item number. */
+  ndc11: string | null;
   description: string | null;
   /** The supplier's own catalogue number for the item, where the invoice prints one. */
   itemNumber: string | null;
@@ -276,8 +277,20 @@ const IPC_CREDIT = new RegExp(
  * The extension is optional here for the same reason it is on the named form below: IPD leaves it off some lines
  * entirely, and where it does, the line's own arithmetic supplies it and the section subtotal proves it.
  */
+/*
+ * The run can be an item number alone, with no NDC behind it.
+ *
+ * IPD 1018194, 24 September 2026: `1435700 1 0EACH 239.99  0  239.99` — EPINEPHRINE, seven digits
+ * where every other line on the page carries sixteen. Requiring eleven meant this line did not
+ * match at all, so it was not read AND not counted as unreadable: the invoice reported four lines,
+ * nought unread, and $239.99 short of its own printed total.
+ *
+ * Five digits is enough of a floor because nothing else here is doing the work of recognising the
+ * row. What follows it has to be a quantity, a back-order quantity run onto a unit of measure, a
+ * price and a discount, in that order, and no prose on this page does that.
+ */
 const IPD = new RegExp(
-  String.raw`^(\d{11,})` + // item number and NDC, run together, or the NDC on its own
+  String.raw`^(\d{5,})` + // item number and NDC, run together, or the item number on its own
     String.raw`\s+(\d+)` + // quantity shipped
     String.raw`\s+(\d+)([A-Z]{2,6})` + // back-ordered quantity, then the unit of measure, run together
     String.raw`\s+(${MONEY})` + // unit price
@@ -658,11 +671,21 @@ export function parseInvoiceLines(
       const extendedCents = ext ? money(ext) : quantity * unitCostCents;
       // How many digits of the run the NDC column actually took, asked rather than assumed: on one
       // line of IPD 1008931 it printed nine and taking eleven ate two digits of the item number.
-      const read = ndcFromRun(run, known, packagesOf);
-      const key = read.printed === 11 ? ndc11(read.code) : read.code;
+      /*
+       * A run too short to hold an NDC is an item number, and that is a fact rather than a failure.
+       *
+       * The shortest NDC this reader accepts is nine digits, so a run below that cannot contain one
+       * however it is cut. Such a line keeps no NDC — nothing is invented for it — and is still
+       * read, because its money is on the invoice whether or not the product has a code. A longer
+       * run that yields no NDC is a different thing and is still refused: there the digits are
+       * there and could not be made sense of.
+       */
+      const noNdcPrinted = run.length < 9;
+      const read = noNdcPrinted ? { code: null as string | null, printed: 0 } : ndcFromRun(run, known, packagesOf);
+      const key = read.code === null ? null : read.printed === 11 ? ndc11(read.code) : read.code;
       // The line's own arithmetic, as everywhere else here: a description that ran into the digits
       // would otherwise shift every field along it and the wrong cost would look entirely ordinary.
-      if (!key || !lineAddsUp(quantity, unitCostCents, extendedCents)) {
+      if ((!key && !noNdcPrinted) || !lineAddsUp(quantity, unitCostCents, extendedCents)) {
         unreadable.push(line.slice(0, 200));
         continue;
       }

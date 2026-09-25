@@ -49,7 +49,8 @@ async function main() {
   let leftAlone = 0;
   let cents = 0;
   for (const l of lines) {
-    if (known(l.ndc11)) continue;
+    // A line with no NDC has no code to repair.
+    if (!l.ndc11 || known(l.ndc11)) continue;
     const resolved = ndcFromUpc(l.ndc11, known);
     if (!resolved || resolved === l.ndc11) {
       leftAlone++;

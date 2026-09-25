@@ -283,7 +283,8 @@ export async function returnsDueNow(): Promise<{ rows: ReturnCandidate[]; suppli
     else without.push(s.name);
   }
 
-  const withIds = lines.map((l) => ({
+  /* Returns are asked of a product, so a line with no NDC is not one this can answer for. */
+  const withIds = lines.filter((l): l is typeof l & { ndc11: string } => !!l.ndc11).map((l) => ({
     ndc11: l.ndc11,
     description: l.description,
     supplier: l.supplier,

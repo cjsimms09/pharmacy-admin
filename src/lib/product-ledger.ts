@@ -600,7 +600,8 @@ async function loadProductLedger(): Promise<{ rows: LedgerRow[]; rate: number | 
   });
 
   const rows = buildLedger({
-    invoiceLines: lines,
+    /* Per product, so a line carrying only an item number has no product to be about. */
+    invoiceLines: lines.filter((l): l is typeof l & { ndc11: string } => !!l.ndc11),
     receiptLines,
     packFallback: shelf,
     catalogue: catalogue.map((c) => ({

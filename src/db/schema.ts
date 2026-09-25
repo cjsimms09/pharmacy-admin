@@ -904,7 +904,8 @@ export const invoiceLines = sqliteTable(
     supplierId: text("supplier_id"),
     /** The date on the invoice, copied here so a price can be placed in time without a join. */
     invoiceDate: text("invoice_date"),
-    ndc11: text("ndc11").notNull(),
+    /** The NDC, where the invoice printed one. Null where the line carries only an item number, which IPD prints for some items. */
+    ndc11: text("ndc11"),
     description: text("description"),
     itemNumber: text("item_number"),
     quantity: integer("quantity").notNull(),

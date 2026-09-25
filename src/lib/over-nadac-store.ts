@@ -61,7 +61,8 @@ async function loadOverNadac(days: number, to: string): Promise<OverNadac> {
   }
 
   return overNadac({
-    lines: lines.map((l) => ({ ndc11: l.ndc11, supplier: l.supplier, description: l.description, itemNumber: l.itemNumber, invoiceDate: l.invoiceDate, packs: l.quantity, packCostCents: l.unitCostCents, rebated: l.rebated })),
+    /* A line with no NDC cannot be compared with a NADAC price, because NADAC is keyed on one. */
+    lines: lines.filter((l): l is typeof l & { ndc11: string } => !!l.ndc11).map((l) => ({ ndc11: l.ndc11, supplier: l.supplier, description: l.description, itemNumber: l.itemNumber, invoiceDate: l.invoiceDate, packs: l.quantity, packCostCents: l.unitCostCents, rebated: l.rebated })),
     packQtyOf: (ndc) => packOf.get(ndc) ?? null,
     nadac: nadacMap,
     rateOf: (s) => (s ? rates[s.trim().toLowerCase()] ?? null : null),

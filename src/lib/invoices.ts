@@ -3096,7 +3096,7 @@ export async function storeInvoiceLines(
       const said = lineSchedule({
         sectionControlled: l.controlled,
         supplierClass: /mckesson/i.test(meta.supplier ?? "") ? l.itemClass : null,
-        directoryCode: directoryCodeOf(scheduleOf(l.ndc11)),
+        directoryCode: l.ndc11 ? directoryCodeOf(scheduleOf(l.ndc11)) : null,
         deliveryCodes,
       });
       return { controlled: said.controlled, deaSchedule: said.schedule, deaScheduleFrom: said.from };
