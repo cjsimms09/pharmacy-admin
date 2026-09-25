@@ -27,6 +27,7 @@ import { allSuppliers, supplierForSender } from "./suppliers-registry";
 import { loadNadacFiles, nadacDir } from "./nadac";
 import { gateFile } from "./phi-gate";
 import { pdfText } from "./pdf-text";
+import { readPrintedBillTotal } from "./bill-total";
 import { audit } from "./audit";
 import { matchTrainingReplies, completeByEmailReply } from "./training-replies";
 import { matchCertificateReply, fileCertificateReply } from "./credential-requests";
@@ -1188,19 +1189,40 @@ export async function importRecognised(
        */
       const v = (await vendorBill(from))!;
       const { saveExpense } = await import("./expenses");
+      /*
+       * Where the page proves its own total, take it and book it.
+       *
+       * The paragraph above is about an UNPROVEN total, and it is right about those. A page that
+       * prints a subtotal, a tax and a total which add up has done the arithmetic in the open, and
+       * a confirmation adds nothing to it — it only moves the month's books behind somebody
+       * remembering. The owner, on being asked to confirm the PioneerRx bill: "why do I need to
+       * confirm it". He did not, and $2,180.48 a month was waiting on him for no reason.
+       *
+       * Anything the page does not prove still waits, which is most bills: `readPrintedBillTotal`
+       * refuses a lone total, a mismatch and a penny out alike.
+       */
+      const proven = (() => {
+        try {
+          return /\.pdf$/i.test(fileName) ? readPrintedBillTotal(pdfText(buf)) : null;
+        } catch {
+          return null;
+        }
+      })();
       await saveExpense({
         vendorId: v.id,
         categoryId: v.categoryId,
         // The day it arrived, until somebody reads the bill and says otherwise.
         invoiceDate: new Date().toISOString().slice(0, 10),
-        amountCents: v.typicalCents ?? 1,
+        amountCents: proven ? proven.totalCents : v.typicalCents ?? 1,
         description: subject || fileName,
         documentId: filed?.documentId ?? null,
-        status: "draft",
+        status: proven ? "confirmed" : "draft",
         source: "email",
         createdBy: ctx.userName ?? "mailbox-sweep",
       });
-      routeResult = `A bill from ${v.name}, filed as a draft under ${v.categoryId ? "its usual category" : "no category yet"}. Nothing counts on the month until somebody confirms the amount — reading a total off a PDF is a guess with a number attached.`;
+      routeResult = proven
+        ? `A bill from ${v.name} for ${money(proven.totalCents)}, booked under ${v.categoryId ? "its usual category" : "no category yet"}. ${proven.says} Nothing was assumed, so nothing waits for anybody.`
+        : `A bill from ${v.name}, filed as a draft under ${v.categoryId ? "its usual category" : "no category yet"}. Nothing counts on the month until somebody confirms the amount — the page does not prove its own total, and reading one off a PDF is a guess with a number attached.`;
       imported = true;
     } else if (cls.kind === "rxrescue_credit") {
       /*
@@ -1660,20 +1682,24 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
   const vendor = vendorForSender(from, await vendors());
   if (vendor) {
     const { saveExpense } = await import("./expenses");
+    /* The page's own total where it proves it, exactly as the sweep does. See `bill-total.ts`. */
+    const proven = words ? readPrintedBillTotal(words) : null;
     await saveExpense({
       vendorId: vendor.id,
       categoryId: vendor.categoryId,
       invoiceDate: new Date().toISOString().slice(0, 10),
-      amountCents: vendor.typicalCents ?? 1,
+      amountCents: proven ? proven.totalCents : vendor.typicalCents ?? 1,
       description: subject || fileName,
       documentId: doc.id,
-      status: "draft",
+      status: proven ? "confirmed" : "draft",
       source: "email",
       createdBy: ctx.userName,
     });
-    const text =
-      `Read again ${stamp}: a bill from ${vendor.name}, filed as a draft under ` +
-      `${vendor.categoryId ? "its usual category" : "no category yet"}. Nothing counts on the month until somebody confirms the amount.`;
+    const text = proven
+      ? `Read again ${stamp}: a bill from ${vendor.name} for $${(proven.totalCents / 100).toFixed(2)}, booked under ` +
+        `${vendor.categoryId ? "its usual category" : "no category yet"}. ${proven.says}`
+      : `Read again ${stamp}: a bill from ${vendor.name}, filed as a draft under ` +
+        `${vendor.categoryId ? "its usual category" : "no category yet"}. The page does not prove its own total, so nothing counts on the month until somebody confirms the amount.`;
     await db.update(schema.inboxItems).set({ routedAs: "vendor_bill", routeResult: text, reason: null }).where(eq(schema.inboxItems.id, itemId));
     await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: doc.id, details: text.slice(0, 200) });
     return text;
