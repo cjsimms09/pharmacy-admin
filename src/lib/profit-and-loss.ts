@@ -148,6 +148,14 @@ export type PLInputs = {
   /** Facilitator and top-off money that reached fills in the month. */
   laterMoneyCents: number;
   /**
+   * Cash banked this month for prescriptions nobody collected, and how many payments it was.
+   *
+   * Real money in the bank and a debt to the payer at once: plans pay on adjudication, not on
+   * pickup, and an uncollected script is reversed and clawed back weeks later. Named on the cash
+   * account so the fall, when it comes, is expected rather than a mystery.
+   */
+  bankedForUncollected?: { cents: number; n: number } | null;
+  /**
    * Prescription revenue from the claims themselves: every plan's remittance plus what the patient
    * paid, per dispensing, for fills dated in the month.
    *
@@ -258,6 +266,7 @@ export function beforeBooksInputs(month: string, basis: "accrual" | "cash"): PLI
     sales: null,
     receipts: [],
     laterMoneyCents: 0,
+    bankedForUncollected: null,
     claimsRevenueCents: null,
     claimsRemitCents: null,
     claimsPatientCents: null,
@@ -651,6 +660,23 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * Named by what is on file rather than by a list written here, so a cost added next month is
    * covered the day it is entered.
    */
+  /*
+   * Cash banked for prescriptions nobody collected, which the payer will take back.
+   *
+   * Said on the cash account because that is the only account it is on: a reversed, uncollected
+   * script earns nothing, so the accrual side never counted it and has nothing to warn about. The
+   * money is genuinely in the bank today and is genuinely owed back, and both halves are true at
+   * once — which is exactly the sort of figure that looks like a fault when it disappears.
+   */
+  if (i.basis === "cash" && i.bankedForUncollected && i.bankedForUncollected.cents !== 0) {
+    const u = i.bankedForUncollected;
+    caveats.push(
+      `${formatCents(u.cents)} of the money banked this month is for ${u.n} prescription${u.n === 1 ? "" : "s"} nobody collected. ` +
+        `Plans pay when a claim is adjudicated rather than when it is picked up, so an unclaimed script is paid for, reversed after a fortnight, ` +
+        `and clawed back weeks later. It is in the bank now and it is owed back, so expect cash to fall by about that much without anything being wrong.`,
+    );
+  }
+
   if (i.basis === "cash") {
     const named = new Set(caveats.join(" "));
     for (const st of given.standing ?? []) {
@@ -842,6 +868,8 @@ export type SharedInputs = {
   counts: { countedOn: string; valueCents: number | null; rxValueCents: number | null }[];
   /** Money received against fills, by the day it arrived, for the cash account. */
   payments: { source: string; receivedOn: string | null; amountCents: number; revenueCents: number | null }[];
+  /** Money banked in each month for prescriptions nobody collected: real cash today, owed back to the payer. */
+  bankedForUncollected: Map<string, { cents: number; n: number }>;
   /** Per month: the bills on the basis asked for, the receipts entered, the rebate earned, and the driver's invoices where the pharmacy pays them. */
   byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; driverCents: number }>;
   /** The wholesalers' own ledgers: what cleared, when, and under which ACH. */
@@ -869,7 +897,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
   const { earningForMonth } = await import("./rebate-rates");
   const { allSuppliers } = await import("./suppliers-registry");
   const { db, schema } = await import("@/db");
-  const { and, gte, lte, eq } = await import("drizzle-orm");
+  const { and, gte, lte, eq, sql } = await import("drizzle-orm");
 
   const sorted = [...months].sort();
   const from = `${sorted[0]}-01`;
@@ -889,7 +917,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
     .select({ invoiceId: schema.supplierPaymentAllocations.invoiceId, amountCents: schema.supplierPaymentAllocations.amountCents, paidOn: schema.supplierPayments.paidOn })
     .from(schema.supplierPaymentAllocations)
     .innerJoin(schema.supplierPayments, eq(schema.supplierPaymentAllocations.paymentId, schema.supplierPayments.id));
-  const [sales, cats, fills, suppliers, invoices, lines, counts, payments, standing] = await Promise.all([
+  const [sales, cats, fills, suppliers, invoices, lines, counts, payments, standing, uncollectedRows] = await Promise.all([
     salesMonths(),
     categories(true),
     allFills({ from, to }),
@@ -914,6 +942,41 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
       columns: { source: true, receivedOn: true, amountCents: true, revenueCents: true },
     }),
     allStandingCosts(),
+    /*
+     * Money already banked for prescriptions nobody ever collected, by the month it arrived.
+     *
+     * A plan pays on adjudication, not on pickup. A script never collected is reversed after a
+     * fortnight and the payer takes its money back, usually weeks later — so this is real cash in
+     * the bank today and a debt to that payer at the same time. On 24 September 2026 it stood at
+     * $6,591.86 across 64 payments and nothing anywhere said so; the first anyone would have known
+     * is cash falling next month for no visible reason.
+     *
+     * Reversed AND never sold. A reversed script that WAS sold is an ordinary rebill and its money
+     * is kept, which is why the sold date is asked about rather than the status alone.
+     */
+    /*
+     * EXISTS rather than a join, so each payment is counted once.
+     *
+     * A coordinated fill puts two claim rows on one prescription and day, and joining to them
+     * doubles the payment. That fan-out has already produced one wrong figure in this project — a
+     * $719 sample that was really $4,969 — so the shape is avoided rather than corrected after.
+     */
+    db.all<{ month: string; cents: number; n: number }>(sql`
+      select substr(cp.received_on, 1, 7) as month, sum(cp.amount_cents) as cents, count(*) as n
+        from claim_payments cp
+       where cp.out_of_books = 0
+         and exists (
+           select 1 from claims c
+            where c.rx_number = cp.rx_number and c.date_filled = cp.date_filled
+              and c.status = 'reversed' and c.sold_on is null
+         )
+         and not exists (
+           select 1 from claims c
+            where c.rx_number = cp.rx_number and c.date_filled = cp.date_filled
+              and c.status <> 'reversed'
+         )
+       group by month
+    `),
   ]);
 
   const byMonth: SharedInputs["byMonth"] = new Map();
@@ -959,6 +1022,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
     lines,
     counts,
     payments,
+    bankedForUncollected: new Map(uncollectedRows.map((r) => [r.month, { cents: Number(r.cents), n: Number(r.n) }])),
     byMonth,
     standing,
     pioneerPurchases,
@@ -1168,6 +1232,7 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     sales: sales ? { retailCents: sales.retailCents, retailCostCents: sales.retailCostCents ?? null, rxPatientCents: sales.rxPatientCents, rxRemitCents: sales.rxRemitCents, totalCents: sales.totalCents } : null,
     receipts,
     laterMoneyCents,
+    bankedForUncollected: shared.bankedForUncollected.get(month) ?? null,
     claimsRevenueCents,
     claimsRemitCents,
     claimsPatientCents,
