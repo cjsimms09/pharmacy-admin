@@ -1,0 +1,268 @@
+import { familyTabs } from "@/lib/families";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { requireUser, requireManager } from "@/lib/auth";
+import { audit } from "@/lib/audit";
+import { planRegister, registerProgress, syncPlanGroups, classifyPlan, CLASS_INFO, BASIS_KINDS, composeBasis, needsBasis } from "@/lib/plans";
+import { PLAN_CLASSES, type PlanClass } from "@/db/schema";
+import { formatCents } from "@/lib/money";
+import { requireReimbursement } from "@/lib/features";
+import { PageHeader, Notice, Empty, Card, Figure, Field } from "@/components/ui";
+
+export const metadata = { title: "Plans" };
+export const dynamic = "force-dynamic";
+
+export default async function PlansPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string; show?: string }> }) {
+  await requireReimbursement();
+  await requireUser();
+  const { ok, error, show } = await searchParams;
+  const [rows, progress] = await Promise.all([planRegister(), registerProgress()]);
+  const shown = show === "all" ? rows : rows.filter((r) => r.classification === "unknown");
+
+  async function sync() {
+    "use server";
+    const u = await requireManager();
+    const r = await syncPlanGroups();
+    await audit({ action: "plans.sync", userId: u.id, userName: u.name, details: `${r.added} new of ${r.total}` });
+    revalidatePath("/plans");
+    redirect("/plans?ok=" + encodeURIComponent(`${r.added} new plan${r.added === 1 ? "" : "s"} added. ${r.total} in the register.`));
+  }
+
+  async function classify(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const id = String(fd.get("id") ?? "");
+    try {
+      await classifyPlan(
+        id,
+        {
+          classification: String(fd.get("classification") ?? "unknown") as PlanClass,
+          sponsorName: String(fd.get("sponsorName") ?? ""),
+          // The source and what it says are stored as one line; see composeBasis.
+          basis: composeBasis(String(fd.get("basisKind") ?? ""), String(fd.get("basisDetail") ?? "")),
+          sourceUrl: String(fd.get("sourceUrl") ?? ""),
+        },
+        u,
+      );
+      await audit({ action: "plans.classify", userId: u.id, userName: u.name, details: `${id} → ${fd.get("classification")}` });
+      revalidatePath("/plans");
+      redirect("/plans?ok=" + encodeURIComponent("Recorded."));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/plans?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+    }
+  }
+
+  return (
+    <>
+      <PageHeader
+        tabs={familyTabs("floor", "/plans")}
+        title="Plans"
+        subtitle="Which benefit plans the Kansas floor can reach. This one determination decides what is filable — the contract, the rate schedule and the MAC list are not needed for it."
+      />
+
+      {ok && <Notice kind="ok">{ok}</Notice>}
+      {error && <Notice kind="crit">{error}</Notice>}
+
+      {rows.length === 0 ? (
+        <>
+          <Empty>No plans in the register yet.</Empty>
+          <form action={sync} className="mt-3">
+            <button className="btn btn-primary">Build it from the claims</button>
+          </form>
+        </>
+      ) : (
+        <>
+          <div className="my-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Figure value={progress.plans} label="Plans" sub="Seen on the claims held" tone="muted" />
+            <Figure
+              value={`${progress.decided} of ${progress.plans}`}
+              label="Determined"
+              sub={progress.unknown ? `${progress.unknown} still to establish` : "Every one settled"}
+              tone={progress.unknown ? "warn" : "ok"}
+            />
+            <Figure
+              value={progress.inScopePlans}
+              label="In scope for the floor"
+              sub={`${progress.inScopeClaims} claims on them`}
+              tone="ok"
+            />
+            <Figure
+              value={progress.claimsUnknown}
+              label="Claims still unclassified"
+              sub={progress.claimsUnknown ? "Neither owed nor dismissed until the plan is known" : "Nothing left waiting"}
+              tone={progress.claimsUnknown ? "warn" : "ok"}
+            />
+          </div>
+
+          {progress.inScopeUnderFee > 0 && (
+            <Notice kind="ok">
+              {progress.inScopeUnderFee} claim{progress.inScopeUnderFee === 1 ? "" : "s"} on plans established as in
+              scope received less than the $10.50 dispensing fee alone. Those are the ones a filing is built from.
+            </Notice>
+          )}
+
+          <Card
+            className="mt-4"
+            title="How to establish one"
+            subtitle="Four rules settle almost every plan. The first one settles most of them."
+          >
+            <ul className="list-disc space-y-2 pl-5 text-sm text-ink-2">
+              <li>
+                <b className="text-ink">Self-funded or fully insured</b> is answered by the sponsor&rsquo;s{" "}
+                <b className="text-ink">Form 5500</b>, filed annually with the Department of Labor and public at{" "}
+                <code>efast.dol.gov</code>. Search the employer name. A Schedule A means an insurance contract — fully
+                insured, and in scope. No Schedule A on a health benefit means self-funded, and out.
+              </li>
+              <li>
+                <b className="text-ink">City, county, school district and state plans are not ERISA plans at all</b>, so
+                they stay in scope even when self-funded. The sponsor name usually gives this away.
+              </li>
+              <li>
+                <b className="text-ink">Plans with fewer than 100 participants</b> may not file a full 5500. Ask the
+                plan, or read the summary plan description.
+              </li>
+              <li>
+                <b className="text-ink">A discount card is not insurance.</b> There is no plan to regulate and no payer
+                to owe a floor.
+              </li>
+            </ul>
+          </Card>
+
+          <Card
+            className="mt-4"
+            title={show === "all" ? "Every plan" : "Not yet determined"}
+            count={shown.length}
+            subtitle="Each is one form. Record what established it as well as what it is — a classification nobody can check is one nobody can file on."
+            actions={
+              <a href={show === "all" ? "/plans" : "/plans?show=all"} className="btn btn-sm">
+                {show === "all" ? "Show only undetermined" : "Show all"}
+              </a>
+            }
+          >
+            {shown.length === 0 ? (
+              <Empty>Every plan has been determined.</Empty>
+            ) : (
+              <div className="space-y-3">
+                {shown.map((r) => (
+                  <form key={r.id} action={classify} className="rounded-lg border border-line p-4">
+                    <input type="hidden" name="id" value={r.id} />
+                    <div className="flex flex-wrap items-baseline justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="font-mono text-sm font-semibold">{r.groupNumber || "(no group number)"}</span>
+                        <span className="ml-2 text-sm text-ink-2">{r.payerLabel ?? r.pbmName ?? "—"}</span>
+                        <div className="mt-0.5 text-xs text-ink-3">
+                          BIN {r.bin ?? "—"}{r.pcn ? ` · PCN ${r.pcn}` : " · any PCN"}
+                          {r.planTypes.length > 0 && ` · PioneerRx calls it ${r.planTypes.join(", ")}`}
+                          {r.decidedOn && ` · determined ${r.decidedOn}`}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-semibold tabular-nums">{r.claims}</div>
+                        <div className="text-xs text-ink-3">claims · {formatCents(r.receivedCents)}</div>
+                        {r.underFeeClaims > 0 && (
+                          <div className="mt-1"><span className="badge badge-warn">{r.underFeeClaims} under $10.50</span></div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/*
+                      What this plan actually paid for, above the controls that classify it.
+
+                      The owner: "when trying to classify plans, it would be nice to see current
+                      claims we have for that plan it might help me classify them (ie copay cards)".
+
+                      He is describing the evidence, and two facts carry nearly all of it. A
+                      manufacturer copay card pays for one brand drug over and over — 019158/CNRX is
+                      Wegovy — where a benefit plan pays for the whole shop. And a card is meant to
+                      sit *on top of* a plan, so it should arrive as a second payer on the fill;
+                      DST/CNRX being the only payer on 26 of its 28 fills is the exact fact that
+                      made him correct this work once already: "Technically cnrx is a payor!! They
+                      will reimburse us for that remit amount."
+
+                      So: the drugs, and whether it ever pays alone. Both read off claims already on
+                      file, so the evidence is on the row rather than a screen away.
+                    */}
+                    {r.claims > 0 && (
+                      <div className="mt-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-ink-2">
+                        <span className="font-medium text-ink-1">What it pays for:</span>{" "}
+                        {r.topDrugs.length > 0
+                          ? r.topDrugs.map((d) => `${d.name}${d.claims > 1 ? ` (${d.claims})` : ""}`).join(", ")
+                          : "no drug names on its claims"}
+                        {r.topDrugs.length === 4 && r.claims > r.topDrugs.reduce((n, d) => n + d.claims, 0) && ", and others"}
+                        <span className="mx-1.5 text-ink-3">·</span>
+                        {r.sharedFills === 0
+                          ? `the only payer on ${r.soleFills === 1 ? "its one fill" : `all ${r.soleFills} fills`}`
+                          : r.soleFills === 0
+                            ? `always alongside another payer, on ${r.sharedFills === 1 ? "its one fill" : `all ${r.sharedFills} fills`}`
+                            : `the only payer on ${r.soleFills} of ${r.soleFills + r.sharedFills} fills, sharing the rest`}
+                        {/*
+                          Suggested only where it is the whole story. One brand drug and never a
+                          second payer is a card acting as the payer of record — a thing to look at,
+                          not a classification, so this points and does not decide.
+                        */}
+                        {r.topDrugs.length === 1 && r.sharedFills === 0 && r.claims > 2 && (
+                          <span className="ml-1 text-ink-3">— one drug, always alone: worth checking whether this is a manufacturer card.</span>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <Field label="Classification">
+                        <select name="classification" defaultValue={r.classification} className="w-full">
+                          {/* Which classes will ask for a basis is said here, not after the button. */}
+                          {PLAN_CLASSES.map((c) => (
+                            <option key={c} value={c}>
+                              {CLASS_INFO[c].label}
+                              {CLASS_INFO[c].inScope ? " — floor applies" : ""}
+                              {needsBasis(c) ? " · needs a basis" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="Plan sponsor / employer">
+                        <input name="sponsorName" defaultValue={r.sponsorName ?? ""} placeholder="What you would search on efast.dol.gov" className="w-full" />
+                      </Field>
+                      {/*
+                        The four sources an appeal can stand on, offered rather than typed.
+
+                        A rule answered by a blank box with a ten-character minimum is a rule people
+                        learn to write "checked it" against. Picking the source takes a second; the
+                        detail beside it is what makes the record checkable a year later.
+                      */}
+                      <Field label="How this was established" hint="Required for the classes that decide whether the floor applies.">
+                        <select name="basisKind" defaultValue="" className="w-full">
+                          <option value="">Choose the source…</option>
+                          {BASIS_KINDS.map((b) => (
+                            <option key={b.key} value={b.key}>{b.label}</option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="What it says">
+                        <input
+                          name="basisDetail"
+                          defaultValue={r.basis ?? ""}
+                          placeholder="plan year 2025, Schedule A for the health benefit — fully insured"
+                          className="w-full"
+                        />
+                      </Field>
+                      <Field label="Source link" className="sm:col-span-2">
+                        <input name="sourceUrl" defaultValue={r.sourceUrl ?? ""} placeholder="Link to the filing or document" className="w-full" />
+                      </Field>
+                    </div>
+
+                    <button className="btn btn-sm mt-3">Record</button>
+                  </form>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <form action={sync} className="mt-4">
+            <button className="btn">Pick up plans from newly loaded claims</button>
+          </form>
+        </>
+      )}
+    </>
+  );
+}

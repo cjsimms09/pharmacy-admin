@@ -1,0 +1,1 @@
+ALTER TABLE `manual_sections` ADD `audit_fail_count` integer DEFAULT 0 NOT NULL;

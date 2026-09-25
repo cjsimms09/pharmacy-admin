@@ -1,0 +1,705 @@
+import "server-only";
+import { looksLikeReturnsDetail, looksLikeApTransactions } from "./ap-transactions";
+import { looksLikeCopayRemit } from "./copay-remit";
+import { parseCsvRows } from "./reference";
+import { readSheet, readSheets } from "./xlsx";
+import { looksLikeVeridikalReport } from "./veridikal-report";
+import { looksLikeIpdStatement } from "./ipd-statement";
+import { mapColumns } from "./claims";
+import { mapSupplierColumns } from "./suppliers";
+import { looksLikePioneerCatalog } from "./pioneer-catalog";
+import { looksLikeRxTransactions } from "./rx-transactions";
+import { looksLikeSystemSales } from "./system-sales";
+import { looksLikeOnHand } from "./on-hand";
+import { looksLikeRxRescueCredit } from "./rxrescue-credit";
+import { looksLikePayerPayments } from "./payer-payments";
+import { looksLikeAccountHistory } from "./providerpay-account";
+import { looksLikeRemitSummary, looksLikeRemitDetail } from "./mck-remit-csv";
+import { pdfItems, pdfText } from "./pdf-text";
+import { copayRemitTextFromPdf } from "./copay-remit-scan";
+import { looksLikeCardStatement } from "./card-statement";
+import { looksLikeAccessHealthPayment } from "./accesshealth-payment";
+import { looksLikeSalesByPayment } from "./sales-by-payment";
+import { looksLikeRebateReport } from "./rebate-report";
+import { isDrillDownText } from "./drill-down-read";
+import { ALLOWED_MIME, EXCEL_MIME } from "./files";
+
+/**
+ * Working out what an emailed report actually is, and loading it.
+ *
+ * The point of this is that a scheduled report should arrive and be usable without anyone
+ * touching it. The risk is the mirror image: a file loaded as the wrong kind of thing writes
+ * wrong data into the tables everything else reads, and does it unattended, overnight, with
+ * nobody watching.
+ *
+ * So recognition is done by reading the file's own header row rather than trusting its name.
+ * A supplier can call a file anything; only the columns say what it holds. And every rule below
+ * requires positive evidence — a file that merely lacks the markers of one kind is never assumed
+ * to be another. Anything unrecognised is filed as a document exactly as before, which is the
+ * behaviour we already had and is never wrong, only unhelpful.
+ */
+
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "providerpay_account" | "mck_remit_summary" | "mck_remit_detail" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "sales_by_payment" | "empty_report" | "unrecognised";
+
+export type Classification = {
+  kind: RouteKind;
+  /** What in the file led here, so a wrong guess can be diagnosed from the inbox. */
+  why: string;
+  /** Headers found, for the same reason. */
+  headers: string[];
+};
+
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * The whole file is a "nothing to report" marker, or it is not.
+ *
+ * Returns the marker as written, so the inbox can quote the report's own words back rather than
+ * paraphrasing them. Null for everything else, including an empty file.
+ *
+ * Deliberately strict in three ways. It is **anchored to the whole file**, so a report that merely
+ * contains the words somewhere is untouched. It is **bounded by size**, because no real report is
+ * this small and the bound is what stops the rule ever reaching one. And **zero bytes is not a
+ * match**: a file with no content at all is as likely to be a download that failed as a report that
+ * ran, and those are different facts — it stays unrecognised, which is the safe direction.
+ *
+ * The family of wordings is matched rather than the one string actually seen. "No Data" is what
+ * RxLocal sent on 13 September; the same report writer elsewhere says "No Records Found" and "No
+ * rows to display", and a rule that had to be extended each time a vendor phrased it differently
+ * would be a rule that fails on a Sunday nobody is watching.
+ */
+const NO_DATA = /^\(?\s*no\s+(data|records?|results?|rows?)(\s+(available|found|returned|to\s+display))?\s*\.?\s*\)?$/i;
+
+export function emptyReportMarker(buf: Buffer): string | null {
+  if (buf.length === 0 || buf.length > 512) return null;
+  const text = buf.toString("utf8").replace(/^﻿/, "").trim();
+  if (text === "") return null;
+  return NO_DATA.test(text.replace(/\s+/g, " ")) ? text : null;
+}
+
+/**
+ * Which scheduled report a file is, from its name alone — for the case where its content cannot say.
+ *
+ * Only reached for an empty report, where there is nothing inside to recognise. It exists so the
+ * inbox can say *"the daily claims report ran and had no transactions"* rather than *"a file was
+ * empty"*, which is the difference between a line he can dismiss at a glance and one he has to go
+ * and open.
+ *
+ * Naming a report by its filename is exactly what the rest of this file refuses to do, and the
+ * reason is worth stating: every other rule has the file's own contents to go on, and a name is a
+ * worse witness than contents whenever both exist. Here there are no contents. So the fall-back is
+ * an honest "a scheduled report" rather than a guess, and a name this does not know costs nothing.
+ */
+function scheduledReportNamedBy(fileName: string): string | null {
+  /* "Daily 9_13_2026 12_00_00 AM.txt" — how RxLocal names every daily transaction report. */
+  if (/^daily\s+\d{1,2}_\d{1,2}_\d{4}\b/i.test(fileName.trim())) return "The daily claims report";
+  return null;
+}
+
+/**
+ * Whether a PDF is McKesson's daily Purchase Drill Down, before anything is spent reading it.
+ *
+ * The extracted text comes back with its columns interleaved and its words split across fragments,
+ * so only the most robust markers are worth testing. These two labels appear on no other report
+ * the pharmacy receives.
+ */
+export function looksLikeDrillDown(text: string, fileName = ""): boolean {
+  return isDrillDownText(text, fileName);
+}
+
+/**
+ * Reads just the header row, whatever the format. Returns [] for anything unreadable.
+ *
+ * A file with **no extension at all** is read as delimited text, because the pharmacy's feeds
+ * arrive that way and the site already knows it: `acceptableAttachment` below has a whole branch
+ * for extensionless attachments, written after PioneerRx sent the catalogue without one and the
+ * first Sunday's files were filed as unrecognised for want of four letters.
+ *
+ * The same thing was still true of every other header-read report. A NADAC file named
+ * "nadac_2026-08-26" — no extension, which is what an entry unpacked from a zip or forwarded from
+ * a phone looks like — read as unrecognised here while `looksLikeNadacHeader` in `nadac.ts`
+ * recognised the identical bytes, because that one reads the first line and this one asked the
+ * name first.
+ *
+ * This only ever *adds* recognition: a name with a known extension takes the branch it always
+ * took, and every rule that consumes these headers requires a specific combination of columns to
+ * be present, so a file that matched nothing before cannot start matching the wrong thing now.
+ *
+ * The extensionless branch is gated on the bytes looking like text, because without a name to go
+ * on there is nothing else stopping a twenty-megabyte binary from being decoded and parsed as a
+ * spreadsheet on the sweep's thread. A NUL byte in the first chunk is the cheap, certain tell.
+ */
+export function headersOf(fileName: string, buf: Buffer): string[] {
+  const named = /\.(csv|txt)$/i.test(fileName);
+  const unnamed = !/\.[A-Za-z0-9]{1,5}$/.test(fileName) && !buf.subarray(0, 8192).includes(0);
+  try {
+    if (named || unnamed) {
+      // Read the header row itself rather than going through the object parser: a report whose
+      // period happened to be empty still has to be recognised, and the object parser has no
+      // rows to take keys from.
+      const rows = parseCsvRows(buf.toString("utf8"));
+      const head = rows.find((r) => r.some((c) => c.trim() !== ""));
+      return head ? head.map((h) => h.trim()).filter(Boolean) : [];
+    }
+    if (/\.xlsx$/i.test(fileName)) {
+      const rows = readSheet(buf);
+      const head = rows.find((r) => r.some((c) => c.trim() !== ""));
+      return head ? head.map((h) => h.trim()).filter(Boolean) : [];
+    }
+  } catch {
+    // A file we cannot parse is simply not one we can route.
+  }
+  return [];
+}
+
+/**
+ * Decides what a file is from its columns.
+ *
+ * Order matters. NADAC is checked first because its marker column is unambiguous. Claims are
+ * checked before supplier catalogues because a claims export also carries an NDC and a cost, and
+ * would otherwise match the looser catalogue rule.
+ */
+export function classify(fileName: string, buf: Buffer): Classification {
+  /*
+   * A remittance advice (835), known by its envelope and not its name (BACKLOG 27).
+   *
+   * An X12 file opens with an ISA segment and declares the transaction in its ST segment;
+   * "ST*835" is a remittance whatever the sender called the file (.835, .edi, .txt, .dat). The
+   * reader it goes to checks the file against its own totals before anything is stored.
+   */
+  if (buf.subarray(0, 4).toString("latin1") === "ISA*") {
+    const head = buf.subarray(0, 2048).toString("latin1");
+    if (/(^|[~\r\n])ST\*835\*/.test(head)) return { kind: "remittance_835", why: "An X12 envelope declaring an 835 remittance advice.", headers: [] };
+    return { kind: "unrecognised", why: "An X12 envelope that is not an 835 remittance. Filed as a document.", headers: [] };
+  }
+  /*
+   * A copay-voucher remittance, known by what is in it rather than what it is called.
+   *
+   * After the X12 test and before the header-row rules. An 835 is an 835 whatever it settles, so
+   * that test goes first; these arrive as plain text under whatever name RedSail's system chooses
+   * when it pushes them to the SFTP host, so the name says nothing at all.
+   *
+   * The test wants a marker and two rows that pass the row's own arithmetic together, so a covering
+   * email about the voucher programme does not match it and neither does a table of figures from
+   * somewhere else.
+   */
+  if (looksLikeCopayRemit(buf.subarray(0, 65_536).toString("utf8"))) {
+    return { kind: "copay_remit", why: "A RedSail copay-voucher remittance: a payment header and item rows that hold together.", headers: [] };
+  }
+  /*
+   * A PDF, which is the one shape here that is not text at all.
+   *
+   * McKesson's monthly rebate breakdown is the document that carries the tier ladder and the rate
+   * actually earned. It arrives as a generated PDF, so its words have to be pulled out before
+   * anything can be told about it — and it is worth the trouble, because the alternative is
+   * somebody typing eleven bands of a contract into a form and one of them being wrong.
+   */
+  if (/^%PDF/.test(buf.subarray(0, 8).toString("latin1"))) {
+    /*
+     * A returned goods policy, known by its name rather than its words.
+     *
+     * The two real ones yield almost nothing to the extractor — twenty-seven characters of
+     * fragments out of McKesson's — so there is no content rule to write. The file name is what
+     * there is, and it is enough: nothing else a wholesaler sends is called a returns policy.
+     */
+    if (/return(ed)?[_\s-]*goods|returns?[_\s-]*polic/i.test(fileName)) {
+      return { kind: "return_policy", why: "Named as a returned goods policy. Read against the supplier it came from.", headers: [] };
+    }
+    try {
+      const text = pdfText(buf);
+      /*
+       * The same voucher test again, on the text the PDF gave up.
+       *
+       * The byte test above cannot see inside a PDF, and RedSail offered these as either text or
+       * PDF. One statement in hand has a scanned first page and a second page with a text layer,
+       * which is exactly the shape this reaches: nothing readable on page one, the rows on page two.
+       */
+      if (looksLikeCopayRemit(text)) {
+        return { kind: "copay_remit", why: "A PDF whose text carries a copay-voucher remittance: a payment header and item rows that hold together.", headers: [] };
+      }
+      /* The monthly card processing statement: the only record of card fees. See card-statement.ts. */
+      if (looksLikeCardStatement(text)) {
+        return { kind: "card_statement", why: "A Global Payments merchant statement: the month's card processing fees and every batch deposited.", headers: [] };
+      }
+      /*
+       * IPD's statement of account: the only document that says which of its invoices a credit memo settled, and the
+       * only route by which that credit is banked. Its invoices are never paid from the bank, so no bank line exists to
+       * place against them. See ipd-statement.ts.
+       */
+      if (looksLikeIpdStatement(text)) {
+        return { kind: "ipd_statement", why: "IPD's statement of account: which invoices a credit memo settled, on which day, and what is still open.", headers: [] };
+      }
+      /* Health Mart Atlas's itemised EFT: the claim payments inside one deposit. See accesshealth-payment.ts. */
+      if (looksLikeAccessHealthPayment(text)) {
+        return { kind: "accesshealth_payment", why: "A Health Mart Atlas AccessHealth payment report: one EFT, its total, and every claim payment and adjustment inside it.", headers: [] };
+      }
+      if (looksLikeRebateReport(text)) {
+        return {
+          kind: "rebate_report",
+          why: "A McKesson rebate breakdown: it carries the tier table and the compliance rate the month was paid at.",
+          headers: [],
+        };
+      }
+      /*
+       * The daily Purchase Drill Down, which carries the ratio every rebate band turns on.
+       *
+       * Recognised here, read by the model later: the extractor pulls its text out but returns the
+       * columns interleaved — eleven percentages in a row with nothing saying which month each
+       * belongs to. Enough to know what the document is; not enough to read a figure off it that
+       * a purchasing decision will be made on.
+       */
+      if (looksLikeDrillDown(text, fileName)) {
+        return { kind: "purchase_drilldown", why: "McKesson's Purchase Drill Down: it carries the compliance ratio and the OneStop share, month by month.", headers: [] };
+      }
+      /*
+       * A scanned voucher remittance whose text layer comes out one field per line. Its printed lines are rebuilt from
+       * the words' positions and tested again (copay-remit-scan.ts). Only tried where the words say copay voucher, so no
+       * other PDF pays for the rebuild.
+       */
+      if (/copay/i.test(text) && /voucher|redsail/i.test(text) && copayRemitTextFromPdf(text, pdfItems(buf)).from !== null) {
+        return { kind: "copay_remit", why: "A scanned copay-voucher remittance: its printed lines, rebuilt from the page, carry a payment header and item rows that hold together.", headers: [] };
+      }
+    } catch {
+      // Not readable as text — a scan. It is filed as a document like anything else.
+    }
+    if (/purchase[_\s-]*drill[_\s-]*down/i.test(fileName)) {
+      return { kind: "purchase_drilldown", why: "Named as a Purchase Drill Down.", headers: [] };
+    }
+    return { kind: "unrecognised", why: "A PDF this does not recognise. Filed as a document.", headers: [] };
+  }
+  /*
+   * Veridikal's eVoucher and Denial Conversion client summaries (veridikal-report.ts): workbooks whose first row is a
+   * title, with the header four or five rows down, so the header-row rules below never see their columns. Known by
+   * the title and the header together, on every tab.
+   */
+  if (/\.xlsx$/i.test(fileName) || buf.subarray(0, 2).toString("latin1") === "PK") {
+    try {
+      if (looksLikeVeridikalReport(readSheets(buf))) {
+        return { kind: "veridikal_report", why: "A Veridikal client summary: the eVoucher or Denial Conversion payments inside one Veridikal ACH, row by row, with its totals.", headers: [] };
+      }
+    } catch {
+      // Not a workbook this can open; the rules below decide.
+    }
+  }
+  /*
+   * The daily "Rx Transaction Details By Submission Type" report — the claims feed — is, like the
+   * catalogue, a printed report whose first line is its title, so it is known by that title.
+   */
+  if (looksLikeRxTransactions(buf.subarray(0, 8192).toString("utf8"))) {
+    return {
+      kind: "rx_transactions",
+      why: "Begins with PioneerRx's \"Rx Transaction Details By Submission Type\" title; one row per claim transaction.",
+      headers: ["Rx Number", "Status", "Amount", "Group", "Ntw Reim. Id", "Copay", "Dispensing Fee", "Completed Date", "Date Filled", "BIN", "QTY", "Acq. Inv. Cost", "PCN", "NDC", "GrossProfit"],
+    };
+  }
+  /*
+   * PioneerRx's "Accrual System Sales", which the pharmacy sends monthly.
+   *
+   * Recognised before it can be read. Nothing about its columns is guessed at — guessing a layout
+   * is precisely the failure the transaction reader was rebuilt to prevent, and a sales figure
+   * invented from the wrong column would be worse than no figure at all. So it is identified,
+   * filed against the month it covers and named on the Inbox as understood but not yet read, which
+   * is what stops a report the pharmacy went to the trouble of sending from vanishing into the
+   * documents pile while everybody assumes it is being counted.
+   */
+  /*
+   * The Aytu / IPD credit memo, checked before anything that reads a header row generically.
+   *
+   * It is a CSV with a proper header, so the generic reader would happily map some of it and file
+   * it as a claims export — which would put top-off credits into the claims table as dispensings.
+   */
+  if (looksLikeRxRescueCredit(buf.subarray(0, 8192).toString("utf8"), fileName)) {
+    return {
+      kind: "rxrescue_credit",
+      why: "An Aytu / IPD credit memo: RxRescue top-off money for claims already dispensed. Applied to the fills it names.",
+      headers: ["Transaction ID", "Rx Number", "NDC", "Transaction Date", "RxRescue Top Off Amount/Credit", "Total Credit Payment to Pharmacy"],
+    };
+  }
+  /*
+   * The payer payment report: what the plans actually put in the bank.
+   *
+   * Checked before the generic header reader because it is an ordinary CSV with a proper header
+   * and would otherwise map plausibly onto something else. It is known by four columns together —
+   * a payment number, a payer, a deposit date and an amount — which no other report the pharmacy
+   * receives carries as a set.
+   */
+  if (looksLikePayerPayments(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "payer_payments",
+      why: "A payer payment report: what each plan deposited, by payment. Banked as cash received in the month it was deposited, once per payment number.",
+      headers: ["Payment number", "Payer name", "Deposit date", "Payment amt", "Payment type"],
+    };
+  }
+  /*
+   * The ProviderPay sweep account history: the only thing that ties a bank deposit to its payers.
+   *
+   * Payers do not pay the pharmacy directly. They deposit into a Wells Fargo account McKesson
+   * holds, and McKesson sweeps it across. The bank statement shows one lump and names nobody. This
+   * file names both halves, so the lump resolves into payments and each payment into its 835.
+   *
+   * Checked after the payment report, which is the more specific of the two — both carry a payment
+   * number, and only the payment report carries a payer name and a deposit date as well.
+   */
+  if (looksLikeAccountHistory(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "providerpay_account",
+      why: "The ProviderPay sweep account history: each payer's deposit and the transfer that swept them to the bank. It is what breaks a lump deposit back into the payers behind it.",
+      headers: ["Date", "Location", "Payment number", "Description", "Amount"],
+    };
+  }
+  /*
+   * The two CSVs the remittance table exports. Named so a refusal can say which one arrived.
+   *
+   * The detail export carries a patient name column, so it is refused by the ingestion gate before
+   * anything stores it. It is still classified, because "this is the detail export, take the
+   * summary instead" is a usable sentence and "columns did not match any known report" is not.
+   */
+  if (looksLikeRemitDetail(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "mck_remit_detail",
+      why: "ProviderPay's Remit Detail export: one row per claim, and it carries a patient name column. Nothing reads it and nothing may keep it — the Remit Summary export holds the money without the patients.",
+      headers: ["Location", "Remit number", "Rx number or ADJ description", "Dispense date", "Patient name", "Remit amt"],
+    };
+  }
+  if (looksLikeRemitSummary(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "mck_remit_summary",
+      why: "ProviderPay's Remit Summary export: one row per remittance, with the payment number that ties it to the deposit in the sweep account. Kept as a document; nothing posts from it yet.",
+      headers: ["NCPDP", "Remit number", "Payer name", "Remit date", "Remit amt", "Payment match", "Claim match"],
+    };
+  }
+  /*
+   * McKesson's Accounts Payable Open & Closed Transactions, which arrives weekly inside a zip.
+   *
+   * The one report that says when money actually leaves for an invoice, and which invoices left
+   * together: every one cleared under a single ACH shares a check number. Nothing else this
+   * pharmacy receives can tie a bank debit to the invoices inside it.
+   *
+   * Known by its columns rather than its file name, because the name carries a timestamp and the
+   * zip entry is named for the dashboard that produced it.
+   */
+  /* The other half of the same weekly ledger: what went back, and what was credited for it. */
+  if (looksLikeReturnsDetail(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "mck_returns",
+      why: "McKesson's Returns Details: every credit note with what went back, why, and what was credited. Money coming in, settled like an invoice.",
+      headers: ["Invoice/Credit Number", "Net Returned Price ($)", "Returned Quantity", "Return Reason Description", "Original Invoice Number"],
+    };
+  }
+  /*
+   * The summary sheets that ride along in the same zip.
+   *
+   * Each of these reports ships a detail CSV and one or two totals of it. The totals are the same
+   * money added up, so reading them would be the detail counted twice — but they are not
+   * unrecognised either, and saying so put three lines on his inbox that needed a person and had
+   * nothing wrong with them. Recognised, filed, and deliberately not read.
+   */
+  if (looksLikeReportSummary(headersOf(fileName, buf))) {
+    return {
+      kind: "report_summary",
+      why: "A totals sheet from a report whose detail is read separately. Filed, and deliberately not read — the same money added up is not more of it.",
+      headers: [],
+    };
+  }
+  if (looksLikeApTransactions(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "ap_transactions",
+      why:
+        "McKesson's Accounts Payable transactions: every invoice with what was billed, the cash discount, what is actually paid, " +
+        "and the ACH it cleared under. Not a bill — every row is an invoice already counted — so nothing on it reaches an account as a cost.",
+      headers: ["Receivable Number", "Due Date", "Transaction Status", "Check Number", "Gross Amount ($)", "Cash Discount ($)", "Net Amount ($)"],
+    };
+  }
+  /*
+   * Before the monthly summary: the payment-type report is also named Accrual_System_Sales…, and the
+   * summary's reader refuses it, seven times over, every day. See sales-by-payment.ts.
+   */
+  if (looksLikeSalesByPayment(buf.subarray(0, 8192).toString("utf8"))) {
+    return {
+      kind: "sales_by_payment",
+      why: "PioneerRx's System Sales Totals By Payment Type: the till's takings split by card, cash, cheque and account.",
+      headers: ["Cash", "Check", "Credit/Debit", "A/R / Direct Dep", "Coupons", "Totals", "Tax Collected"],
+    };
+  }
+  if (looksLikeSystemSales(buf.subarray(0, 8192).toString("utf8"), fileName)) {
+    return {
+      kind: "accrual_sales",
+      why: "PioneerRx's System Sales Summary — the whole till for a month, retail alongside prescriptions. The only report that answers what the pharmacy took.",
+      headers: ["Sales", "Discounts", "Returns", "Subtotal", "Tax Calculated", "Total"],
+    };
+  }
+  /*
+   * The daily inventory count.
+   *
+   * Checked before the generic header reader because it is a printed report with page furniture,
+   * and ahead of the catalogue rules because an on-hand export carries NDCs and costs and would
+   * otherwise be a plausible price list — filed as one, it would overwrite what the pharmacy pays
+   * with what it happens to hold, which is the same shape of number and a completely different
+   * fact. `looksLikeOnHand` requires both an on-hand quantity column and the words to go with it.
+   */
+  if (looksLikeOnHand(buf.subarray(0, 20_000).toString("utf8"))) {
+    return {
+      kind: "on_hand",
+      why: "An inventory count: either PioneerRx's Inventory Search Results, or an export with an NDC column beside a quantity-on-hand column. Filed as the count for its own date, replacing any earlier upload for that day.",
+      headers: ["NDC/UPC", "Description", "On Hand", "On Order", "Cost"],
+    };
+  }
+  /*
+   * PioneerRx's supplier catalogue export, checked before anything that reads a header row.
+   *
+   * Its first line is a report title, not a header, so headersOf() would return the title as a
+   * one-column header and the file would fall through as unrecognised — which is what happened to
+   * the first one. It is also the one report here that names its own supplier, in a section line
+   * inside the file, so unlike a generic price list it needs no sender rule to be filed correctly.
+   *
+   * Recognised by content alone, whatever the name ends in. The scheduled file is named
+   * Supplier + run date by the pharmacy and PioneerRx decides the extension, if any; a rule that
+   * needed ".txt" would have filed the first Sunday's files as unrecognised for want of four letters.
+   */
+  if (looksLikePioneerCatalog(buf.subarray(0, 8192).toString("utf8"))) {
+    return {
+      kind: "pioneer_catalog",
+      why: "Begins with PioneerRx's \"Supplier Catalog Item Search Results\" header; the supplier is named inside the file.",
+      headers: ["Supplier Item Number", "Name", "NDC", "Order By Constant", "Cost Per Unit"],
+    };
+  }
+
+  /*
+   * A scheduled report that ran and correctly carried nothing.
+   *
+   * On Sunday 13 September the daily claims report arrived as twelve bytes reading "No Data" — the
+   * pharmacy was shut, so there were no transactions to report. The header reader took "No Data" as
+   * a one-column header, matched no known report, and filed it as unrecognised: the same pile as a
+   * file whose format has never been seen. That is the third state rendered as a fault, and it will
+   * recur every Sunday and every holiday.
+   *
+   * It matters more than tidiness. The first question of the daily check is whether each feed ran,
+   * and silence is the failure mode this site keeps having. An empty report sitting on the
+   * unrecognised pile looks exactly like a feed that stopped — and a feed that really stops becomes
+   * one more line on a pile that already has a line on it every Monday, which is how a real break
+   * goes unnoticed.
+   *
+   * Three states, kept apart: the report ran and had nothing (here), the report could not be read
+   * (`unrecognised`), the report never arrived (nothing in the mailbox at all, which only a
+   * freshness check can see). Placed after every positive content rule, so a real file is always
+   * claimed first.
+   */
+  const emptied = emptyReportMarker(buf);
+  if (emptied !== null) {
+    const named = scheduledReportNamedBy(fileName);
+    return {
+      kind: "empty_report",
+      why:
+        `${named ?? "A scheduled report"} arrived carrying "${emptied}" and nothing else. The report ran and there was ` +
+        `nothing in it, which on a Sunday or a holiday is what a closed day looks like. Nothing is filed from it, and ` +
+        `it is not a reader that failed.`,
+      headers: [],
+    };
+  }
+
+  const headers = headersOf(fileName, buf);
+  if (headers.length === 0) return { kind: "unrecognised", why: "No header row could be read.", headers };
+  const set = new Set(headers.map(norm));
+  const has = (...names: string[]) => names.some((n) => set.has(norm(n)));
+
+  if (has("nadac per unit") && has("ndc") && has("effective date")) {
+    return { kind: "nadac", why: "Carries a NADAC Per Unit column alongside NDC and Effective Date.", headers };
+  }
+
+  // A claims export is identified by the prescription and its routing, not by money — a supplier
+  // file has money too, and a claims file without a prescription number is not usable anyway.
+  const { map } = mapColumns(headers);
+  if (map.rxNumber && map.dateFilled && (map.bin || map.pcn)) {
+    return { kind: "claims", why: `Carries ${map.rxNumber}, ${map.dateFilled} and ${map.bin ?? map.pcn}.`, headers };
+  }
+
+  const { map: sup } = mapSupplierColumns(headers);
+  if (sup.ndc && (sup.unitCost || sup.packCost) && !map.rxNumber) {
+    return {
+      kind: "supplier_catalog",
+      why: `Carries ${sup.ndc} and ${sup.unitCost ?? sup.packCost} with no prescription number.`,
+      headers,
+    };
+  }
+
+  return { kind: "unrecognised", why: `Columns did not match any known report: ${headers.slice(0, 8).join(", ")}.`, headers };
+}
+
+/**
+ * Which supplier a catalogue came from, per rules the pharmacy writes.
+ *
+ * Free text, one rule per line, "fragment = Supplier Name" — matched against the sender address
+ * and the subject. A catalogue with no matching rule is not loaded: filing prices under the
+ * wrong supplier would make the purchasing comparison quietly wrong, and there is no way to
+ * infer a supplier from a spreadsheet.
+ */
+export function parseSupplierRules(raw: string): { pattern: string; supplier: string }[] {
+  return (raw ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"))
+    .map((l) => {
+      const i = l.indexOf("=");
+      if (i < 0) return null;
+      const pattern = l.slice(0, i).trim().toLowerCase();
+      const supplier = l.slice(i + 1).trim();
+      return pattern && supplier ? { pattern, supplier } : null;
+    })
+    .filter((x): x is { pattern: string; supplier: string } => x !== null);
+}
+
+export function supplierFor(rules: { pattern: string; supplier: string }[], from: string, subject: string): string | null {
+  const hay = `${from} ${subject}`.toLowerCase();
+  return rules.find((r) => hay.includes(r.pattern))?.supplier ?? null;
+}
+
+/*
+ * The attachment types the mailbox reads. Mirrors the list in files.ts plus the text and
+ * spreadsheet types reports come as; kept here so the acceptance rule can be tested without a
+ * mailbox.
+ */
+// .835, .edi, .x12 and .dat are how remittances arrive (BACKLOG 27); .xml is how some plans send them.
+const REPORT_EXT = /\.(pdf|csv|tsv|txt|xls|xlsx|jpg|jpeg|png|835|edi|x12|dat|xml)$/i;
+const REPORT_MIME = new Set([
+  ...ALLOWED_MIME,
+  "text/csv",
+  "text/plain",
+  "text/tab-separated-values",
+  /*
+   * Every alias a mail server uses for a spreadsheet, not just the registered one.
+   *
+   * This is the gate that actually refused Veridikal's two monthly reports on 15 September 2026:
+   * .xlsx on the extension list, and `application/x-msexcel` — a pre-registration alias — not on
+   * this one. See EXCEL_MIME in files.ts. Both reports were turned away while the site told the
+   * owner Veridikal had never sent anything.
+   */
+  ...EXCEL_MIME,
+  "application/octet-stream",
+]);
+const TEXT_MIME = new Set(["text/plain", "text/csv", "text/tab-separated-values", "application/octet-stream"]);
+
+/**
+ * Whether an attachment is one this reads, and if not, why not — in words for the inbox line.
+ *
+ * The scheduled catalogue is named Supplier + run date by the pharmacy, and whether PioneerRx
+ * puts ".txt" on the end is PioneerRx's business. A rule that needed the extension would have
+ * left the first Sunday's files unread, recorded as "no report attachment", which is not what
+ * happened. So a file with no extension is accepted when its type is text or its first lines are
+ * the catalogue's own title; everything else still needs a known extension and a known type.
+ */
+export function acceptableAttachment(att: { filename?: string | null; contentType?: string | null; content?: Buffer | Uint8Array | null }): { ok: true; note?: string } | { ok: false; why: string } {
+  const name = att.filename ?? "";
+  const type = att.contentType ?? "";
+  if (!name) return { ok: false, why: "an attachment with no name" };
+  const hasExt = /\.[A-Za-z0-9]{1,5}$/.test(name);
+  if (hasExt) {
+    /*
+     * The extension decides. A sending server's declared type never refuses a file on its own.
+     *
+     * The owner, 16 September 2026, after Veridikal's two monthly reports were turned away for
+     * declaring `application/x-msexcel`: "they shouldnt be refused in the future.. we now know how
+     * they come in, what they look like, we should know what to do next time." Adding that one
+     * alias would have fixed that one sender until the next server spelled it differently.
+     *
+     * The rule was incoherent anyway, which is the real argument. `application/octet-stream` — "I
+     * have no idea what this is" — has always been accepted here, because Gmail sends real reports
+     * that way. So the least informative declaration in existence passed while a more specific one
+     * was refused. A type is a claim made by somebody else's mail server about a file; it is not
+     * evidence, and it was never the thing keeping anything out.
+     *
+     * What actually gates is unchanged and is doing all the work: the extension must be one of the
+     * dozen this site reads, `storeFile` enforces the size ceiling, and every reader proves the
+     * contents before a figure is stored. A file that lies about its type still has to survive all
+     * three. What it can no longer do is be dropped at the door and reported as never sent.
+     *
+     * An unusual type is still worth seeing, so it is recorded on the inbox line rather than lost —
+     * `REPORT_MIME` now decides what gets mentioned, not what gets in.
+     */
+    if (!REPORT_EXT.test(name)) return { ok: false, why: `${name} (not a type this reads)` };
+    return REPORT_MIME.has(type) ? { ok: true } : { ok: true, note: `${name} was sent as ${type || "an unknown type"}, which is unusual for that extension.` };
+  }
+  if (TEXT_MIME.has(type)) {
+    if (type !== "application/octet-stream") return { ok: true };
+    const head = att.content ? Buffer.from(att.content.subarray(0, 8192)).toString("utf8") : "";
+    if (looksLikePioneerCatalog(head)) return { ok: true };
+  }
+  return { ok: false, why: `${name} (no file extension, sent as ${type || "an unknown type"})` };
+}
+
+/**
+ * The sentence an inbox line carries when a PDF reads as a supplier invoice and nobody knows whose.
+ *
+ * Kept as a constant, and matched by `isUnknownSenderInvoice`, because the inbox page has to be
+ * able to offer the right control on the right line without re-reading the file. Every other piece
+ * of advice on that page is already derived from the recorded reason the same way; this follows it
+ * rather than adding a column.
+ */
+export const UNKNOWN_SENDER_INVOICE = "An invoice from a sender we do not know";
+
+/** Whether an inbox line's recorded reason is the unknown-sender invoice notice. */
+export function isUnknownSenderInvoice(reason: string | null | undefined): boolean {
+  return (reason ?? "").startsWith(UNKNOWN_SENDER_INVOICE);
+}
+
+/**
+ * The sentence the inbox records for one of these, and the only place it is composed.
+ *
+ * The mailbox writes it and the inbox page reads a name back out of it, which is exactly the pair
+ * that drifts apart: a comma moved here and the page silently stops offering the supplier's name,
+ * with nothing failing. So both halves live here and a test walks one into the other.
+ */
+export function unknownSenderInvoiceReason(from: string, printedSupplier: string | null): string {
+  const printed = printedSupplierSuggestion(printedSupplier);
+  return (
+    `${UNKNOWN_SENDER_INVOICE}. This PDF reads as a supplier invoice — item lines with an NDC and a price` +
+    `${printed ? `, printed under “${printed}”` : ""} — but nothing on the register sends from ${from}, ` +
+    `so it has not been filed as one. Say who it is and it will be filed with their invoices, and the next one will file itself.`
+  );
+}
+
+/**
+ * The name printed on an unplaced invoice, taken back out of the recorded reason.
+ *
+ * The page offers it as a placeholder rather than a value: it is what the document said, which is a
+ * starting point for somebody who can see it, not an answer. Typing over a placeholder costs
+ * nothing; a wrong name written onto the register sends the next invoice to the wrong supplier.
+ */
+export function printedNameInReason(reason: string | null | undefined): string | null {
+  const m = /printed under “(.+?)”/.exec(reason ?? "");
+  return m ? m[1] : null;
+}
+
+/**
+ * The name printed on an unplaced invoice, offered as a suggestion and never as an answer.
+ *
+ * Trimmed to something a person would recognise on a button. Null where the page named nobody, or
+ * named something too long or too short to be a trading name — a header line that ran together
+ * with an address is worse than no suggestion, because it would be typed onto the register.
+ */
+export function printedSupplierSuggestion(name: string | null | undefined): string | null {
+  const t = (name ?? "").replace(/\s+/g, " ").trim();
+  if (t.length < 2 || t.length > 60) return null;
+  return t;
+}
+
+/**
+ * Whether a CSV is a totals sheet belonging to a report whose detail arrives beside it.
+ *
+ * Deliberately narrow: a short header with a money column and a grouping column, and none of the
+ * identifiers a detail row has. A detail sheet always names the transaction — a receivable, a
+ * credit number, an Rx — and a summary never does.
+ */
+export function looksLikeReportSummary(headers: string[]): boolean {
+  if (headers.length === 0 || headers.length > 10) return false;
+  const has = (re: RegExp) => headers.some((h) => re.test(h));
+  const hasMoney = has(/^(Gross )?Returns \(\$\)$/i) || has(/^Gross Document Amount/i) || has(/^Net Returned Price/i);
+  /*
+   * The exact column, not a word inside one.
+   *
+   * A summary counts the things a detail sheet lists, so it names them: "Count of Receivable
+   * Number" is a summary column and matching it as a detail key made the totals sheet read as
+   * unrecognised and land on his inbox needing a person.
+   */
+  const hasDetailKey = has(/^(Receivable Number|Invoice\/Credit Number|Rx Number|Reference Number)$/i);
+  return hasMoney && !hasDetailKey;
+}

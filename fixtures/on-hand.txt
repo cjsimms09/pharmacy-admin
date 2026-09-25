@@ -1,0 +1,32 @@
+# Fixture: a PioneerRx on-hand / inventory export, as the column shape the reader accepts.
+#
+# No real file has ever arrived, so this is built from what the report designer offers rather than
+# cut from something the pharmacy sent — and it is here so that the first real one lands on the
+# first try instead of being debugged on the day it matters.
+#
+# Every item number and quantity is invented. NDCs are real products, because an NDC identifies a
+# drug and not a person, and the reader's whole job is to recognise them.
+#
+# What it exercises:
+#   - a title and a date line above the header, which every PioneerRx report prints;
+#   - the tab separator the export uses by default;
+#   - a quantity with decimals, which is how a partial bottle comes out;
+#   - a UPC rather than an NDC on a front-shop line, which is a code the reader keeps but cannot
+#     price against NADAC;
+#   - a row with no quantity at all, which must be skipped rather than filed as zero;
+#   - an inventory group, so the dispensing shelf can be told from the front shop;
+#   - a manufacturer that wrapped onto a line of its own and still arrived at the full column
+#     width, which is the tail the narrow-line test cannot catch. It carries no code and no
+#     quantity, so it is a tail and not a record whose NDC went missing.
+Inventory Search Results
+West Wichita Family Pharmacy
+Count Date:	9/30/2026
+Item Number	Description	NDC	Inventory Group	Quantity On Hand	Unit	Unit Cost	Extended Cost
+100234	ATORVASTATIN 20MG TAB 90	00093505698	Rx	270.000	EA	$0.0241	$6.51
+100235	METFORMIN HCL ER 500MG TAB 100	00093105301	Rx	1400.000	EA	$0.0189	$26.46
+100236	AMOXICILLIN 400MG/5ML SUSP 100ML	00093416073	Rx	3.500	ML	$0.0312	$0.11
+100237	GABAPENTIN 300MG CAP 100	00093571401	Rx	820.000	EA	$0.0402	$32.96
+100238	IBUPROFEN 200MG TAB 100CT	305730164016	Front Shop	24.000	EA	$0.0150	$0.36
+100239	LEVOTHYROXINE 50MCG TAB 90	00093145306	Rx		EA	$0.0355
+100240	MOUNJARO 12.5MG/0.5ML PEN	00002150680	Rx	4.000	EA	$212.4400	$849.76
+		AMNEAL PHARMACEUTICALS, LLC					

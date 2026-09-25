@@ -1,0 +1,1 @@
+ALTER TABLE `obligation_completions` ADD `signature_id` text;

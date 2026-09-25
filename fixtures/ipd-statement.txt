@@ -1,0 +1,72 @@
+// The text layer of IPD's statement of account, as pdfText extracts it.
+// Every identifier is changed and every one changed consistently: the invoice settled across both offsets is still
+// one invoice. Dates and amounts are as printed, because the reader's arithmetic is checked against them.
+Done
+Done
+Statement
+High Point, NC 27260
+www.ipdpharma.com
+As of: 9/15/2026
+:  (555) 555-07000006
+:  (555) 555-07000006
+DEA#: XX0000000
+WESAttention: COCustomer ID 5000 
+70000060 W TEST ST (555) 555-07000006
+STE 5Fax: (555) 555-07000006
+TESTTOWN, KS 60000
+USA
+Original Amount Running 
+Due Date 
+AmountRemainingBalance
+Age
+Reference #DateDue DateDescription
+700000608/24/202609/25/2026Invoice 5,828.13  5,721.13  5,721.13 (10)
+700001408/27/202609/25/2026Invoice 1,766.54  1,766.54  7,487.67 (10)
+700001508/31/202609/25/2026Invoice 1,509.72  1,509.72  8,997.39 (10)
+700001609/04/202610/10/2026Invoice 227.94  227.94  9,225.33 (25)
+700001709/08/202610/10/2026Invoice 3,255.70  3,255.70  12,481.03 (25)
+Credits used Since 08/15/2026
+Check Date
+Inv. Date
+Payment RefInv/Cr NbrInvPay
+AutoARO09/03/2026
+08/13/2026I 3,277.39
+7000001 2,152.03
+08/17/2026I 4,446.27
+7000002 4,446.27
+08/18/2026I 202.88
+7000003 202.88
+08/20/2026I 1,029.68
+7000004 1,029.68
+08/24/2026I 2,768.34
+7000005 2,768.34
+08/24/2026I 5,828.13
+7000006 107.00
+09/03/2026C-10,706.20
+500020260903CM-10,706.20
+ 0.00
+AutoARO08/19/2026
+07/20/2026I 4,096.93
+7000007 1,588.65
+07/22/2026I 693.00
+7000008 693.00
+07/27/2026I 3,176.10
+7000009 3,176.10
+07/28/2026I 1,838.88
+7000010 1,838.88
+08/05/2026I 840.58
+7000011 840.58
+08/06/2026I 2,255.35
+7000012 2,255.35
+08/10/2026I 2,808.47
+7000013 2,808.47
+08/13/2026I 3,277.39
+7000001 1,125.36
+08/18/2026C-14,326.39
+500020260818CM-14,326.39
+ 0.00
+:g::/
+Amount Due as of  9/15/2026
+2SoaSSo 2c652/Ao/:c652/Ao/p:c652/Ao/:moS/:
+/fi#fg://:g:://:g:://:g:://:g:://:g::/
+/2S6 56C2es /oo/e5/6ll8eou/2s/688/aSoue2/6 u/Aoe2/C6Su/l6Bo 25
