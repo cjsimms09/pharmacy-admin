@@ -1645,6 +1645,40 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
     await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: doc.id, details: text.slice(0, 200) });
     return text;
   }
+  /*
+   * A bill from a vendor registered since it arrived.
+   *
+   * The sweep files bills from known senders as drafts, and knows a sender only once somebody has
+   * told the site about it. A bill that arrives first lands as "unrecognised" and stays there,
+   * because this path — the one a person presses afterwards — had no branch for it. PioneerRx's
+   * own invoice sat like that: $2,180.48 a month, auto-paid, and the books had no record of it.
+   *
+   * Before the supplier-invoice test below, as in the sweep, and for the same reason: a vendor's
+   * PDF can look enough like a wholesaler's to be filed as drugs bought.
+   */
+  const { vendors, vendorForSender } = await import("./expenses");
+  const vendor = vendorForSender(from, await vendors());
+  if (vendor) {
+    const { saveExpense } = await import("./expenses");
+    await saveExpense({
+      vendorId: vendor.id,
+      categoryId: vendor.categoryId,
+      invoiceDate: new Date().toISOString().slice(0, 10),
+      amountCents: vendor.typicalCents ?? 1,
+      description: subject || fileName,
+      documentId: doc.id,
+      status: "draft",
+      source: "email",
+      createdBy: ctx.userName,
+    });
+    const text =
+      `Read again ${stamp}: a bill from ${vendor.name}, filed as a draft under ` +
+      `${vendor.categoryId ? "its usual category" : "no category yet"}. Nothing counts on the month until somebody confirms the amount.`;
+    await db.update(schema.inboxItems).set({ routedAs: "vendor_bill", routeResult: text, reason: null }).where(eq(schema.inboxItems.id, itemId));
+    await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: doc.id, details: text.slice(0, 200) });
+    return text;
+  }
+
   if (looksLikeInvoice({ fileName, mimeType: doc.mimeType, subject, supplier: supplierName, text: words })) {
     const filed = await fileInvoice(
       buf,
