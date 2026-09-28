@@ -4,7 +4,7 @@
 -- carries three things the printed statement does not, and all three are what make a bank line
 -- matchable:
 --
---   the check number  every invoice cleared under one ACH shares it. "CKACH07227740" covers 27
+--   the check number  every invoice cleared under one ACH shares it. "CKACH9990001" covers 27
 --                     invoices and $106,322.62. No bank line will ever equal a single invoice, so
 --                     without this there is nothing to match a debit against.
 --   whether it cleared  "Closed - Cleared" against "Open - Pending Approval". Money gone against

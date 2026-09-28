@@ -1,6 +1,6 @@
 -- What the recognised item lines on an invoice came to, when they did not add up to its total.
 --
--- McKesson invoice 7657944598, 15 September, $10,044.80. The line reader recognised 56 lines and
+-- McKesson invoice 7000000001, 15 September, $10,044.80. The line reader recognised 56 lines and
 -- one — a FreeStyle Libre sensor printed with a GTIN — it did not. The 56 came to $9,880.92, the
 -- all-or-nothing rule rightly refused them, and the site had nothing to say but "usually a scan":
 -- lines_read and lines_unread were stored, the money was not.
