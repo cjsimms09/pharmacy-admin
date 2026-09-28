@@ -161,6 +161,15 @@ const EFFECTS: Record<string, KindEffect> = {
       "the payments stay, and each can be removed on the invoices page, which frees the invoices it paid. The credit stays banked, keyed on the memo's day and amount — so the memo itself, read afterwards, does not bank it again.",
     at: { href: "/inventory/invoices", label: "Invoices" },
   },
+  parmed_eft_notice: {
+    short: "records the ACH, banks nothing",
+    writes:
+      "one supplier payment for the notice's total, with what it puts against each invoice this site holds; no revenue and no deposit — the notice is money going out, and the bank statement is what records it leaving",
+    reversal: "removable",
+    leaves:
+      "the payment stays and can be removed on the invoices page, which frees any invoices it paid. Invoices the notice names that this site does not hold are counted and named on the payment, never created from it — a debit notice says an invoice number and an amount and nothing about what was received.",
+    at: { href: "/inventory/invoices", label: "Invoices" },
+  },
   veridikal_report: {
     short: "pays vouchers, banks nothing",
     writes: "a payment against each claim the Veridikal summary names, counting as revenue only what the claim did not already carry; nothing on the cash account",

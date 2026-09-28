@@ -77,6 +77,21 @@ const TABS: { key: InvoiceSchedule | "all"; label: string; blurb: string }[] = [
   { key: "all", label: "Everything", blurb: "Every supplier invoice, whatever it carries." },
 ];
 
+/*
+ * Where a payment was read from, in his words.
+ *
+ * A lookup and not a chain of ternaries, because the chain that stood here ended in "the bank statement" — so the day
+ * Parmed's EFT debit notice became a fifth source, every payment read from it would have said it came off a bank
+ * statement that has never been read. Correct arithmetic, a passing build, and a sentence that is simply untrue. A
+ * source with no words here prints its own name, which is ugly and honest, instead of somebody else's.
+ */
+const SOURCE_WORDS: Record<string, string | undefined> = {
+  ipd_statement: "IPD's statement",
+  parmed_portal: "Parmed's payment page",
+  parmed_eft_notice: "Parmed's EFT debit notice",
+  bank_debit: "the bank statement",
+};
+
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const monthLabel = (m: string) => `${MONTH_NAMES[Number(m.slice(5, 7)) - 1] ?? m} ${m.slice(0, 4)}`;
 
@@ -2223,7 +2238,7 @@ export default async function InvoicesPage({
                         {p.reference ? <span className="block font-mono text-[11px] text-ink-3">{p.reference}</span> : null}
                         {p.creditMemo ? <span className="block text-[11px] text-ink-3">credit memo {p.creditMemo}</span> : null}
                         <span className="block text-[11px] text-ink-3">
-                          {p.source === "hand" ? "ticked by hand" : `read from ${p.source === "ipd_statement" ? "IPD's statement" : p.source === "parmed_portal" ? "Parmed's payment page" : "the bank statement"}`}
+                          {p.source === "hand" ? "ticked by hand" : `read from ${SOURCE_WORDS[p.source] ?? p.source}`}
                         </span>
                       </td>
                       <td className="align-top text-xs text-ink-2">

@@ -1154,6 +1154,19 @@ export async function importRecognised(
       const r = await fileIpdStatement({ text: pdfText(buf), documentId: filed?.documentId ?? null, fileName }, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined });
       routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
       imported = !r.refused && (r.payments > 0 || r.banked > 0);
+    } else if (cls.kind === "parmed_eft_notice") {
+      /*
+       * Parmed's EFT debit notice: the invoices inside one ACH, the day before it leaves the bank.
+       *
+       * Before the vendor-bill rule, like the other supplier statements — it comes from a wholesaler's own address and
+       * carries a total, so the vendor-bill reader would take it for a bill and book the same money as an expense.
+       * It is a payment against invoices, never a cost of its own.
+       */
+      const { fileParmedEftNotice } = await import("./parmed-eft-notice-store");
+      const { pdfText } = await import("./pdf-text");
+      const r = await fileParmedEftNotice({ text: pdfText(buf), documentId: filed?.documentId ?? null, fileName }, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined });
+      routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
+      imported = !r.refused;
     } else if (cls.kind === "accesshealth_payment") {
       /*
        * Health Mart Atlas's itemised EFT. Claim payments only, revenue nought, never banked: the payer payment report

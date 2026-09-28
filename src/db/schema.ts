@@ -1124,7 +1124,7 @@ export const supplierInvoices = sqliteTable(
 );
 
 export const SUPPLIER_PAYMENT_METHODS = ["offset", "ach", "cheque", "card", "unknown"] as const;
-export const SUPPLIER_PAYMENT_SOURCES = ["hand", "ipd_statement", "parmed_portal", "bank_debit"] as const;
+export const SUPPLIER_PAYMENT_SOURCES = ["hand", "ipd_statement", "parmed_portal", "parmed_eft_notice", "bank_debit"] as const;
 /** How a payment's allocations were known. "inferred" is reserved: no rule writes it until the owner decides one may. */
 export const SUPPLIER_PAYMENT_BASES = ["document", "hand", "inferred"] as const;
 

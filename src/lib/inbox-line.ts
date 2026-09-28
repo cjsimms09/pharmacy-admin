@@ -86,6 +86,8 @@ const KIND_WORDS: Record<string, string> = {
   accesshealth_payment: "Health Mart Atlas payment detail",
   /* Which IPD invoices a credit memo settled, and the credit banked on the memo's own day. See ipd-statement-store.ts. */
   ipd_statement: "IPD statement of account",
+  /* The invoices inside one Parmed ACH, the day before it leaves the bank. See parmed-eft-notice-store.ts. */
+  parmed_eft_notice: "Parmed EFT debit notice",
   /* One Veridikal ACH itemised (eVoucher or Denial Conversion): claim payments posted, nothing banked. See veridikal-report-store.ts. */
   veridikal_report: "Veridikal voucher payments",
   /* How the till was paid. Checks the card batch and the claims; books nothing. See sales-by-payment.ts. */
