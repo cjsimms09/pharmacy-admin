@@ -96,6 +96,25 @@ export type Facts = {
    * *nothing to check* from *all clear* is not a check, and this is the pair that tells them apart.
    */
   remittanceRegisterRows: number;
+  /**
+   * How many of those rows carry a payment number, which is the population the check can judge.
+   *
+   * Not the same as the row count, and the difference is not a rounding of it: a remittance with no
+   * payment number is ProviderPay saying it has not matched that money to a deposit, so no cash is
+   * owed for it yet and it is deliberately outside the comparison. Reporting the row count as though
+   * it were the number checked claims to have looked at money nobody has looked at.
+   */
+  remittanceRegisterOwed: number;
+  /**
+   * The newest remittance date the register holds, or null while it holds none.
+   *
+   * The horizon of the check, and the reason it is a fact rather than a sentence: the ProviderPay
+   * pull is monthly and by hand, so between pulls this check is reading an older and older snapshot
+   * while saying nothing about it. A green line that means "reconciled to the 17th" and reads as
+   * "reconciled" is the kind of sentence CLAUDE.md's sixth clause is about — right, and acted on
+   * wrongly.
+   */
+  remittanceRegisterThrough: string | null;
   remittancePaymentsPosted: number;
   /** Today, so the check does not have to ask the clock and can be tested. */
   today: string;
@@ -124,6 +143,28 @@ export type Check = {
 const hoursBetween = (a: string, b: string) => (Date.parse(b) - Date.parse(a)) / 3_600_000;
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const daysBetween = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
+
+/*
+ * How far the remittance register reaches, said on the same line as its verdict.
+ *
+ * The pull is monthly and by hand — the owner, 26 September 2026: "were going to have to get monthly
+ * with out auto task". So a gap between pulls is the design working, and the check must not report
+ * it as a fault. What it must not do either is stay silent about it: on the eleventh day the line
+ * still read "all 51 remittances have their cash" with no hint that it had seen nothing since the
+ * 17th. The horizon goes in the observation, where the number he reads is, and not in a footnote.
+ */
+function horizon(f: Facts): string {
+  if (!f.remittanceRegisterThrough) return "";
+  const days = daysBetween(f.remittanceRegisterThrough, f.today);
+  const how = days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
+  return `, reading to ${f.remittanceRegisterThrough} (${how}) — the last ProviderPay export`;
+}
+
+/** The rows the check deliberately does not judge, named rather than netted out of the count. */
+function unmatched(f: Facts): string {
+  const n = f.remittanceRegisterRows - f.remittanceRegisterOwed;
+  return n === 0 ? "" : `; ${n} more carry no payment number, so no cash is owed for ${n === 1 ? "it" : "them"} yet`;
+}
 
 export function runDailyCheck(f: Facts): Check[] {
   const checks: Check[] = [];
@@ -373,8 +414,8 @@ export function runDailyCheck(f: Facts): Check[] {
           ? "no remittance has been read yet, so there is nothing to compare"
           : `${f.remittancePaymentsPosted} payments came from a remittance and the register holds none of them, so nothing can be compared`
         : f.remittancesNotBanked === 0
-          ? `all ${f.remittanceRegisterRows} remittances with a payment number have their cash`
-          : `${f.remittancesNotBanked} remittance${f.remittancesNotBanked === 1 ? "" : "s"} paid and not banked, ${money(f.remittancesNotBankedCents)} between them`,
+          ? `all ${f.remittanceRegisterOwed} remittances with a payment number have their cash${unmatched(f)}${horizon(f)}`
+          : `${f.remittancesNotBanked} remittance${f.remittancesNotBanked === 1 ? "" : "s"} paid and not banked, ${money(f.remittancesNotBankedCents)} between them${horizon(f)}`,
     ok: f.remittancesNotBanked === 0 && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
     difference:
       f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0

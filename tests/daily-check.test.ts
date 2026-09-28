@@ -21,6 +21,8 @@ const wellRun: Facts = {
   remittancesNotBanked: 0,
   remittancesNotBankedCents: 0,
   remittanceRegisterRows: 51,
+  remittanceRegisterOwed: 51,
+  remittanceRegisterThrough: "2026-09-17",
   remittancePaymentsPosted: 1346,
   today: "2026-09-17",
   now: "2026-09-17T17:00:00.000Z",
@@ -237,5 +239,40 @@ describe("money earned and money arriving", () => {
     const c = check({}, "Money the payer says it has sent has reached the cash account");
     assert.equal(c.ok, true);
     assert.match(c.shouldBe, /not owed yet/);
+  });
+
+  /*
+   * What the green line claims to have looked at.
+   *
+   * On 28 September it read "all 51 remittances with a payment number have their cash" when 46
+   * carried one and the newest was eleven days old — the pull being monthly and by hand, which is
+   * his decision and not a fault. The money was right; the sentence described a wider and more
+   * recent look than had happened, and that is the sentence somebody acts on.
+   */
+  test("it counts the remittances it judges, not every row in the register", () => {
+    const c = check({ remittanceRegisterRows: 51, remittanceRegisterOwed: 46 }, "Money the payer says it has sent has reached the cash account");
+    assert.equal(c.ok, true);
+    assert.match(c.observed, /all 46 remittances/);
+    assert.match(c.observed, /5 more carry no payment number/);
+  });
+
+  test("it says how far back the last export reaches, so a green line cannot read as today's", () => {
+    const c = check({ remittanceRegisterThrough: "2026-09-06", today: "2026-09-17" }, "Money the payer says it has sent has reached the cash account");
+    assert.equal(c.ok, true, "a monthly pull is the design, so a gap is not a failure");
+    assert.match(c.observed, /reading to 2026-09-06 \(11 days ago\)/);
+  });
+
+  test("an export read today says so rather than counting nought days", () => {
+    const c = check({ remittanceRegisterThrough: "2026-09-17", today: "2026-09-17" }, "Money the payer says it has sent has reached the cash account");
+    assert.match(c.observed, /reading to 2026-09-17 \(today\)/);
+  });
+
+  test("the horizon is named on a failing line too, not only a passing one", () => {
+    const c = check(
+      { remittancesNotBanked: 3, remittancesNotBankedCents: 250_000, remittanceRegisterThrough: "2026-09-06", today: "2026-09-17" },
+      "Money the payer says it has sent has reached the cash account",
+    );
+    assert.equal(c.ok, false);
+    assert.match(c.observed, /reading to 2026-09-06/);
   });
 });

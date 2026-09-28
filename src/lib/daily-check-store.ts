@@ -1,5 +1,5 @@
 import "server-only";
-import { db } from "@/db";
+import { db, schema } from "@/db";
 import { sql } from "drizzle-orm";
 import { getSettings } from "./settings";
 import { todayIso } from "./dates";
@@ -106,6 +106,20 @@ async function gather(): Promise<Facts> {
   const notBanked = await notBankedRows();
 
   const registerRows = await one(sql`select count(*) as n from remittance_register`);
+  /*
+   * The two facts that say what the check below is actually able to see.
+   *
+   * It compares remittances that carry a payment number against banked cash, so the population it
+   * covers is those rows and not the whole register — and it can only see as far as the last export,
+   * because the pull is monthly and by hand. Both were absent, and the sentence it wrote said "all
+   * 51 remittances with a payment number have their cash" on a morning when 46 carried one and the
+   * newest of them was eleven days old. Right about the money, wrong about what it had looked at.
+   */
+  const registerOwed = await one(sql`select count(*) as n from remittance_register where payment_number is not null`);
+  const registerThrough = await db
+    .select({ on: sql<string | null>`max(remit_on)` })
+    .from(schema.remittanceRegister)
+    .then((r) => r[0]?.on ?? null);
   const remitSourced = await one(sql`select count(*) as n from claim_payments where reference like 'ProviderPay %'`);
 
   const settings = await getSettings();
@@ -135,6 +149,8 @@ async function gather(): Promise<Facts> {
     paymentsCountedTwiceCents,
     remittancesNotBanked: notBanked.length,
     remittanceRegisterRows: registerRows,
+    remittanceRegisterOwed: registerOwed,
+    remittanceRegisterThrough: registerThrough,
     remittancePaymentsPosted: remitSourced,
     remittancesNotBankedCents: notBanked.reduce((n, r) => n + r.amountCents, 0),
     today: todayIso(),
