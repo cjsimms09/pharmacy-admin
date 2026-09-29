@@ -74,6 +74,34 @@ const FOOT = {
 
 /** The lowest a table row may be drawn on a page that still has to carry the totals. */
 const LAST_PAGE_FLOOR = FOOT.rule + 84;
+
+/*
+ * Where a draft says how much of the month is in, and why it is beside the total rather than below it.
+ *
+ * It used to be laid out downwards from the AMOUNT DUE box while the payment block is anchored
+ * upwards from the foot, with nothing holding the two apart. On the September draft — twenty-one
+ * rows, so the totals sat as low as the floor allows — it landed inside the payment block and
+ * printed "The remaining 1 day is still to come…" straight over "Payment by check made payable to
+ * Madison Simms": 235 points of one sentence on top of another, and the same line 39 points out
+ * into the right margin besides.
+ *
+ * Reserving vertical room for it works and costs a page. September fills the sheet exactly — 21
+ * rows with no slack at all — so any height kept free below the total, even one line's worth,
+ * carries the last rows overleaf. A draft of a month that has just ended would arrive two pages
+ * long while the invoice issued from it is one, which is a worse document than the one being fixed.
+ *
+ * There is no need for the height. The AMOUNT DUE box starts two-fifths of the way across the page
+ * and everything to its left is blank, on every invoice this has ever produced. So the note goes
+ * there, level with the box, in space the layout was already wasting: no room to reserve, nothing
+ * below the total to collide with, and the reader finds it beside the figure it qualifies.
+ */
+const DRAFT_NOTE = {
+  /** Between the note's right edge and the left edge of the AMOUNT DUE box. */
+  gap: 16,
+  line: 11,
+  /** The box is 36 points tall; three lines beside it is what fits without reaching past it. */
+  maxLines: 3,
+};
 /** The lowest a row may be drawn on a page that continues overleaf. */
 const CONTINUED_FLOOR = FOOT.rule + 26;
 
@@ -243,21 +271,28 @@ export function invoicePdf(invoice: DriverInvoice, lines: InvoiceLine[], parties
   text({ x: M, y, text: `Delivery driver for ${parties.forWhom}`, size: 9, grey: 0.35 });
   y -= 30;
 
-  text({
-    x: M,
-    y,
-    text: `Prescription deliveries and daily mail runs for ${parties.forWhom}, ${monthLabel(invoice.month)}.`,
-    size: 10,
-  });
-  y -= 13;
-  text({
-    x: M,
-    y,
-    text: `${invoice.deliveries} deliveries and ${invoice.mailTrips} mail trips, ${trips} trips in total at ${money(invoice.rateCents)} each.`,
-    size: 10,
-    grey: 0.3,
-  });
-  y -= 28;
+  /*
+   * Wrapped, because the pharmacy's name is in it and a name is as long as it is.
+   *
+   * This sentence carries `forWhom` and was drawn as one line from the left margin: at the length
+   * of a real trading name with "of Greater …" in it, it reaches fifty points past the right edge
+   * of the text block. It has never done so on this pharmacy's own name, which is why it stood —
+   * the fault is in the input nobody has typed yet, and the page it would ruin is the only page
+   * this system sends outside the building.
+   */
+  for (const line of wrapForPdf(`Prescription deliveries and daily mail runs for ${parties.forWhom}, ${monthLabel(invoice.month)}.`, 10, RIGHT - M)) {
+    text({ x: M, y, text: line, size: 10 });
+    y -= 13;
+  }
+  for (const line of wrapForPdf(
+    `${invoice.deliveries} deliveries and ${invoice.mailTrips} mail trips, ${trips} trips in total at ${money(invoice.rateCents)} each.`,
+    10,
+    RIGHT - M,
+  )) {
+    text({ x: M, y, text: line, size: 10, grey: 0.3 });
+    y -= 13;
+  }
+  y -= 15;
 
   // ── The working ──────────────────────────────────────────────────
   /*
@@ -270,6 +305,18 @@ export function invoicePdf(invoice: DriverInvoice, lines: InvoiceLine[], parties
    */
   const scratch: Draw[] = [];
   const continuedTableTop = mastheadInto(scratch) - 22 - 20;
+
+  /*
+   * The draft note, wrapped now because the page has to be split around it.
+   *
+   * Both sentences depend only on how much of the month is in, which is known before a single row
+   * is placed — so the number of lines they take, and therefore the room the last sheet has to keep
+   * free, is knowable here. See NOTE above for what went wrong when it was not.
+   */
+  const weekdays = weekdaysIn(invoice.month).length;
+  const stillToCome = Math.max(0, weekdays - lines.length);
+  const draftNote: string[] = draft ? draftNoteLines(lines.length, weekdays, monthLabel(invoice.month)) : [];
+
   const sizes = paginate(lines.length, y - 20, continuedTableTop);
   const chunks: InvoiceLine[][] = [];
   {
@@ -355,29 +402,20 @@ export function invoicePdf(invoice: DriverInvoice, lines: InvoiceLine[], parties
      * the one thing worth saying in that space, and it is the whole reason a draft exists: how
      * much of the month is in, and what happens when the rest is.
      */
-    if (draft) {
-      const total = weekdaysIn(invoice.month).length;
-      const left = Math.max(0, total - lines.length);
-      y -= 44;
-      text({
-        x: M,
-        y,
-        text: `${lines.length} of the ${total} weekdays in ${monthLabel(invoice.month)} have been entered.`,
-        size: 9.5,
-        grey: 0.35,
-      });
-      y -= 12;
-      text({
-        x: M,
-        y,
-        text:
-          left === 0
-            ? "The month is complete. The invoice is issued, numbered and sent as soon as it is closed."
-            : `The remaining ${left} ${left === 1 ? "day is" : "days are"} still to come. The invoice is numbered and sent on its own once the last weekday is entered.`,
-        size: 9.5,
-        grey: 0.35,
-      });
-    }
+    /*
+     * Wrapped, like everything else on this page that is a sentence rather than a figure.
+     *
+     * These two were drawn as single lines from the left margin, and the second of them is 114
+     * characters: on the September draft it reached x=595 on a 612-point sheet whose text block
+     * ends at 556, so it stood 39 points out into the right margin past every other line on the
+     * page. The same fault the closing sentence in `foot` carries a paragraph about, in the same
+     * file — and invisible for the same reason, because a position off the page is drawn exactly
+     * as happily as one on it. Measured by reading the generated PDF's own content stream back.
+     */
+    /* Level with the AMOUNT DUE box, in the blank to its left. See DRAFT_NOTE. */
+    draftNote.forEach((line, i) => {
+      text({ x: M, y: y + 8 - i * DRAFT_NOTE.line, text: line, size: 8, grey: 0.4 });
+    });
 
     foot(index + 1, pageCount);
   });
@@ -390,6 +428,36 @@ export function invoicePdf(invoice: DriverInvoice, lines: InvoiceLine[], parties
       : `Delivery invoice ${invoice.invoiceNumber} — ${monthLabel(invoice.month)}`,
     pages,
   );
+}
+
+/** The width the draft note has beside the AMOUNT DUE box. */
+export const DRAFT_NOTE_W = COL.deliveries - 60 - DRAFT_NOTE.gap - M;
+
+/**
+ * What a draft says about how much of the month is in, in the lines it will be drawn on.
+ *
+ * Exported because the one thing that can go wrong here cannot be seen on the page: the note has
+ * three lines beside the box and no more, and the first version of this simply took the first three
+ * of whatever it wrapped to. On the September draft that printed "…it is numbered and sent once the
+ * last is" and stopped — a sentence cut mid-thought on a document sent outside the pharmacy, which
+ * is worse than the overlap it was written to fix, and nothing in the generated file looks wrong.
+ *
+ * So a sentence too long for the space is not trimmed. The short form is used instead, and if even
+ * that will not fit the note is left off altogether — a draft with no note is merely quieter, and a
+ * draft with half a sentence on it is an invoice somebody queries.
+ */
+export function draftNoteLines(entered: number, weekdays: number, month: string, width: number = DRAFT_NOTE_W): string[] {
+  const left = Math.max(0, weekdays - entered);
+  const full =
+    left === 0
+      ? `All ${weekdays} weekdays in ${month} are in. Numbered and sent as soon as the month is closed.`
+      : `${entered} of the ${weekdays} weekdays in ${month} are in. ${left} still to come; numbered and sent when the last is entered.`;
+  const short = left === 0 ? `All ${weekdays} weekdays in ${month} are in.` : `${entered} of ${weekdays} weekdays in. ${left} still to come.`;
+  for (const sentence of [full, short]) {
+    const lines = wrapForPdf(sentence, 8, width);
+    if (lines.length <= DRAFT_NOTE.maxLines) return lines;
+  }
+  return [];
 }
 
 /** How many rows fit between a table top and a given floor. */

@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { paginate, fit } from "../src/lib/driver-invoice-pdf";
+import { paginate, fit, draftNoteLines, DRAFT_NOTE_W } from "../src/lib/driver-invoice-pdf";
 import { textWidth } from "../src/lib/pdf";
 
 /**
@@ -92,5 +92,64 @@ describe("the note on a day with no trips", () => {
 
   test("no room means nothing rather than a stray ellipsis over the figures", () => {
     assert.equal(fit("anything", 8.5, 0), "");
+  });
+});
+
+/**
+ * What a draft says about how much of the month is in.
+ *
+ * It sits beside the AMOUNT DUE box, in the blank the layout was already wasting to its left, and
+ * that blank is 176 points wide and three lines tall. Two things can go wrong there and neither is
+ * visible on the generated page: a sentence longer than the space, silently trimmed to its first
+ * three lines, and a sentence wide enough to run under the box.
+ *
+ * The September 2026 draft did the first. It printed "...it is numbered and sent once the last is"
+ * and stopped — on the one document this system sends outside the pharmacy.
+ */
+describe("the draft's note about the month so far", () => {
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+  test("it is never cut off, for any month and any number of days entered", () => {
+    for (const name of MONTHS) {
+      const month = `${name} 2026`;
+      for (let weekdays = 19; weekdays <= 23; weekdays++) {
+        for (let entered = 0; entered <= weekdays; entered++) {
+          const lines = draftNoteLines(entered, weekdays, month);
+          if (lines.length === 0) continue; // left off rather than trimmed: allowed, and tested below
+          const sentence = lines.join(" ");
+          assert.ok(sentence.endsWith("."), `${month}, ${entered}/${weekdays}: "${sentence}"`);
+          assert.ok(lines.length <= 3, `${month}, ${entered}/${weekdays}: ${lines.length} lines`);
+        }
+      }
+    }
+  });
+
+  test("every line fits the width it is given, so none can run under the total", () => {
+    for (let entered = 0; entered <= 22; entered++) {
+      for (const line of draftNoteLines(entered, 22, "September 2026")) {
+        assert.ok(textWidth(line, 8) <= DRAFT_NOTE_W + 0.5, `"${line}" is ${textWidth(line, 8).toFixed(1)} wide`);
+      }
+    }
+  });
+
+  test("a full month says so rather than counting nought days still to come", () => {
+    const lines = draftNoteLines(22, 22, "September 2026");
+    assert.match(lines.join(" "), /^All 22 weekdays/);
+    assert.doesNotMatch(lines.join(" "), /still to come/);
+  });
+
+  /*
+   * The space is too narrow for the sentence, which is what the short form is for. Rather than
+   * trim, it steps down; rather than trim the short form, it gives up the note altogether. A draft
+   * with no note is quieter; a draft with half a sentence on it is an invoice somebody queries.
+   */
+  test("a width too small for the full sentence steps down instead of trimming", () => {
+    const narrow = draftNoteLines(21, 22, "September 2026", 90);
+    assert.ok(narrow.length === 0 || narrow.join(" ").endsWith("."), `"${narrow.join(" ")}"`);
+    assert.ok(narrow.length <= 3);
+  });
+
+  test("a width too small for either form leaves the note off rather than printing part of one", () => {
+    assert.deepEqual(draftNoteLines(21, 22, "September 2026", 24), []);
   });
 });
