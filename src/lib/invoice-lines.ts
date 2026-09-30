@@ -478,6 +478,32 @@ export type PackagesOf = (productNdc9: string) => string[];
  * front of what is left instead of guessing at that too.
  */
 export function ndcFromRun(run: string, known?: KnownNdc, packagesOf?: PackagesOf): { code: string; printed: number } {
+  /*
+   * A run shorter than eleven digits has no eleven-digit NDC in it, and never claims one.
+   *
+   * This used to take `slice(-11)` of whatever it was given and report `printed: 11` regardless. On
+   * a nine-digit run that returned nine characters while saying eleven had been read, so the caller
+   * asked `ndc11` for an NDC out of nine digits, got nothing, and threw the line away — and the
+   * item number it would have kept was computed as `slice(0, -2)`, two digits chopped off a run
+   * that had no item number in it at all. IPD 1020382, 29 September 2026: `435470354`, the Solco
+   * lisinopril 43547-0354 with its package code clipped, $14.99 of an invoice that then would not
+   * add up to its own printed total.
+   *
+   * Below eleven the run is one of two things and the directory is what tells them apart: nine or
+   * ten digits that name a product the FDA lists is that product with the package code clipped —
+   * the same clipping as the propranolol below, this time with no item number in front of it — and
+   * anything else is the supplier's own item number, carrying no NDC. `printed: 0` says the second,
+   * and the caller keeps the whole run as the item number and the line as a line with no code.
+   */
+  if (run.length < 11) {
+    if (run.length >= 9 && packagesOf) {
+      const short = run.slice(-9);
+      const packages = packagesOf(short);
+      if (packages.length === 1) return { code: packages[0], printed: 9 };
+      if (packages.length > 1) return { code: short, printed: 9 };
+    }
+    return { code: "", printed: 0 };
+  }
   const last11 = run.slice(-11);
   /* With nobody to ask, the old reading stands rather than a guess replacing it. */
   if (!known || !packagesOf || run.length < 12) return { code: last11, printed: 11 };
@@ -672,17 +698,22 @@ export function parseInvoiceLines(
       // How many digits of the run the NDC column actually took, asked rather than assumed: on one
       // line of IPD 1008931 it printed nine and taking eleven ate two digits of the item number.
       /*
-       * A run too short to hold an NDC is an item number, and that is a fact rather than a failure.
+       * A run with no NDC in it is an item number, and that is a fact rather than a failure.
        *
-       * The shortest NDC this reader accepts is nine digits, so a run below that cannot contain one
-       * however it is cut. Such a line keeps no NDC — nothing is invented for it — and is still
-       * read, because its money is on the invoice whether or not the product has a code. A longer
-       * run that yields no NDC is a different thing and is still refused: there the digits are
-       * there and could not be made sense of.
+       * Such a line keeps no NDC — nothing is invented for it — and is still read, because its
+       * money is on the invoice whether or not the product has a code. A run that does carry digits
+       * where an NDC should be and yields none is a different thing and is still refused: there the
+       * digits are there and could not be made sense of.
+       *
+       * Which of the two it is used to be decided here, by length, and the rule was `run.length < 9`
+       * — so a nine-digit run fell between the two answers. It was too long to be called an item
+       * number and too short to hold an eleven-digit NDC, and the line was thrown away with $14.99
+       * on it. The question belongs to `ndcFromRun`, which is the thing that knows what it managed
+       * to read, and `printed: 0` is its way of saying it found none.
        */
-      const noNdcPrinted = run.length < 9;
-      const read = noNdcPrinted ? { code: null as string | null, printed: 0 } : ndcFromRun(run, known, packagesOf);
-      const key = read.code === null ? null : read.printed === 11 ? ndc11(read.code) : read.code;
+      const read = ndcFromRun(run, known, packagesOf);
+      const noNdcPrinted = read.printed === 0;
+      const key = noNdcPrinted ? null : read.printed === 11 ? ndc11(read.code) : read.code;
       // The line's own arithmetic, as everywhere else here: a description that ran into the digits
       // would otherwise shift every field along it and the wrong cost would look entirely ordinary.
       if ((!key && !noNdcPrinted) || !lineAddsUp(quantity, unitCostCents, extendedCents)) {

@@ -462,3 +462,66 @@ describe("DEA schedules as the FDA writes them", () => {
     assert.equal(scheduleFromDea(["0", "SOMETHING"]), "unknown");
   });
 });
+
+/*
+ * A run too short to hold an eleven-digit NDC.
+ *
+ * IPD 1020382, 29 September 2026, printed `435470354 1 0EACH 14.99  0  14.99` for the Solco
+ * lisinopril — nine digits, 43547-0354 with the package code clipped off, and no item number in
+ * front of it at all. `ndcFromRun` took `slice(-11)` of it regardless, handed back nine characters
+ * while reporting that eleven had been read, and the caller then asked for an NDC out of nine
+ * digits, got nothing, and threw the line away. $14.99 of a $3,907.45 invoice, and the morning
+ * check found the invoice no longer adding up to its own printed total.
+ *
+ * It was also about to store an item number of "4354703" — `slice(0, 9 - 11)` — off a run that
+ * carried none.
+ */
+describe("a digit run shorter than an NDC", () => {
+  const lisinopril = ["43547035403", "43547035409"];
+  const known = (n: string) => lisinopril.includes(n);
+  const packagesOf = (nine: string) => (nine === "435470354" ? lisinopril : nine === "435470999" ? ["43547099930"] : []);
+
+  test("nine digits that name a product are that product, not eleven digits of nothing", () => {
+    const r = ndcFromRun("435470354", known, packagesOf);
+    assert.equal(r.printed, 9);
+    assert.equal(r.code, "435470354", "two packs are listed, so the pack code stays unsaid");
+  });
+
+  test("one package listed settles it to all eleven, as it does on a longer run", () => {
+    assert.deepEqual(ndcFromRun("435470999", known, packagesOf), { code: "43547099930", printed: 9 });
+  });
+
+  /*
+   * The other thing a short run can be. IPD 1018194 printed `1435700` for an EpiPen — the item
+   * number alone. Nothing is invented for it, and `printed: 0` is how that is said, so the caller
+   * keeps the whole run as the item number rather than chopping two digits off it.
+   */
+  test("a short run that names no product is an item number, and says it found no NDC", () => {
+    assert.deepEqual(ndcFromRun("1435700", known, packagesOf), { code: "", printed: 0 });
+  });
+
+  test("it never reports having read more digits than the run holds", () => {
+    for (const run of ["1", "12345", "1435700", "435470354", "4354703540"]) {
+      assert.ok(ndcFromRun(run, known, packagesOf).printed <= run.length, `"${run}"`);
+    }
+  });
+
+  test("read off the whole line, the money is kept and no item number is invented", () => {
+    const line = ["Non-CII", "435470354 1 0EACH 14.99  0  14.99", "LISINOPRI", "Non-CII Subtotal:$14.99 "].join("\n");
+    const p = parseInvoiceLines(line, 1499, known, packagesOf);
+    assert.equal(p.lines.length, 1);
+    assert.equal(p.unreadable.length, 0);
+    assert.equal(p.lines[0].extendedCents, 1499);
+    assert.equal(p.lines[0].ndc11, "435470354");
+    assert.equal(p.lines[0].itemNumber, null, "the run was all NDC; there was no item number to keep");
+  });
+
+  test("a line whose item number is all it carries is still read, with no code against it", () => {
+    const line = ["Non-CII", "1435700 1 0EACH 239.99  0  239.99", "EPINEPHRINE", "Non-CII Subtotal:$239.99 "].join("\n");
+    const p = parseInvoiceLines(line, 23999, known, packagesOf);
+    assert.equal(p.lines.length, 1);
+    assert.equal(p.lines[0].ndc11, null);
+    assert.equal(p.lines[0].itemNumber, "1435700");
+    assert.equal(p.lines[0].extendedCents, 23999);
+  });
+});
