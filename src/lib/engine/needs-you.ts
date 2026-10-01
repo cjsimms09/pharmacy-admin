@@ -130,12 +130,18 @@ async function claimPots(today: string): Promise<Line[]> {
   const by = new Map<string, number[]>();
   for (const r of paid) by.set(r.payer, [...(by.get(r.payer) ?? []), r.days]);
   const p90 = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(0.9 * s.length))]; };
-  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.remit_cents cents, julianday(${today}) - julianday(c.date_filled) age, c.date_filled filled from claims c where c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; cents: number; age: number; filled: string }[];
-  const pots = new Map<string, { n: number; cents: number; dueN: number; dueCents: number; oldest: string; cycle: number | null; sample: number }>();
+  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.remit_cents cents, julianday(${today}) - julianday(c.date_filled) age, c.date_filled filled from claims c where c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; pcn: string | null; cents: number; age: number; filled: string }[];
+  /*
+   * A manufacturer programme is not a plan. The owner, 1 October 2026, of DST / ConnectiveRx (PCN CNRX, every claim
+   * Wegovy): "dst IS a copay card!!!" It pays on its own terms and by its own route, which the site learns from the
+   * first payment; until then the pot is said as a programme's, never as a plan's late money.
+   */
+  const programme = (payer: string, pcn: string | null) => /cnrx|connectiverx|copay|voucher|redsail|veridikal|dst pharmacy/i.test(`${payer} ${pcn ?? ""}`);
+  const pots = new Map<string, { n: number; cents: number; dueN: number; dueCents: number; oldest: string; cycle: number | null; sample: number; programme: boolean }>();
   for (const u of unpaid) {
     const xs = by.get(u.payer) ?? [];
     const cycle = xs.length >= 25 ? p90(xs) : null;
-    const e = pots.get(u.payer) ?? { n: 0, cents: 0, dueN: 0, dueCents: 0, oldest: u.filled, cycle, sample: xs.length };
+    const e = pots.get(u.payer) ?? { n: 0, cents: 0, dueN: 0, dueCents: 0, oldest: u.filled, cycle, sample: xs.length, programme: programme(u.payer, u.pcn) };
     e.n++;
     e.cents += u.cents;
     if (u.filled < e.oldest) e.oldest = u.filled;
@@ -150,12 +156,18 @@ async function claimPots(today: string): Promise<Line[]> {
         id: `claims_unmeasured|${payer}`,
         kind: "claims_unmeasured",
         rank: 3,
-        title: `${payer}: ${money(e.cents)} billed since ${e.oldest}, ${e.sample === 0 ? "nothing ever received" : `only ${e.sample} payment${e.sample === 1 ? "" : "s"} ever received`}`,
-        detail: `${e.n} claims. The site cannot call this late: it has never measured how this payer pays. It can say the pot is large and the oldest claim is ${Math.round(oldestAge)} days old.`,
+        title: e.programme
+          ? `${payer}, a manufacturer programme: ${money(e.cents)} on ${e.n} claims since ${e.oldest}, ${e.sample === 0 ? "nothing received by any route yet" : `only ${e.sample} payment${e.sample === 1 ? "" : "s"} seen`}`
+          : `${payer}: ${money(e.cents)} billed since ${e.oldest}, ${e.sample === 0 ? "nothing ever received" : `only ${e.sample} payment${e.sample === 1 ? "" : "s"} ever received`}`,
+        detail: e.programme
+          ? `A programme pays on its own terms and by its own route; the first payment will say which and how long it takes. The oldest claim is ${Math.round(oldestAge)} days old. Not a plan, not called late.`
+          : `${e.n} claims. The site cannot call this late: it has never measured how this payer pays. It can say the pot is large and the oldest claim is ${Math.round(oldestAge)} days old.`,
         amountCents: e.cents,
         href: "/payers/waiting",
-        answers: [{ label: "Which channel pays them", action: "channel", params: { payer } }, { label: "They pay monthly; wait", action: "wait", params: { payer } }],
-        rows: { payer, claims: e.n },
+        answers: e.programme
+          ? [{ label: "How it pays us", action: "channel", params: { payer } }, { label: "It pays later; wait", action: "wait", params: { payer } }]
+          : [{ label: "Which channel pays them", action: "channel", params: { payer } }, { label: "They pay monthly; wait", action: "wait", params: { payer } }],
+        rows: { payer, claims: e.n, programme: e.programme },
       });
     } else if (e.cycle !== null && e.dueCents >= 500_00) {
       out.push({
