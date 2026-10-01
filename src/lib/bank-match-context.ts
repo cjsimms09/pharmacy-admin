@@ -82,10 +82,16 @@ export async function matchContext(): Promise<MatchContext> {
   const confirmedReceipts = new Set((await db.query.bankLines.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId).filter((id): id is string => id !== null));
   const rebateReceipts = (await db.query.cashReceipts.findMany({ where: like(schema.cashReceipts.sourceKey, "REBATE|%"), columns: { id: true, amountCents: true, receivedOn: true } })).filter((r) => !confirmedReceipts.has(r.id));
   const firstPostage = postageBills.map((b) => b.on).sort()[0] ?? null;
+  /* The register's daily cash-and-cheque deposits no bank line has confirmed: what a counter deposit is a run of. */
+  const registerDeposits = (await db.query.cashReceipts.findMany({ where: like(schema.cashReceipts.sourceKey, "register|%"), columns: { id: true, amountCents: true, receivedOn: true } }))
+    .filter((r) => !confirmedReceipts.has(r.id) && r.receivedOn)
+    .map((r) => ({ id: r.id, amountCents: r.amountCents, receivedOn: r.receivedOn! }))
+    .sort((a, b) => a.receivedOn.localeCompare(b.receivedOn));
 
   return {
     remits,
     rebateReceipts,
+    registerDeposits,
     booksStartOn: SITE_STARTS_ON,
     firstPostageBillOn: firstPostage,
     receipts: receiving.map((r) => ({ id: r.id, number: r.invoiceNumber ?? r.id.slice(0, 8), supplier: r.supplier, totalCents: r.totalCents, invoiceDate: r.invoiceDate })),

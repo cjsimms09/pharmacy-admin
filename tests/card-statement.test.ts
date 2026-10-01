@@ -109,10 +109,11 @@ describe("the bank's card fee debit", () => {
     assert.equal(p.kind === "pays_bill" ? p.expenseId : null, "e1");
   });
 
-  test("with no statement on file it is left for a person, and says to forward the statement rather than book it by hand", () => {
+  test("with no statement on file the fee books itself from the line, and the statement will book nothing beside it (owner, 1 October 2026)", () => {
     const p = placeLine(debit, { ...ctx, cardFeeBills: [{ id: "e1", vendorName: null, amountCents: 2400, invoiceDate: "2026-09-30" }] });
-    assert.equal(p.kind, "unplaced");
-    assert.match(p.why, /Forward that month's statement/);
+    assert.equal(p.kind, "books_bill");
+    assert.equal(p.kind === "books_bill" ? p.category : "", "Card processing and bank fees");
+    assert.match(p.why, /book nothing beside it/);
   });
 });
 

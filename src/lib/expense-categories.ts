@@ -146,5 +146,17 @@ export const SEED_CATEGORIES: SeedCategory[] = [
     sortOrder: 430,
     notes: "Estimated and final income tax paid. The pharmacy's profit is before tax, so this is below the line on the cash account and absent from the accrual one.",
   },
+  {
+    name: "Sales tax remitted",
+    kind: "balance_sheet",
+    sortOrder: 440,
+    notes: "Sales tax the state drafts from the account. Collected at the counter and held for them, so not a cost of running the pharmacy: it leaves the cash account and is absent from the accrual one.",
+  },
+  {
+    name: "Cash over and short",
+    kind: "operating",
+    sortOrder: 450,
+    notes: "The cents, occasionally dollars, by which the counter's deposit differed from what the register said the drawers held. Positive is money the bank got that the register did not count; negative the reverse.",
+  },
   { name: "Other", kind: "operating", sortOrder: 900, notes: "Where a bill goes while somebody decides. A month with much in here is a chart of accounts that needs a line adding." },
 ];

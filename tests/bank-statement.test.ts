@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { parseBankStatement, bankDate, bankCents, placeLines, lineKey } from "../src/lib/bank-statement";
+import { parseBankStatement, bankDate, bankCents, placeLines, lineKey, type MatchContext } from "../src/lib/bank-statement";
 
 const ctx = {
   payers: ["CVS Caremark", "Express Scripts", "OptumRx"],
@@ -215,5 +215,70 @@ describe("the lines September 2026 could not place, and what explains them", () 
     assert.deepEqual(whole.map((o) => o.placement.kind), ["confirms_rebate", "confirms_rebate", "confirms_rebate"]);
     const short = placeLines(lines.slice(0, 2), { ...base, rebateReceipts: [{ id: "reb", amountCents: 1_069_724, receivedOn: "2026-09-17" }] });
     assert.deepEqual(short.map((o) => o.placement.kind), ["rebate_part", "rebate_part"]);
+  });
+});
+
+describe("the fixed monthly debits and the counter's deposits (1 October 2026)", () => {
+  const base: MatchContext = { payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [], booksStartOn: "2026-09-01" };
+  const one = (on: string, description: string, amountCents: number, ctx: MatchContext = base) => placeLines([{ on, description, amountCents, key: description + amountCents }], ctx)[0].placement;
+
+  test("each fixed monthly debit books itself under its category, with the payee named", () => {
+    const cases: [string, number, string][] = [
+      ["KSDEPTOFREVENUE/TAXDRAFTS 999000000000F01 WEST WICHITA FAM", -112_766, "Sales tax remitted"],
+      ["Ln 9999 Pmt from DD 9999", -794_932, "Loan principal"],
+      ["CPESN USA LLC/CPESN Sep CPESN SEP 2026999 WEST WICHITA", -12_500, "Professional fees"],
+      ["PIONEERRX/EPAY N999-999 WEST WICHITA FAMILY PH", -234_729, "Software and systems"],
+      ["SHA PROVIDERPAY/AUTO ACH CKACH9990001 WEST WICHITA FAMILY P", -53_599, "Professional fees"],
+      ["HRTLAND PMT SYS/TXNS/FEES 650000019999999 WEST WICHITA FAM", -477_873, "Card processing and bank fees"],
+    ];
+    for (const [d, cents, category] of cases) {
+      const p = one("2026-09-15", d, cents, { ...base, cardFeeBills: [] });
+      assert.equal(p.kind, "books_bill", d);
+      assert.equal(p.kind === "books_bill" ? p.category : "", category, d);
+    }
+  });
+
+  test("a PioneerRx bill already on file for the amount still wins over the fixed rule", () => {
+    const ctx = { ...base, vendors: [{ id: "v", name: "RedSail Technologies (PioneerRx)" }], unpaidBills: [{ id: "b", vendorId: "v", vendorName: "RedSail Technologies (PioneerRx)", amountCents: 234_729, invoiceDate: "2026-09-10" }] };
+    const p = one("2026-09-22", "PIONEERRX/EPAY N999-999 WEST WICHITA FAMILY PH", -234_729, ctx);
+    assert.equal(p.kind, "pays_bill");
+  });
+
+  const register = [
+    { id: "d1", amountCents: 36_001, receivedOn: "2026-09-01" },
+    { id: "d2", amountCents: 5_350, receivedOn: "2026-09-02" },
+    { id: "d3", amountCents: 17_846, receivedOn: "2026-09-03" },
+    { id: "d4", amountCents: 8_813, receivedOn: "2026-09-04" },
+    { id: "d5", amountCents: 1_058, receivedOn: "2026-09-05" },
+    { id: "d6", amountCents: 24_263, receivedOn: "2026-09-08" },
+    { id: "d7", amountCents: 21_457, receivedOn: "2026-09-09" },
+  ];
+
+  test("three counter deposits on one day are the first week, the second week, and something else — whichever order the bank lists them", () => {
+    const out = placeLines(
+      [
+        { on: "2026-09-16", description: "Deposit", amountCents: 45_720, key: "a" },
+        { on: "2026-09-16", description: "Deposit", amountCents: 69_069, key: "b" },
+        { on: "2026-09-16", description: "Deposit", amountCents: 23_267, key: "c" },
+      ],
+      { ...base, registerDeposits: register },
+    );
+    const [week2, week1, other] = out.map((o) => o.placement);
+    assert.equal(week1.kind, "confirms_run");
+    assert.deepEqual(week1.kind === "confirms_run" ? [week1.receiptIds, week1.overShortCents] : [], [["d1", "d2", "d3", "d4", "d5"], 1]);
+    assert.equal(week2.kind, "confirms_run");
+    assert.deepEqual(week2.kind === "confirms_run" ? [week2.receiptIds, week2.overShortCents] : [], [["d6", "d7"], 0]);
+    assert.equal(other.kind, "unplaced");
+  });
+
+  test("a deposit more than a dollar from any run is not those days", () => {
+    const p = one("2026-09-16", "Deposit", 70_000, { ...base, registerDeposits: register });
+    assert.equal(p.kind, "unplaced");
+  });
+
+  test("a run never reaches past the deposit's own day", () => {
+    const p = one("2026-09-03", "Deposit", 41_351, { ...base, registerDeposits: register });
+    assert.equal(p.kind, "confirms_run");
+    assert.deepEqual(p.kind === "confirms_run" ? p.receiptIds : [], ["d1", "d2"]);
   });
 });

@@ -15,7 +15,7 @@ import { SITE_STARTS_ON } from "@/lib/books-start";
 import type { SolvedStatement, Unproven } from "@/lib/scanned-bank-solve";
 import { readFile } from "@/lib/files";
 import { parseCents } from "@/lib/money";
-import { addCashReceipt, categories, saveExpense, seedCategories, unpaid, vendors } from "@/lib/expenses";
+import { addCashReceipt, categories, saveExpense, saveVendor, seedCategories, unpaid, vendors } from "@/lib/expenses";
 import { allSuppliers } from "@/lib/suppliers-registry";
 import { CARD_STATEMENT_BILL } from "@/lib/card-statement";
 import { readBankDescriptor } from "@/lib/bank-descriptors";
@@ -323,6 +323,25 @@ async function placeStatementLines(
       depositCents += line.amountCents;
     } else if (placement.kind === "before_books") {
       placedAs = "before_books";
+    } else if (placement.kind === "confirms_run") {
+      for (const id of placement.receiptIds) claimed.add(id);
+      receiptId = placement.receiptIds[0];
+      placedAs = "confirms_deposit";
+      why = placement.why;
+      confirmed++;
+      confirmedCents += line.amountCents;
+      /* The cents the counter and the register disagree by, booked so the cash account still equals the bank. */
+      if (placement.overShortCents > 0) {
+        await addCashReceipt({ month: line.on.slice(0, 7), kind: "other", amountCents: placement.overShortCents, payer: "Cash over", notes: `The counter deposit of ${line.on} was this much more than the register's days ${placement.from} to ${placement.to}.`, receivedOn: line.on, sourceKey: `bank-overshort|${line.key}`, documentId, createdBy: user.id });
+      } else if (placement.overShortCents < 0) {
+        await seedCategories();
+        const category = (await categories(true)).find((c) => c.name === "Cash over and short");
+        await saveExpense({ vendorId: null, categoryId: category?.id ?? null, invoiceNumber: `BANK|${line.key}|short`, invoiceDate: line.on, paidOn: line.on, amountCents: -placement.overShortCents, description: `Cash short: the counter deposit of ${line.on} against the register's days ${placement.from} to ${placement.to}`, notes: placement.why, documentId, status: "confirmed", source: "manual", createdBy: user.id });
+      }
+    } else if (placement.kind === "unplaced" && line.amountCents > 0 && /^deposit\b/i.test(line.description.trim()) && line.on <= shiftDays(SITE_STARTS_ON, OPENING_TAKINGS_DAYS)) {
+      /* The counter paying in the last days of August, which the books never had. */
+      placedAs = "before_books";
+      why = `A counter deposit on ${line.on}: the drawers' cash and cheques from the days before the books began on ${SITE_STARTS_ON}. No register day was ever going to be on file for it; nothing is banked.`;
     } else if (placement.kind === "card_deposit" && line.on <= shiftDays(SITE_STARTS_ON, OPENING_TAKINGS_DAYS)) {
       /* The processor paying in the last days of August, which the books never had. */
       placedAs = "before_books";
@@ -336,7 +355,9 @@ async function placeStatementLines(
         await seedCategories();
         const category = (await categories(true)).find((c) => c.name === placement.category);
         const vendor = (await vendors(true)).find((v) => v.name.toLowerCase().includes(placement.vendor.toLowerCase()));
-        expenseId = await saveExpense({ vendorId: vendor?.id ?? null, categoryId: category?.id ?? null, invoiceNumber: key, invoiceDate: line.on, paidOn: line.on, amountCents: -line.amountCents, description: line.description, notes: placement.why, documentId, status: "confirmed", source: "manual", createdBy: user.id });
+        /* A fixed monthly payee with no vendor yet is made, so the bill files under a name and not under nobody. */
+        const vendorId = vendor?.id ?? (await saveVendor({ name: placement.vendor, categoryId: category?.id ?? null, cadence: "monthly", notes: `Made from the bank statement on ${line.on}: ${placement.why}` }));
+        expenseId = await saveExpense({ vendorId, categoryId: category?.id ?? null, invoiceNumber: key, invoiceDate: line.on, paidOn: line.on, amountCents: -line.amountCents, description: line.description, notes: placement.why, documentId, status: "confirmed", source: "manual", createdBy: user.id });
       }
       bills++;
     } else if (placement.kind === "psao_deposit") {

@@ -229,6 +229,21 @@ const RULES: Rule[] = [
   },
   {
     /*
+     * ProviderPay's own monthly fee, drawn by ACH under "SHA PROVIDERPAY". Not the PSAO fee standing cost
+     * ($619.25, Access Health), which is a different arrangement and a different figure. The owner, 1 October
+     * 2026, on the fixed monthly debits: "fix the fixed monthly charges" — booked from the line, every month.
+     */
+    kind: "providerpay_fee",
+    counterparty: "ProviderPay",
+    test: /SHAPROVIDERPAY/,
+    side: "out",
+    lands: "operating",
+    category: "Professional fees",
+    feed: null,
+    why: "ProviderPay's monthly fee for reconciling the remittances, drawn by ACH.",
+  },
+  {
+    /*
      * The owner: "pioneer should match invoice we willr eceive from them for previous month".
      *
      * So their monthly invoice and this debit are one charge seen twice, and whichever arrives
@@ -303,7 +318,7 @@ const RULES: Rule[] = [
     test: /KSDEPTOFREVENUE|KS\s*DEPT\s*OF\s*REVENUE/,
     side: "out",
     lands: "balance_sheet",
-    category: null,
+    category: "Sales tax remitted",
     feed: null,
     why: "Sales tax drafted by the state. The money was collected at the counter and held for them, so it is not a cost of running the pharmacy.",
   },

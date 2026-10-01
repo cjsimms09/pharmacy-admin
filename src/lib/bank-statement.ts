@@ -188,7 +188,21 @@ export type Placement =
    * document that was never going to be here.
    */
   | { kind: "before_books"; why: string }
+  /**
+   * A counter deposit that is a run of consecutive register days, paid in together.
+   *
+   * The drawers' cash and cheques are banked by the register's day (register.ts); the counter takes several days
+   * to the bank at once, in order. The owner, 1 October 2026: "counter deposits is cash + checks we keep $300 in
+   * each drawer (have 2)". The run starts at the oldest day not yet paid in and ends before the deposit; exact to
+   * the cent, or within a dollar with the difference booked as cash over and short — never more.
+   */
+  | { kind: "confirms_run"; receiptIds: string[]; from: string; to: string; overShortCents: number; why: string }
   | { kind: "unplaced"; why: string };
+
+/** The most a counter deposit may differ from the register's days and still be those days, in cents. */
+export const CASH_OVER_SHORT_CENTS = 100;
+/** The most register days one counter deposit may carry. */
+export const DEPOSIT_RUN_DAYS = 12;
 
 /** A remittance in the register that no receipt yet stands for. */
 export type RegisterRemit = { id: string; payer: string; remitOn: string; amountCents: number; paymentNumber: string | null; remitNumber: string };
@@ -269,6 +283,8 @@ export type MatchContext = {
   booksStartOn?: string;
   /** The earliest postage confirmation on file: a Stamps.com charge before it had no email to be counted from. */
   firstPostageBillOn?: string | null;
+  /** The register's daily cash-and-cheque deposits no bank line has confirmed, oldest first. */
+  registerDeposits?: { id: string; amountCents: number; receivedOn: string }[];
 };
 
 /**
@@ -664,9 +680,16 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
     const fee = ctx.cardFeeBills.filter((b) => b.amountCents === out);
     if (fee.length === 1) return { kind: "pays_bill", expenseId: fee[0].id, vendorName: fee[0].vendorName ?? meaning.counterparty, why: `the card processing fees on the ${fee[0].invoiceDate.slice(0, 7)} statement, exactly this amount` };
     if (fee.length > 1) return { kind: "unplaced", why: `${fee.length} card processing statements are for exactly this amount; mark the right one paid by hand` };
+    /*
+     * No statement on file: the fee is booked from the line. The owner, 1 October 2026: "fix the fixed monthly
+     * charges". When the statement does arrive, card-statement-store.ts finds a fee bill of exactly its total in
+     * the category and books nothing beside it — so this is one cost either way round.
+     */
     return {
-      kind: "unplaced",
-      why: "the card processor taking its monthly fees, but no card processing statement for this amount is on file. Forward that month's statement to the inbox rather than booking this by hand, or the fees will be counted twice when it arrives.",
+      kind: "books_bill",
+      category: "Card processing and bank fees",
+      vendor: "Global Payments (Heartland)",
+      why: "The card processor taking its monthly fees. No card processing statement for this amount is on file, so the fee is booked from the line; the statement, when forwarded, will recognise it and book nothing beside it.",
     };
   }
   /* A supplier paid by debit card: the purchase pays its invoice, or waits for one — its cost comes from the invoice, never from this line. */
@@ -709,6 +732,28 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
   const invByName = invoices.filter((v) => v.supplier && mentions(d, v.supplier));
   if (invByName.length === 1) return { kind: "pays_invoice", invoiceId: invByName[0].id, supplier: invByName[0].supplier!, why: `the ${invByName[0].supplier} invoice for exactly this amount` };
   if (billByName.length > 1 || invByName.length > 1) return { kind: "unplaced", why: "more than one open item has this amount and name; mark the right one paid by hand" };
+  /*
+   * The fixed monthly debits, booked from the line.
+   *
+   * The state's sales tax drafts, the loan, CPESN, PioneerRx's system charge, ProviderPay's fee: each leaves the
+   * account every month at a figure nobody sends a bill for — or sends one that arrives after the money has gone.
+   * They sat "unmatched" on every statement and the owner answered each the same way. 1 October 2026: "fix the
+   * fixed monthly charges." So a debit the descriptor names with a category is booked under it, after every rule
+   * that could tie it to a bill already on file has had its turn — a PioneerRx invoice filed before the debit still
+   * wins, and the next month's invoice finds this month's debit already booked and books nothing.
+   */
+  const FIXED: Record<string, { vendor: string; says: string }> = {
+    sales_tax: { vendor: "Kansas Department of Revenue", says: "the state's sales tax draft" },
+    loan_payment: { vendor: "Loan", says: "the loan payment, all of it under principal until the lender's statement splits out the interest" },
+    network_fee: { vendor: "CPESN", says: "the CPESN network membership" },
+    software: { vendor: "RedSail Technologies (PioneerRx)", says: "PioneerRx's monthly system charge, billed in arrears, with no invoice of theirs on file for this amount" },
+    providerpay_fee: { vendor: "ProviderPay", says: "ProviderPay's monthly fee" },
+  };
+  const fixed = FIXED[meaning.kind];
+  if (fixed && meaning.category) {
+    return { kind: "books_bill", category: meaning.category, vendor: fixed.vendor, why: `${fixed.says}: a fixed monthly debit, booked from the line under ${meaning.category}.` };
+  }
+
   const vendor = ctx.vendors.find((v) => mentions(d, v.name));
   const supplier = ctx.suppliers.find((s) => mentions(d, s.name)) ?? namedByAccount(line.description, ctx.suppliers);
 
@@ -815,6 +860,53 @@ export function placeLines(lines: BankLine[], ctx: MatchContext): { line: BankLi
       remits = remits.filter((r) => !used.has(r.id));
     }
     out.push({ line, placement });
+  }
+  /*
+   * The counter's deposits, as runs of register days.
+   *
+   * Deposits go to the bank in order, so the run always starts at the oldest day not yet paid in — which is why
+   * this is a pass over all the bare deposits rather than a rule inside `placeLine`: three deposits on one day
+   * (16 September 2026: $690.69, $1,604.82, $232.67) are the first week, the second week, and something else, and
+   * which is which depends on the one before being settled first. Passes repeat until nothing more places.
+   */
+  if (ctx.registerDeposits?.length) {
+    let remaining = [...ctx.registerDeposits].sort((a, b) => a.receivedOn.localeCompare(b.receivedOn));
+    let progress = true;
+    while (progress && remaining.length) {
+      progress = false;
+      for (let i = 0; i < out.length; i++) {
+        const { line, placement } = out[i];
+        if (placement.kind !== "unplaced" || line.amountCents <= 0 || !/^deposit\b/i.test(line.description.trim())) continue;
+        const pool = remaining.filter((r) => r.receivedOn < line.on).slice(0, DEPOSIT_RUN_DAYS);
+        let sum = 0;
+        let hit: { n: number; diff: number } | null = null;
+        for (let n = 1; n <= pool.length; n++) {
+          sum += pool[n - 1].amountCents;
+          const diff = line.amountCents - sum;
+          if (Math.abs(diff) <= CASH_OVER_SHORT_CENTS && (!hit || Math.abs(diff) < Math.abs(hit.diff))) hit = { n, diff };
+          if (sum > line.amountCents + CASH_OVER_SHORT_CENTS) break;
+        }
+        if (!hit) continue;
+        const run = pool.slice(0, hit.n);
+        const money = (c: number) => (Math.abs(c) / 100).toFixed(2);
+        out[i] = {
+          line,
+          placement: {
+            kind: "confirms_run",
+            receiptIds: run.map((r) => r.id),
+            from: run[0].receivedOn,
+            to: run[run.length - 1].receivedOn,
+            overShortCents: hit.diff,
+            why:
+              `The counter paying in the register's ${run.length === 1 ? "day" : `${run.length} days`} ${run[0].receivedOn}${run.length > 1 ? ` to ${run[run.length - 1].receivedOn}` : ""} (cash and cheques, ${money(sum)})` +
+              (hit.diff === 0 ? ", to the cent. The statement confirms those receipts; nothing new is banked." : `, ${money(hit.diff)} ${hit.diff > 0 ? "over" : "short"} — booked as cash over and short.`),
+          },
+        };
+        const used = new Set(run.map((r) => r.id));
+        remaining = remaining.filter((r) => !used.has(r.id));
+        progress = true;
+      }
+    }
   }
   /*
    * The rebate, whole. McKesson pays it as separate brand, generic and fee credits on one day; the rebate statement
