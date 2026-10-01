@@ -8,6 +8,7 @@ import { invoiceIssues, type InvoiceIssue } from "./invoices";
 import { monthState, monthLabel, weekdaysIn, monthIsOurs } from "./deliveries";
 import { getSettings } from "./settings";
 import { TRAINING_LABEL, CREDENTIAL_LABEL } from "./labels";
+import { kindWords } from "./inbox-line";
 
 /**
  * What is worth interrupting the pharmacist-in-charge for, and what is not.
@@ -708,6 +709,79 @@ export async function alerts(): Promise<Alert[]> {
     }
   } catch (e) {
     /* A checklist is never worth taking the dashboard down for. */
+    void e;
+  }
+
+  /*
+   * ── A report that arrived, was recognised, and was refused ───────
+   *
+   * The owner, 1 October 2026: "you need to fix this shit. this site is not useful if it doest work
+   * and Ihave to babysit evberything. please stop this stuff from happening."
+   *
+   * He is right and the individual readers are not the point. In two days three correct reports were
+   * refused by three different readers — two Sundays of payment-type takings, a month of them with a
+   * cash-price prescription on it, and September's whole System Sales Summary, $705,263.81 — and in
+   * every case the money simply did not land and nothing anywhere said so. He found all three by
+   * knowing what should have arrived and going to look.
+   *
+   * A reader refusing is not the failure. A reader refusing is sometimes exactly right: the document
+   * really is broken, or truncated, or says two things that cannot both be true, and storing it would
+   * be worse. The failure is that "Held, nothing stored" was a sentence written into a row on the
+   * inbox and read by nothing — so a refusal and a successful load looked identical from anywhere a
+   * person actually looks.
+   *
+   * So it is on the front page now, at "now", because a refused report means a figure the books need
+   * is absent while every screen downstream goes on looking finished.
+   *
+   * Only recognised-and-refused, deliberately. `storyOf` already tells those apart from merely
+   * unrecognised, and the distinction is the whole reason this can be trusted: something unrecognised
+   * is usually nothing — a listserv photograph, somebody's immunisation certificate — and a row that
+   * fires on those every morning is a row that gets scrolled past, which is how the site would end up
+   * exactly where it started.
+   */
+  try {
+    const { storyOf } = await import("./inbox-line");
+    const since = addDays(today, -45);
+    const recent = await db.query.inboxItems.findMany({
+      where: (i, { gte: at }) => at(i.receivedAt, since),
+      columns: { receivedAt: true, fromAddress: true, subject: true, fileName: true, documentId: true, status: true, reason: true, routedAs: true, routeResult: true, imported: true },
+    });
+    /*
+     * The sweep's own answer first, the sentence only as a fall-back.
+     *
+     * `imported` is what the loader returned and the mailbox now keeps (`0132_inbox_counted.sql`).
+     * Reading it is the difference between knowing and guessing: the test that stood here matched
+     * the loader's English, and September's System Sales Summary said "Recognised as the System
+     * Sales Summary but nothing was filed" — which is not one of the four phrasings `storyOf` knows,
+     * so the refusal that cost $705,263.81 was invisible to the inbox page as well as to this.
+     *
+     * Rows written before that column existed have null, and null is not a no. For those the old
+     * sentence test is all there is, and an arrival nobody recorded either way is left alone rather
+     * than assumed to have failed.
+     */
+    const refused = recent
+      .map((r) => ({ row: r, story: storyOf(r) }))
+      .filter(({ row, story }) =>
+        row.imported === false
+          ? story.outcome !== "ignored" && story.outcome !== "filed_only"
+          : row.imported === null && (story.outcome === "held" || story.outcome === "rejected"),
+      )
+      .sort((a, b) => a.row.receivedAt.localeCompare(b.row.receivedAt));
+    if (refused.length > 0) {
+      const names = [...new Set(refused.map(({ row }) => kindWords(row.routedAs) ?? row.fileName ?? "a document"))];
+      out.push({
+        key: "reports-refused",
+        level: "now",
+        title: `${refused.length} report${refused.length === 1 ? " that" : "s that"} arrived and ${refused.length === 1 ? "was" : "were"} not counted`,
+        why:
+          `${names.join(", ")}. ` +
+          `Each was recognised and then refused, so nothing from it reached the books — and every figure that should include it ` +
+          `is quietly short while looking finished. Oldest ${fmt(refused[0].row.receivedAt.slice(0, 10))}.`,
+        href: "/inbox",
+        action: "See what was refused",
+      });
+    }
+  } catch (e) {
     void e;
   }
 

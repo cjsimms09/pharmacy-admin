@@ -88,11 +88,42 @@ const iso = (s: string): string | null => {
 const SECTIONS = [
   "Retail Sales",
   "Rx Sales",
+  /*
+   * A prescription sold without billing a plan — a cash-price fill. It nests inside Rx Sales
+   * alongside the two plan headings, and it was absent from this list, which is what made the
+   * September summary unreadable: see `rowOf` for what that cost.
+   */
+  "Non-Adjudicated Rx Sales",
   "Rx Plan Customer Payments",
   "Rx Plan Third Party Remit",
   "Sales Adjustments",
   "Other",
 ];
+
+/**
+ * The calendar month a report's period is, or null where it is not one month.
+ *
+ * Two shapes are one month and the second was missing. A range inside a single month is obvious.
+ * The other is PioneerRx's own month-end run: September 2026's summary printed its period as
+ * "9/1/2026 - 10/1/2026" and arrived as "Accrual System Sales Totals Summary 10_1_2026 12_00_00 AM"
+ * — scheduled for midnight on the first of the following month, so the last day of the range cannot
+ * carry a sale. Read strictly as two different months it belonged to neither, and the report was
+ * refused for covering "no single calendar month": the month's takings, correct and complete, with
+ * nowhere to go.
+ *
+ * Only the exact shape is accepted — the first of a month to the first of the next — because that is
+ * the one an exclusive end produces. A range from the 1st to the 2nd, or the 3rd to the 3rd, is still
+ * nothing this can name. And the period is stored exactly as printed either way, so a reader who
+ * wants to know what the range said is never relying on this having guessed right.
+ */
+export function monthOf(period: { from: string; to: string }): string | null {
+  if (period.from.slice(0, 7) === period.to.slice(0, 7)) return period.from.slice(0, 7);
+  if (!period.from.endsWith("-01") || !period.to.endsWith("-01")) return null;
+  const [fy, fm] = period.from.split("-").map(Number);
+  const [ty, tm] = period.to.split("-").map(Number);
+  const nextOfFrom = fm === 12 ? { y: fy + 1, m: 1 } : { y: fy, m: fm + 1 };
+  return ty === nextOfFrom.y && tm === nextOfFrom.m ? period.from.slice(0, 7) : null;
+}
 
 export function parseSystemSales(text: string): SystemSales {
   const lines = text.replace(/^﻿/, "").split(/\r?\n/);
@@ -179,7 +210,28 @@ export function parseSystemSales(text: string): SystemSales {
     }
   }
 
-  const rowOf = (section: string, kind: SalesRow["kind"]) => rows.find((x) => x.section === section && x.kind === kind) ?? null;
+  /**
+   * A section's closing line is the one whose label names that section — not the first closing line
+   * that happens to fall inside it.
+   *
+   * September 2026's summary was refused: "Retail and prescriptions do not add to the total the
+   * report printed: 6427.89 against 705263.81." The report was right. 6,247.89 of retail plus
+   * 699,160.28 of prescriptions less 144.36 of adjustments is exactly the 705,263.81 it printed.
+   *
+   * What went wrong is that the month carried a new nested heading, "Non-Adjudicated Rx Sales" — a
+   * cash-price prescription, $180.00 of it. Being unknown, it did not become a section of its own,
+   * so `section` stayed on "Rx Sales" and its "Non-Adjudicated Rx Sales Subtotals:" line was filed
+   * as a subtotal of Rx Sales. It is printed *above* the real "Rx Sales Totals:", and `find` takes
+   * the first match — so the whole of prescriptions read as $180.00 and a correct report was thrown
+   * away for failing an arithmetic test it passes.
+   *
+   * The heading is now listed above, and this is the belt to that brace: whatever new sub-heading
+   * PioneerRx adds next, a section's own closing line is identifiable by its label, and anything
+   * nested that this reader has never heard of cannot stand in for it. The whole-report check is
+   * what then catches money in a section nobody reads — which is the right place for it.
+   */
+  const rowOf = (section: string, kind: SalesRow["kind"]) =>
+    rows.find((x) => x.section === section && x.kind === kind && (kind !== "subtotal" || x.label === section)) ?? null;
   const find = (section: string, kind: SalesRow["kind"]) => rowOf(section, kind)?.totalCents ?? null;
 
   /*
@@ -203,16 +255,33 @@ export function parseSystemSales(text: string): SystemSales {
   const totalCents = rows.find((x) => x.kind === "total")?.totalCents ?? null;
 
   if (rows.length === 0) problems.push(`This does not look like the "${SALES_TITLE}" report — no figures were found in it.`);
-  // The report's own Total column, section by section against its grand total: tax included on both sides.
-  if (retailWithTaxCents !== null && rxCents !== null && totalCents !== null && Math.abs(retailWithTaxCents + rxCents - totalCents) > 2) {
-    problems.push(
-      `Retail and prescriptions do not add to the total the report printed: ${(retailWithTaxCents + rxCents) / 100} against ${totalCents / 100}.`,
-    );
+  /*
+   * The report's own Total column, section by section against its grand total.
+   *
+   * All three sections, and the third is why this is worth a paragraph. The check used to add retail
+   * and prescriptions only, and passed for months because Sales Adjustments was nought every time.
+   * September 2026 carried -$144.36 of manual A/R adjustments and the sum missed the printed total by
+   * exactly that, so a correct report was refused — twice over, this being the second fault in the
+   * same sentence. A check that only holds while a section is empty is not a check; it is a bomb with
+   * a date on it.
+   *
+   * "Other" stays out, deliberately. It is printed *below* the grand total and is not inside it: a
+   * Customer A/R payment is money collected against an account billed earlier, not a sale made now,
+   * and the payment-type reader excludes it for the same reason and says so in the same words.
+   */
+  const adjustmentsForCheck = find("Sales Adjustments", "subtotal") ?? 0;
+  if (retailWithTaxCents !== null && rxCents !== null && totalCents !== null) {
+    const parts = retailWithTaxCents + rxCents + adjustmentsForCheck;
+    if (Math.abs(parts - totalCents) > 2) {
+      problems.push(
+        `Retail, prescriptions and adjustments do not add to the total the report printed: ${parts / 100} against ${totalCents / 100}.`,
+      );
+    }
   }
 
   return {
     period,
-    month: period && period.from.slice(0, 7) === period.to.slice(0, 7) ? period.from.slice(0, 7) : null,
+    month: period ? monthOf(period) : null,
     printedOn,
     rows,
     retailCents,

@@ -1,0 +1,25 @@
+-- Whether an arrival actually reached the books, recorded as a fact rather than inferred from prose.
+--
+-- The sweep has always known. Every loader returns `imported: boolean` and the mailbox has it in hand
+-- at the moment it writes the row — and then threw it away, keeping only the sentence. So everything
+-- downstream that needed to know "did this land" matched that sentence with a regular expression:
+-- `storyOf` in inbox-line.ts tests /^Held, nothing stored|does not balance|could not be loaded/.
+--
+-- On 1 October 2026 that cost the owner September's whole System Sales Summary, $705,263.81. The
+-- reader refused it — correctly, on an arithmetic check that was itself wrong — and said "Recognised
+-- as the System Sales Summary but nothing was filed". Not one of those phrases, so the inbox showed
+-- it as an ordinary arrival, nothing alerted, and he found it by knowing the report had been sent and
+-- going to look. Two Sundays of payment-type takings had gone the same way the week before.
+--
+-- A refusal is a fact the sweep computed. Matching English to recover it is a guess about wording
+-- that every new loader gets a fresh chance to break.
+--
+-- Nullable on purpose, and it is three states rather than two:
+--   1  it reached the books
+--   0  it did not — recognised and refused, or turned away at the gate
+--   NULL  this row was written before the column existed, so nothing recorded it either way
+--
+-- NULL is not "no". Defaulting the existing rows to 0 would put three hundred historic arrivals on
+-- the dashboard as uncounted reports, which is how a new alert gets switched off in a day. Readers
+-- fall back to the old sentence test for a NULL and say so.
+ALTER TABLE `inbox_items` ADD `imported` integer;

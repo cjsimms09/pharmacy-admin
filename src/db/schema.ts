@@ -1569,6 +1569,20 @@ export const inboxItems = sqliteTable(
      */
     routedAs: text("routed_as").notNull(),
     routeResult: text("route_result"),
+    /**
+     * Whether this arrival actually reached the books — the sweep's own answer, kept.
+     *
+     * Every loader returns it and the mailbox has it in hand when it writes the row. It used to be
+     * discarded, so anything that needed to know "did this land" had to match the loader's English:
+     * `storyOf` tests for "Held, nothing stored" and three other phrasings. September 2026's System
+     * Sales Summary said "Recognised as the System Sales Summary but nothing was filed" — none of
+     * them — so $705,263.81 of takings was refused and shown on the inbox as an ordinary arrival.
+     *
+     * Null is a third state and not a no: rows written before this column existed recorded nothing
+     * either way, and treating them as refusals would have put three hundred historic arrivals on
+     * the dashboard. See `drizzle/0132_inbox_counted.sql`.
+     */
+    imported: integer("imported", { mode: "boolean" }),
     scanned: integer("scanned", { mode: "boolean" }).notNull().default(false),
     sweptAt: text("swept_at").notNull().default(now()),
   },

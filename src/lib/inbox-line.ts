@@ -134,11 +134,20 @@ export type LineStory = {
 /*
  * A gate refusal, in every wording the loaders use for it.
  *
+ * Every phrase here was taken from a loader rather than imagined, and the list was incomplete in a
+ * way that cost real money: on 1 October 2026 September's System Sales Summary was refused with
+ * "Recognised as the System Sales Summary but nothing was filed", which matched none of the four
+ * patterns this had, so $705,263.81 of takings showed on the inbox as an ordinary arrival.
+ *
+ * This is now the fall-back rather than the authority — inbox_items.imported records what the sweep
+ * actually decided — and it is kept, and widened, for the rows written before that column existed.
+ *
  * These are deliberately literal. "Held, nothing stored" is what the copay reader says and
  * "does not balance" is what the 835 path says; a loose test like /held/ would catch a catalogue
  * line reading "3 rows held for review" and colour a good load as a refusal.
  */
-const HELD = /^Held, nothing stored|does not balance|could not be loaded|nothing could be loaded/i;
+const HELD =
+  /^Held, nothing stored|does not balance|could not be loaded|nothing could be loaded|nothing was (filed|recorded|stored)|but nothing was filed|no row on it could be read|but no rule says/i;
 
 /**
  * What happened to this arrival, and how it should look.

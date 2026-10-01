@@ -912,6 +912,8 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
              */
             let routedAs = "unrecognised";
             let routeResult: string | null = null;
+            /* The sweep's own answer to "did this reach the books", kept rather than inferred later. */
+            let counted: boolean | null = null;
             /*
              * A supplies invoice is spending, and goes to the books rather than the invoice archive.
              *
@@ -934,19 +936,23 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
                 const booked = await bookSuppliesInvoice(read.invoice, { vendorName: "Rx Systems", from, documentId: docId });
                 routedAs = "supplies_invoice";
                 routeResult = booked.says;
+                counted = Boolean(booked.id);
                 if (!booked.duplicate && booked.id) result.imported++;
               } else {
                 routedAs = "supplies_invoice";
                 routeResult = `A supplies invoice this could not read: ${read.why} Filed as a document; enter it by hand on the Expenses page.`;
+                counted = false;
               }
             } else if ((s.mail_auto_import ?? "").toLowerCase() !== "yes") {
               // Filed, and the line says why it went no further — otherwise a scheduled report that
               // arrives with the switch off looks identical to one that arrived and failed.
               routeResult = "Filed only: automatic loading is switched off under Settings → Email.";
+              counted = false;
             } else {
               const r = await importRecognised(buf, fileName, from, subject, s, ctx, { documentId: docId, supplierId: matched?.id ?? null, supplierName: supplierName ?? null });
               routedAs = r.routedAs;
               routeResult = r.routeResult;
+              counted = r.imported;
               if (r.imported) result.imported++;
             }
 
@@ -969,6 +975,7 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
                     : null),
               routedAs,
               routeResult,
+              imported: counted,
             });
             result.stored++;
           }
@@ -1685,7 +1692,7 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
     const booked = await bookSuppliesInvoice(read.invoice, { vendorName: "Rx Systems", from, documentId: doc.id });
     await db
       .update(schema.inboxItems)
-      .set({ routedAs: "supplies_invoice", routeResult: booked.says, reason: `Read again ${stamp}: a pharmacy supplies invoice, booked as spending rather than filed as a drug invoice.` })
+      .set({ routedAs: "supplies_invoice", routeResult: booked.says, imported: true, reason: `Read again ${stamp}: a pharmacy supplies invoice, booked as spending rather than filed as a drug invoice.` })
       .where(eq(schema.inboxItems.id, itemId));
     await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: doc.id, details: booked.says });
     return booked.says;
@@ -1699,7 +1706,7 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
       .set({ category: "supplier_statement", title: `${supplierName} ${word}${subject ? ` — ${subject}` : ""}` })
       .where(eq(schema.documents.id, doc.id));
     const text = `Read again ${stamp}: this is a ${word} from ${supplierName}, not an invoice. ${kind.why} Filed under supplier statements.`;
-    await db.update(schema.inboxItems).set({ routedAs: "supplier_statement", routeResult: text, reason: null }).where(eq(schema.inboxItems.id, itemId));
+    await db.update(schema.inboxItems).set({ routedAs: "supplier_statement", routeResult: text, reason: null, imported: true }).where(eq(schema.inboxItems.id, itemId));
     await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: doc.id, details: text.slice(0, 200) });
     return text;
   }
@@ -1755,14 +1762,14 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
     const text = filed.needsReview
       ? `Read again ${stamp}: supplier invoice from ${supplierName ?? "a supplier"}, held with the Schedule II records until somebody confirms what it carries.`
       : `Read again ${stamp}: supplier invoice from ${supplierName ?? "a supplier"}, filed under ${where}, kept apart from every other record.`;
-    await db.update(schema.inboxItems).set({ documentId: filed.documentId, routedAs: "invoice", routeResult: text, reason: null }).where(eq(schema.inboxItems.id, itemId));
+    await db.update(schema.inboxItems).set({ documentId: filed.documentId, routedAs: "invoice", routeResult: text, reason: null, imported: true }).where(eq(schema.inboxItems.id, itemId));
     await audit({ action: "invoice.filed", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: filed.documentId, details: `${supplierName ?? "supplier"} · ${filed.schedule} · read again from the inbox` });
     return text;
   }
 
   const r = await importRecognised(buf, fileName, from, subject, s, ctx, { documentId: doc.id, supplierId: matched?.id ?? null, supplierName: supplierName ?? null });
   const text = `Read again ${stamp}: ${r.routeResult ?? (r.routedAs === "unrecognised" ? "still not recognised" : r.routedAs)}`;
-  await db.update(schema.inboxItems).set({ routedAs: r.routedAs, routeResult: text }).where(eq(schema.inboxItems.id, itemId));
+  await db.update(schema.inboxItems).set({ routedAs: r.routedAs, routeResult: text, imported: r.imported }).where(eq(schema.inboxItems.id, itemId));
   await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, details: `${fileName}: ${text.slice(0, 200)}` });
   return text;
 }
