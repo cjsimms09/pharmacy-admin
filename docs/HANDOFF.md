@@ -8,6 +8,21 @@ file is how they talk.
 
 ## Open items
 
+### From the pharmacy session — 1 October: the rebuild has begun. Spec in `docs/REBUILD.md`; stage 1 is live
+
+**Stage 1 of the rebuild is on `feature/compliance`** (commit 1d925fa): the engine (`src/lib/engine`) and Today
+(`/v2/today`, route group `src/app/(site)`). Migration 0134 adds `needs_you`, `feed_state`, `proof_run`,
+`month_status`, `engine_run`. The engine runs last on the half-hourly beat (`src/instrumentation.ts`), after a
+bank placement or a Today answer (`engineAfter`), and proves the books nightly after two.
+- **A migration file needs `--> statement-breakpoint` between statements** or the migrator runs only the first;
+  0133 and 0134 were written without and had to be finished by hand. Every file from here carries the markers.
+- Files the next stages will touch: `src/app/(site)/*` (new screens), `src/lib/engine/*`. The old pages are
+  untouched and stay live until stage 5; a new screen links to the old page that does its job until it exists.
+- Stage 2 (Money) is next: the month view with the answers on screen, Cash ahead, Order from. Say so on the pull
+  request before editing `bank.ts`, `bank-statement.ts` or `bank-match-context.ts` — they changed heavily on
+  1 October (89 → 2 open lines on September; the rules are in the commit messages of that day).
+
+
 ### From 2 — 16 September, before the edit: `inbox/page.tsx` (B's), `audit/page.tsx`, `claims/page.tsx`, `cqi/import/page.tsx`, `settings/email/page.tsx` (A's) — a stored time is shown as the pharmacy's clock reads it
 
 **Written before touching those files**, on branch `work/local-times`. Every timestamp in this database is UTC and this
