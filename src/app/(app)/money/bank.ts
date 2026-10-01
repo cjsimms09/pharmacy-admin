@@ -44,13 +44,13 @@ export async function readBankStatement(fd: FormData) {
     const solved = await solveScanned(kept, {});
     if (!solved.ok) redirect(`${back}&error=${encodeURIComponent(`${solved.why} Nothing was placed.`)}`);
     if (solved.unproven.length > 0) redirect(`${back}&scan=${documentId}`);
-    return placeStatementLines(scannedLines(solved), { documentId, fileName: file.name, skipped: 0, user, back, notes: solved.notes });
+    await placeStatementLines(scannedLines(solved), { documentId, fileName: file.name, skipped: 0, user, back, notes: solved.notes });
   }
 
   const parsed = parseBankStatement(parseCsv(buf.toString("utf8")));
   if (parsed.lines.length === 0) redirect(`${back}&error=${encodeURIComponent(parsed.skipped[0]?.why ?? "Nothing in the file could be read as a bank line.")}`);
   const documentId = await keepStatement(file, `Bank statement ${parsed.lines[0].on} to ${parsed.lines[parsed.lines.length - 1].on}`, user.id);
-  return placeStatementLines(parsed.lines, { documentId, fileName: file.name, skipped: parsed.skipped.length, user, back });
+  await placeStatementLines(parsed.lines, { documentId, fileName: file.name, skipped: parsed.skipped.length, user, back });
 }
 
 /** The file itself is kept, as the record the receipts and paid dates point back to. Null where it could not be. */
@@ -160,13 +160,13 @@ export async function confirmScannedStatement(fd: FormData) {
       )}`,
     );
   }
-  return placeStatementLines(scannedLines(solved), { documentId, fileName: doc!.fileName, skipped: 0, user, back, notes: solved.notes });
+  await placeStatementLines(scannedLines(solved), { documentId, fileName: doc!.fileName, skipped: 0, user, back, notes: solved.notes });
 }
 
 async function placeStatementLines(
   lines: BankLine[],
-  o: { documentId: string | null; fileName: string; skipped: number; user: { id: string; name: string }; back: string; notes?: string[] },
-) {
+  o: { documentId: string | null; fileName: string; skipped: number; user: { id: string; name: string }; back: string; notes?: string[]; quiet?: boolean },
+): Promise<string | never> {
   const { documentId, user, back } = o;
   /*
    * Two lines alike in date, amount and description are two lines. They shared one key, the key is unique, and the
@@ -395,7 +395,6 @@ async function placeStatementLines(
     entityId: documentId ?? undefined,
     details: `${file.name}: ${parsed.lines.length} lines, ${held.size} already held, ${deposits} deposits ${money(depositCents)}, ${confirmed} confirming deposits already banked ${money(confirmedCents)}, ${bills} bills and ${invoices} invoices marked paid, ${unplaced} not placed`,
   });
-  for (const p of ["/money", "/money/monthly", "/expenses", "/inventory/invoices"]) revalidatePath(p);
   const said =
     `${parsed.lines.length} lines read` +
     (held.size ? `, ${held.size} already held` : "") +
@@ -404,7 +403,39 @@ async function placeStatementLines(
     (o.skipped ? `; ${o.skipped} row${o.skipped === 1 ? "" : "s"} could not be read` : "") +
     (o.notes?.length ? ` Read from the scan and proved against its daily balances.` : "") +
     ".";
+  /*
+   * Called from a page, this ends in a redirect that carries the sentence. Called from the sweep or a
+   * script there is no page to go to and no request to revalidate, so the sentence is returned instead —
+   * `revalidatePath` outside a request throws, and `redirect` outside one is a thrown error nobody catches.
+   */
+  if (o.quiet) return said;
+  for (const p of ["/money", "/money/monthly", "/expenses", "/inventory/invoices"]) revalidatePath(p);
   redirect(`${back}&ok=${encodeURIComponent(said)}`);
+}
+
+/**
+ * A scanned statement solved and placed with no browser in the loop: for the sweep, and for a script.
+ *
+ * The same reading and the same placing the Money page does, as the named user, with the figures a
+ * person has confirmed passed in by line index exactly as the page's form passes them. The one thing
+ * it will not do is place a statement the balances cannot prove: an unproven stretch is returned as a
+ * question, as the page would show it, and nothing is written.
+ */
+export async function storeScannedStatement(
+  documentId: string,
+  confirmed: Record<number, number>,
+  user: { id: string; name: string },
+): Promise<{ ok: true; said: string } | { ok: false; why: string; unproven: Unproven[] }> {
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
+  if (!doc || doc.category !== "bank_statement") return { ok: false, why: "That document is not filed as a bank statement.", unproven: [] };
+  const solved = await solveScanned(doc, confirmed);
+  if (!solved.ok) return { ok: false, why: solved.why, unproven: [] };
+  if (solved.unproven.length > 0) {
+    const u = solved.unproven[0];
+    return { ok: false, why: `${u.from}${u.to === u.from ? "" : ` to ${u.to}`} is ${money(Math.abs(u.differenceCents))} ${u.differenceCents > 0 ? "short of" : "over"} the bank's balance. Nothing was placed.`, unproven: solved.unproven };
+  }
+  const said = await placeStatementLines(scannedLines(solved), { documentId, fileName: doc.fileName, skipped: 0, user, back: "/money", notes: solved.notes, quiet: true });
+  return { ok: true, said: said ?? "" };
 }
 
 /** The statement lines that fall in the period: how many were placed, and the ones that were not. */

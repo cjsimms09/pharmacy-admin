@@ -256,6 +256,24 @@ export function readRaw(items: ScanItem[]): RawStatement {
         else pendingAmountWithoutDate = line;
         continue;
       }
+      if (dateText && /^purch/i.test(description)) {
+        /*
+         * A purchase whose amount the scan lost is still a purchase — and only a purchase.
+         *
+         * The bank opens every card line with "Purch", so a dated row that does not is something else
+         * caught beside a date: the address footer at the foot of the page, on this very statement.
+         * That one stays what it was, a scrap, and not a half-line asking to be given a figure.
+         *
+         * "9/25 Purch ANTHROPIC* CLAUDE SUB" came back from recognition with nothing in the amount
+         * column at all, and this branch folded it into the previous purchase's description, as if
+         * it were a second line of that one. The solver then found the 25th short by exactly $164.12
+         * with no line to put it on, and the owner was asked to confirm a figure against nothing.
+         * A row with a date and a name is a line of its own with no amount — a half-line, exactly as
+         * the credits and debits keep theirs — so the day's shortfall has somewhere to land.
+         */
+        lines.push({ section: "card", page: r.page, dateText, amountText: "", credit: false, description });
+        continue;
+      }
       const last = pendingAmountWithoutDate ?? lines[lines.length - 1];
       if (last && last.section === "card" && description) last.description = `${last.description} ${description}`.trim();
       continue;

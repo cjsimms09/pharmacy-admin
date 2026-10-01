@@ -138,6 +138,32 @@ describe("a recognised scan, read as a statement", () => {
     );
   });
 
+  /*
+   * A purchase whose amount the scan lost. It used to fold into the previous purchase's description,
+   * and the solver then had a day short by an exact figure and no line to put it on.
+   */
+  test("a card row with a date and a name but no amount is a half-line of its own", () => {
+    const items = [
+      ...heading(10, 700, "ATM/POS Transactions"),
+      ...row(10, 680, [[75, "9/24"], [213, "8,000.00"], [278, "Purch"], [304, "SUPPLIER"]]),
+      ...row(10, 669, [[278, "CA"], [292, "*****9999"], [340, "09/23"], [367, "01:49"]]),
+      ...row(10, 658, [[75, "9/25"], [278, "Purch"], [304, "ANTHROPIC*"], [362, "CLAUDE"], [399, "SUB"]]),
+      ...row(10, 647, [[278, "FRANCISCO"], [330, "CA"], [344, "*****9999"], [392, "09/24"]]),
+      ...row(10, 636, [[75, "9/25"], [221, "100.00"], [278, "Purch"], [304, "STAMPS.COM"]]),
+    ];
+    const card = readRaw(items).lines.filter((l) => l.section === "card");
+    assert.deepEqual(
+      card.map((l) => [l.dateText, l.amountText]),
+      [
+        ["9/24", "8,000.00"],
+        ["9/25", ""],
+        ["9/25", "100.00"],
+      ],
+    );
+    assert.match(card[1].description, /ANTHROPIC\* CLAUDE SUB FRANCISCO CA/);
+    assert.doesNotMatch(card[0].description, /ANTHROPIC/);
+  });
+
   /* The address footer on the card page, caught in the withdrawal column beside a date. */
   test("a card row whose amount has no digit is not a purchase", () => {
     const items = [

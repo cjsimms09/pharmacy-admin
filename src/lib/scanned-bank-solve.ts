@@ -186,7 +186,12 @@ export function solveStatement(
   const dayIndex = new Map(balanceDays.map((d, i) => [d, i]));
 
   /* ── Each line's possible days: what its characters allow, among days with a balance, kept in order within a section. ── */
-  const lines = raw.lines.filter((l) => l.amountText);
+  /*
+   * A line the scan gave a date and a name but no amount stays in, reading as nothing until a person supplies the
+   * figure (`confirmed`, by this index). Its day then falls short by exactly the figure dropped, which is how the
+   * Money page can show the one line to fix instead of a day that will not balance and no line to put it on.
+   */
+  const lines = raw.lines.filter((l) => l.amountText || (l.dateText && dayOptions(l.dateText)));
   const dayChoices: number[][] = lines.map((l) => {
     const read = dayOptions(l.dateText);
     const allowed = read ? read.filter((d) => dayIndex.has(d)) : [];
@@ -226,7 +231,7 @@ export function solveStatement(
       dayChoices[i] = balanceDays.filter((_, k) => fwd[a][k] + bwd[a][k] - agrees[a][k] === top);
     });
   }
-  const amountChoices = lines.map((l) => amountOptions(l.amountText));
+  const amountChoices = lines.map((l) => (l.amountText ? amountOptions(l.amountText) : [0]));
   for (const [i, cents] of Object.entries(options.confirmed ?? {})) {
     if (!lines[Number(i)] || !Number.isFinite(cents) || cents <= 0) continue;
     amountChoices[Number(i)] = [cents];
@@ -436,18 +441,24 @@ export function solveStatement(
   if (!opening.includes(openingCents)) {
     return fail(`The lines start from ${(openingCents / 100).toFixed(2)}, and the statement's opening balance reads "${raw.summary.beginningText}".`);
   }
-  const solved: SolvedLine[] = lines.map((l, i) => {
+  const dropped = lines.filter((_, i) => assign[i].cents === 0);
+  if (dropped.length) {
+    const one = dropped.length === 1;
+    notes.push(`${dropped.length} line${one ? "" : "s"} with no readable amount ${one ? "was" : "were"} left out; the balances prove ${one ? "its day" : "their days"} without ${one ? "it" : "them"}: ${dropped.map((l) => `"${l.dateText} ${l.description.trim().slice(0, 40)}"`).join(", ")}.`);
+  }
+  const solved: SolvedLine[] = lines.flatMap((l, i): SolvedLine[] => {
     const p = assign[i];
+    if (p.cents === 0) return [];
     const clean = /^\d{1,3}(,\d{3})*\.\d{2}$/.test(l.amountText) && agreesDay(i, p.day) && dayChoices[i].length === 1;
     const said = `"${l.dateText} ${l.amountText}"`;
-    return {
+    return [{
       on: iso(p.day),
       amountCents: sign(i) * p.cents,
       description: l.description.replace(/\s+/g, " ").trim(),
       section: l.section,
       page: l.page,
       decidedFrom: options.confirmed?.[i] !== undefined ? `the scan printed ${said}; a person read it as ${(p.cents / 100).toFixed(2)}` : p.how === "digit" ? `the scan printed ${said}; the balances either side show a digit was misread` : clean && !p.how ? null : `the scan printed ${said}`,
-    };
+    }];
   });
   const creditsCents = solved.filter((s) => s.amountCents > 0).reduce((n, s) => n + s.amountCents, 0);
   const debitsCents = -solved.filter((s) => s.amountCents < 0).reduce((n, s) => n + s.amountCents, 0);
