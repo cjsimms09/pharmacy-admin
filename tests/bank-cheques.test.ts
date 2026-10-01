@@ -109,3 +109,14 @@ describe("the delivery cheque, either side of the month it pays for", () => {
     assert.equal((p as { name: string }).name, "Rent");
   });
 });
+
+describe("the cheque candidates reach the matcher", () => {
+  test("REGRESSION: the match context supplies the standing costs the cheque rule reads (September 2026: five cheques, none could see the rent)", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const text = await readFile("src/lib/bank-match-context.ts", "utf8");
+    assert.match(text, /chequeCandidates\(month\)/);
+    assert.match(text, /\n\s+standing,\n/);
+    const action = await readFile("src/app/(app)/money/bank.ts", "utf8");
+    assert.match(action, /matchContext\(\[\.\.\.new Set\(fresh\.map\(\(l\) => l\.on\.slice\(0, 7\)\)\)\]\)/);
+  });
+});

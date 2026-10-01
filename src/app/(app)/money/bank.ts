@@ -207,7 +207,7 @@ async function placeStatementLines(
     }
     fresh.push(l);
   }
-  const ctx = await matchContext();
+  const ctx = await matchContext([...new Set(fresh.map((l) => l.on.slice(0, 7)))]);
   const placed = placeLines(fresh, ctx);
   /* The pharmacy's own account number with each supplier, which is how two wholesalers of the same name are told apart. */
   const supplierAccounts = Object.fromEntries(ctx.suppliers.map((s) => [s.name, s.accountNumber ?? null]));
@@ -540,4 +540,45 @@ export async function replaceUnplaced(months: string[], user: { id: string; name
   await db.delete(schema.bankLines).where(inArray(schema.bankLines.id, rows.map((r) => r.id)));
   const said = await placeStatementLines(lines, { documentId, fileName: `re-placing ${months.join(", ")}`, skipped: 0, user, back: "/money", quiet: true });
   return { tried: rows.length, said };
+}
+
+/**
+ * What a person says a line is — the one-press answer the register promised and the Money page never had.
+ *
+ * The owner, on the cheques: "the rest of the checks should allow me to categorize." A cheque carries no payee, so
+ * the site can only ever name it from what repeats; the first time, he says. Three answers: it predates the books;
+ * it is a cost, under a category and a payee, booked from the line; or it is money in from a named payer. Each is
+ * recorded on the line in his words, and a cost becomes a bill keyed to the line so a statement read twice books it
+ * once. A line already placed is refused: this is for the ones nothing could place.
+ */
+export async function decideBankLine(
+  lineId: string,
+  decision: { kind: "before_books"; note: string } | { kind: "books_bill"; category: string; vendor: string; note: string } | { kind: "deposit"; payer: string; receiptKind: "third_party" | "patient" | "other"; note: string },
+  user: { id: string; name: string },
+): Promise<{ ok: true; said: string } | { ok: false; why: string }> {
+  const line = await db.query.bankLines.findFirst({ where: eq(schema.bankLines.id, lineId) });
+  if (!line) return { ok: false, why: "No such bank line." };
+  if (line.placedAs !== "unplaced") return { ok: false, why: `That line is already placed as ${line.placedAs}; undo that first.` };
+  const by = `${user.name}, ${new Date().toISOString().slice(0, 10)}`;
+  if (decision.kind === "before_books") {
+    await db.update(schema.bankLines).set({ placedAs: "before_books", why: `${decision.note} (${by})` }).where(eq(schema.bankLines.id, lineId));
+  } else if (decision.kind === "books_bill") {
+    if (line.amountCents >= 0) return { ok: false, why: "A deposit cannot be booked as a cost." };
+    await seedCategories();
+    const category = (await categories(true)).find((c) => c.name === decision.category);
+    if (!category) return { ok: false, why: `No category named "${decision.category}".` };
+    const vendor = (await vendors(true)).find((v) => v.name.toLowerCase() === decision.vendor.toLowerCase());
+    const vendorId = vendor?.id ?? (await saveVendor({ name: decision.vendor, categoryId: category.id, notes: `Made from the bank statement on ${line.on}: ${decision.note}` }));
+    const key = `BANK|${line.key}`;
+    const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.invoiceNumber, key), columns: { id: true } });
+    const expenseId = existing?.id ?? (await saveExpense({ vendorId, categoryId: category.id, invoiceNumber: key, invoiceDate: line.on, paidOn: line.on, amountCents: -line.amountCents, description: line.description, notes: `${decision.note} (${by})`, documentId: line.documentId, status: "confirmed", source: "manual", createdBy: user.id }));
+    await db.update(schema.bankLines).set({ placedAs: "books_bill", expenseId, why: `${decision.note} Booked under ${decision.category}, payee ${decision.vendor} (${by}).` }).where(eq(schema.bankLines.id, lineId));
+  } else {
+    if (line.amountCents <= 0) return { ok: false, why: "A payment cannot be banked as a deposit." };
+    const made = await addCashReceipt({ month: line.on.slice(0, 7), kind: decision.receiptKind, amountCents: line.amountCents, payer: decision.payer, notes: `${decision.note} From the bank statement: ${line.description} (${by})`, receivedOn: line.on, sourceKey: `bank-decided|${line.key}`, documentId: line.documentId, createdBy: user.id });
+    if (!made.id) return { ok: false, why: made.duplicate ? made.why : "The receipt could not be banked." };
+    await db.update(schema.bankLines).set({ placedAs: "deposit", receiptId: made.id, why: `${decision.note} Banked from ${decision.payer} (${by}).` }).where(eq(schema.bankLines.id, lineId));
+  }
+  await audit({ action: "bank.line_decided", userId: user.id, userName: user.name, entity: "bank_line", entityId: lineId, details: `${line.on} ${money(line.amountCents)} ${line.description.slice(0, 60)}: ${decision.kind} — ${decision.note}` });
+  return { ok: true, said: `${line.on} ${money(line.amountCents)}: ${decision.kind.replace("_", " ")}.` };
 }

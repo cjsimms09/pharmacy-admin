@@ -17,7 +17,24 @@ import { SITE_STARTS_ON } from "./books-start";
  * check written against it could only ever be a second implementation of it — and a second
  * implementation of a money rule is how two figures that should be one start to disagree.
  */
-export async function matchContext(): Promise<MatchContext> {
+export async function matchContext(months: string[] = []): Promise<MatchContext> {
+  /*
+   * The cheque candidates — standing costs, the delivery round, the practice's drugs at cost — for the months the
+   * lines fall in. `chequeCandidates` existed and the matcher's cheque rule read `ctx.standing`, and nothing ever
+   * put one into the other: September 2026's five cheques were all "a payment the site cannot tie" with rent,
+   * payroll and the lease sitting in the standing costs. Found 1 October, placing the owner's answers.
+   */
+  const { chequeCandidates } = await import("./bank-statement");
+  const standing: MatchContext["standing"] = [];
+  const seen = new Set<string>();
+  for (const month of months) {
+    for (const c of await chequeCandidates(month)) {
+      const key = `${c.name}|${c.amountCents}|${c.month ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      standing.push(c);
+    }
+  }
   const [claims, sup, ven, bills, invoices, receipts] = await Promise.all([
     db.query.claims.findMany({ columns: { pbmName: true, payerLabel: true } }),
     allSuppliers(true),
@@ -95,6 +112,7 @@ export async function matchContext(): Promise<MatchContext> {
     .map((l) => l.on);
 
   return {
+    standing,
     remits,
     rebateReceipts,
     registerDeposits,

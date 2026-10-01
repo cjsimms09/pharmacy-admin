@@ -26,7 +26,7 @@ so the answer can be checked rather than taken on trust.
 | **19 plans still unclassified** | the residual after 459 were adopted and 15 he decided himself | Almost all of it is the one question no document on file answers: is this employer insured, or does it fund its own plan. Needs a Form 5500 or the plan document, one plan at a time. Each row now shows what the plan pays for and whether it ever pays alone, which is what settles a card. |
 | **Parmed's September ACH pays for twelve August purchases** | **$2,825.92, all of it cash out in September** | Parmed's EFT debit notice of 26 September names twelve invoices, every one dated 17–31 August, and the Parmed invoice feed here begins on 9 September — so this site holds none of them. The payment is recorded and the bank debit will place itself against it, but no cost reaches any month, because nothing was ever counted for those purchases. That is right on the accrual side: August is out of books. **The question is the cash side.** The money genuinely leaves the operating account in September and will be on the Emprise statement. Does September's cash cost of goods carry $2,825.92 for goods bought before the books begin, or does the cash account treat it the way the accrual account does and count nothing? Measured 28 September 2026. |
 
-## September's bank statement — placed 1 October, 11 lines open
+## September's bank statement — placed 1 October, 8 lines open
 
 Read from the scan, proved against its own daily balances to the cent (opening $341,931.59, closing $311,631.53,
 162 lines). First placement left 89 lines "unmatched"; the matcher was then allowed to see what was already on
@@ -37,13 +37,15 @@ fees), and a counter deposit is a run of the register's days in order — 89 →
 banks as copay money, Anthropic is a subscription, RRC's card charges are PioneerRx's receipts, IPC's draws are
 the day's receiving its cadence names, the facilitator's late payment is its 18 Aug remittance plus $1.75
 interest, the 8 Sept McKesson ACH settles the 27 invoices it names with the rest said to be August's — 89 → 11.
-The 11 still open, by what settles each:
+His cheques: $2,625 is the monthly lease (the Rent standing cost, corrected from $2,625.44 on the 18th to $2,625.00
+on the 4th, and the cheque rule was never being fed the standing costs at all — fixed), $1,278 a pre-September drug
+invoice, $71.10 a technician's licence renewal — 89 → 8. The 8 still open, by what settles each:
 
 | Class | Lines | Money | What settles it |
 |---|---|---|---|
 | McKesson ACH 29 Sept | 1 | −$121,997.41 | McKesson's own ledger: the AP report read 1 Oct still lists the 29 Sept-due invoices as open ($139,218.37 of them), so their ledger had not posted the ACH; the next weekly report ties it with no action |
 | Access Health 28 Sept | 1 | +$28,933.18 | the remit summary on file has no Health Mart Atlas remittance between 24 Sept ($1,443.57) and 29 Sept ($20,068.82); one is missing from the export, or ProviderPay had not posted it |
-| Cheques 2453–2457 | 5 | −$9,832.89 | him: what each was for |
+| Cheques 2453 ($58.79, 15 Sept) and 2456 ($5,800.00, 22 Sept) | 2 | −$5,858.79 | him: the payee of each |
 | Counter deposits | 3 | +$2,830.96 | 16–19 Sept: the register says $1,089.77 (to the 18th) or $1,142.76 (to the 19th); the bank got $1,112.76 on the 23rd — the drawers and the bank disagree by $22.99 or $30.00 that week, and the 30 Sept deposit cannot be placed until that one is. $232.67 on the 16th matches no run at all. |
 | WholeScripts (Xymogen) ×2 | 2 | −$3,062.14 | PioneerRx received Xymogen $1,252.62 (1 Sept) and $2,399.22 (29 Sept); the card was charged $2,219.26 (18 Sept) and $842.88 (30 Sept) — no pair agrees |
 | HMA $110 "12 payments" | — | — | already on the register above |
