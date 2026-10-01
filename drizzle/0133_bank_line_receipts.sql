@@ -13,4 +13,5 @@ CREATE TABLE `bank_line_receipts` (
   `receipt_id` text NOT NULL,
   PRIMARY KEY (`line_id`, `receipt_id`)
 );
+--> statement-breakpoint
 CREATE INDEX `bank_line_receipts_receipt_idx` ON `bank_line_receipts` (`receipt_id`);

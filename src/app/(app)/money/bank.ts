@@ -21,6 +21,8 @@ import { CARD_STATEMENT_BILL } from "@/lib/card-statement";
 import { readBankDescriptor } from "@/lib/bank-descriptors";
 import { paymentFromBankDebit } from "@/lib/supplier-payments";
 import { matchContext } from "@/lib/bank-match-context";
+import { engineAfter } from "@/lib/engine/run";
+import { recordMonthBalances } from "@/lib/engine/month";
 
 /** The two systems spell one wholesaler several ways; compared with the noise removed, as cash-cogs.ts does. */
 const fold = (s: string | null | undefined) => (s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -521,6 +523,8 @@ async function placeStatementLines(
    * script there is no page to go to and no request to revalidate, so the sentence is returned instead —
    * `revalidatePath` outside a request throws, and `redirect` outside one is a thrown error nobody catches.
    */
+  /* Today reads the engine, not the ledger: what this placed is on the list the moment the engine has run. */
+  engineAfter("bank placement");
   if (o.quiet) return said;
   for (const p of ["/money", "/money/monthly", "/expenses", "/inventory/invoices"]) revalidatePath(p);
   redirect(`${back}&ok=${encodeURIComponent(said)}`);
@@ -548,6 +552,10 @@ export async function storeScannedStatement(
     return { ok: false, why: `${u.from}${u.to === u.from ? "" : ` to ${u.to}`} is ${money(Math.abs(u.differenceCents))} ${u.differenceCents > 0 ? "short of" : "over"} the bank's balance. Nothing was placed.`, unproven: solved.unproven };
   }
   const said = await placeStatementLines(scannedLines(solved), { documentId, fileName: doc.fileName, skipped: 0, user, back: "/money", notes: solved.notes, quiet: true });
+  /* The statement's own opening and closing, for the month's proof: the lines must reach the closing from the opening. */
+  await recordMonthBalances(solved.periodFrom.slice(0, 7), solved.openingCents, solved.closingCents);
+  /* The inbox row that carried the scan is counted now: the statement reached the books. */
+  await db.update(schema.inboxItems).set({ imported: true }).where(eq(schema.inboxItems.documentId, documentId));
   return { ok: true, said: said ?? "" };
 }
 
@@ -645,5 +653,6 @@ export async function decideBankLine(
     await db.update(schema.bankLines).set({ placedAs: "deposit", receiptId: made.id, why: `${decision.note} Banked from ${decision.payer} (${by}).` }).where(eq(schema.bankLines.id, lineId));
   }
   await audit({ action: "bank.line_decided", userId: user.id, userName: user.name, entity: "bank_line", entityId: lineId, details: `${line.on} ${money(line.amountCents)} ${line.description.slice(0, 60)}: ${decision.kind} — ${decision.note}` });
+  engineAfter("bank line decided");
   return { ok: true, said: `${line.on} ${money(line.amountCents)}: ${decision.kind.replace("_", " ")}.` };
 }

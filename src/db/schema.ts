@@ -3759,3 +3759,98 @@ export const remittanceRegister = sqliteTable(
   },
   (t) => [uniqueIndex("remittance_register_number_idx").on(t.remitNumber), index("remittance_register_payment_idx").on(t.paymentNumber)],
 );
+
+/*
+ * ── The engine's tables (0134) ──
+ *
+ * What the site works out when data lands and every night, kept so a screen is a lookup. One writer each, in
+ * src/lib/engine; rebuilt nightly from the ledger and compared with the incremental copy. docs/REBUILD.md.
+ */
+
+/** One line per thing a person must answer, ranked by consequence. Answered, it never returns; settled by data, it resolves itself. */
+export const needsYou = sqliteTable(
+  "needs_you",
+  {
+    /** Stable: `${kind}|${ref}`, so the same question is one row across every pass. */
+    id: text("id").primaryKey(),
+    kind: text("kind").notNull(),
+    /** 1 patient harm · 2 board and DEA · 3 a payer relationship · 4 money · 5 convenience. */
+    rank: integer("rank").notNull(),
+    title: text("title").notNull(),
+    detail: text("detail"),
+    amountCents: integer("amount_cents"),
+    href: text("href"),
+    /** JSON: the one-press answers that fit this line — [{ label, action, params }]. */
+    answers: text("answers"),
+    /** JSON: the rows behind the line, so the figure can show its evidence. */
+    rowsJson: text("rows_json"),
+    firstSeen: text("first_seen").notNull(),
+    lastSeen: text("last_seen").notNull(),
+    resolvedAt: text("resolved_at"),
+    /** "answer" (a person), "data" (the thing arrived or was placed), "rule" (a learned rule settled it). */
+    resolvedBy: text("resolved_by"),
+  },
+  (t) => [index("needs_you_open_idx").on(t.resolvedAt, t.rank)],
+);
+
+/** Every expectation judged (expected.ts), so Today reads a row and not a calendar. */
+export const feedState = sqliteTable("feed_state", {
+  key: text("key").primaryKey(),
+  name: text("name").notNull(),
+  state: text("state").notNull(),
+  cadence: text("cadence"),
+  lastDue: text("last_due"),
+  nextDue: text("next_due"),
+  lastArrived: text("last_arrived"),
+  says: text("says"),
+  judgedAt: text("judged_at").notNull(),
+});
+
+/** Every nightly proof's result: pass or fail, the figures, the failing rows. The evidence under every number shown. */
+export const proofRun = sqliteTable(
+  "proof_run",
+  {
+    id: text("id").primaryKey(),
+    proof: text("proof").notNull(),
+    scope: text("scope"),
+    runAt: text("run_at").notNull(),
+    passed: integer("passed", { mode: "boolean" }).notNull(),
+    figures: text("figures"),
+    says: text("says").notNull(),
+  },
+  (t) => [index("proof_run_latest_idx").on(t.proof, t.scope, t.runAt)],
+);
+
+/** The month as the engine last computed it: bank figures, the receipts-to-bank gap named, revenue, AR, close state. */
+export const monthStatus = sqliteTable("month_status", {
+  month: text("month").primaryKey(),
+  bankOpeningCents: integer("bank_opening_cents"),
+  bankInCents: integer("bank_in_cents"),
+  bankOutCents: integer("bank_out_cents"),
+  bankClosingCents: integer("bank_closing_cents"),
+  bankLines: integer("bank_lines").notNull().default(0),
+  bankOpenLines: integer("bank_open_lines").notNull().default(0),
+  receiptsCents: integer("receipts_cents"),
+  receiptsGapCents: integer("receipts_gap_cents"),
+  receiptsGapSays: text("receipts_gap_says"),
+  accrualRevenueCents: integer("accrual_revenue_cents"),
+  cashInCents: integer("cash_in_cents"),
+  cashOutCents: integer("cash_out_cents"),
+  arUnpaidCents: integer("ar_unpaid_cents"),
+  arDueCents: integer("ar_due_cents"),
+  /** open · ready (every proof passed, nothing needs a person) · closed (he said so). */
+  closeState: text("close_state").notNull().default("open"),
+  closedAt: text("closed_at"),
+  computedAt: text("computed_at").notNull(),
+});
+
+/** Each engine pass: what it wrote, how long it took, and any error, so a silent engine is visible. */
+export const engineRun = sqliteTable("engine_run", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at"),
+  ms: integer("ms"),
+  wrote: text("wrote"),
+  error: text("error"),
+});

@@ -706,6 +706,18 @@ export async function register() {
     await whenIdle("technician-list", technicianListTick);
     await whenIdle("temperatures", tempTick);
     await whenIdle("cqi", cqiTick);
+    /*
+     * The engine, last on the beat so it sees what every job above it wrote: a refresh each half hour, the
+     * proofs once a night. Today reads what this writes and nothing else (src/lib/engine, docs/REBUILD.md).
+     */
+    await whenIdle("engine", async () => {
+      try {
+        const { engineTick } = await import("./lib/engine/run");
+        await engineTick();
+      } catch {
+        // Its own row in engine_run carries the error; Today shows it.
+      }
+    });
     await whenIdle("digest", digestTick);
     await whenIdle("updates", updateTick);
     await whenIdle("manual-audit", manualAuditTick);
