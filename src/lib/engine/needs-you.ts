@@ -137,20 +137,27 @@ async function claimPots(today: string): Promise<Line[]> {
    * first payment; until then the pot is said as a programme's, never as a plan's late money.
    */
   const programme = (payer: string, pcn: string | null) => /cnrx|connectiverx|copay|voucher|redsail|veridikal|dst pharmacy/i.test(`${payer} ${pcn ?? ""}`);
-  const pots = new Map<string, { n: number; cents: number; dueN: number; dueCents: number; oldest: string; cycle: number | null; sample: number; programme: boolean }>();
+  const pots = new Map<string, { n: number; cents: number; dueN: number; dueCents: number; oldest: string; cycle: number | null; sample: number; programme: boolean; pcn: string | null }>();
   for (const u of unpaid) {
     const xs = by.get(u.payer) ?? [];
     const cycle = xs.length >= 25 ? p90(xs) : null;
-    const e = pots.get(u.payer) ?? { n: 0, cents: 0, dueN: 0, dueCents: 0, oldest: u.filled, cycle, sample: xs.length, programme: programme(u.payer, u.pcn) };
+    const e = pots.get(u.payer) ?? { n: 0, cents: 0, dueN: 0, dueCents: 0, oldest: u.filled, cycle, sample: xs.length, programme: programme(u.payer, u.pcn), pcn: u.pcn };
     e.n++;
     e.cents += u.cents;
     if (u.filled < e.oldest) e.oldest = u.filled;
     if (cycle !== null && u.age > cycle) { e.dueN++; e.dueCents += u.cents; }
     pots.set(u.payer, e);
   }
+  const { rules } = await import("./rules");
+  const routes = await rules("programme_route");
+  const routeFor = (payer: string, pcn: string | null) => routes.find((r) => new RegExp(r.key, "i").test(`${payer} ${pcn ?? ""}`)) ?? null;
   const out: Line[] = [];
   for (const [payer, e] of pots) {
+    const route = e.programme ? routeFor(payer, e.pcn) : null;
+    const cycleDays = route && typeof route.value.cycleDays === "number" ? (route.value.cycleDays as number) : null;
     const oldestAge = (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${e.oldest}T00:00:00Z`)) / 864e5;
+    /* A programme whose route and cycle are known is a pot inside its cycle: nothing to ask until the cycle has passed. */
+    if (route && cycleDays !== null && oldestAge <= cycleDays) continue;
     if (e.cycle === null && e.cents >= 20_000_00 && oldestAge > 21) {
       out.push({
         id: `claims_unmeasured|${payer}`,
@@ -160,7 +167,9 @@ async function claimPots(today: string): Promise<Line[]> {
           ? `${payer}, a manufacturer programme: ${money(e.cents)} on ${e.n} claims since ${e.oldest}, ${e.sample === 0 ? "nothing received by any route yet" : `only ${e.sample} payment${e.sample === 1 ? "" : "s"} seen`}`
           : `${payer}: ${money(e.cents)} billed since ${e.oldest}, ${e.sample === 0 ? "nothing ever received" : `only ${e.sample} payment${e.sample === 1 ? "" : "s"} ever received`}`,
         detail: e.programme
-          ? `A programme pays on its own terms and by its own route; the first payment will say which and how long it takes. The oldest claim is ${Math.round(oldestAge)} days old. Not a plan, not called late.`
+          ? route
+            ? `${String(route.value.note ?? "")} The oldest claim is ${Math.round(oldestAge)} days old, past the ${cycleDays ?? "?"}-day cycle measured on ${route.saidOn}.`
+            : `A programme pays on its own terms and by its own route; the first payment will say which and how long it takes. The oldest claim is ${Math.round(oldestAge)} days old. Not a plan, not called late.`
           : `${e.n} claims. The site cannot call this late: it has never measured how this payer pays. It can say the pot is large and the oldest claim is ${Math.round(oldestAge)} days old.`,
         amountCents: e.cents,
         href: "/payers/waiting",
