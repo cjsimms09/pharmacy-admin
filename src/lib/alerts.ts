@@ -283,25 +283,66 @@ export async function alerts(): Promise<Alert[]> {
     {
       const inBooks = await db.query.claimPayments.findMany({
         where: (p, { and, isNull, gte, eq: is }) => and(isNull(p.claimId), gte(p.dateFilled, SITE_STARTS_ON), is(p.outOfBooks, false)),
-        columns: { amountCents: true, payer: true, rxNumber: true },
+        columns: { amountCents: true, payer: true, rxNumber: true, ndc11: true, fillNumber: true, dateFilled: true },
       });
       const known = new Set(
         (await db.query.claims.findMany({ columns: { rxNumber: true } })).map((c) => c.rxNumber),
       );
       const stranded = inBooks.filter((p) => !known.has(p.rxNumber));
-      if (stranded.length > 0) {
-        const cents = stranded.reduce((n, p) => n + p.amountCents, 0);
-        const payers = [...new Set(stranded.map((p) => p.payer ?? "an unnamed payer"))];
+      const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+      /*
+       * Two different things were being said in one sentence, and one of them was false.
+       *
+       * The row read "12 payments for a prescription this site has never seen, 110.00" and went on:
+       * the prescription number, the fill date, the drug or the BIN disagrees, and "those claims go
+       * on being owed by a payer that has already paid". Every clause of that was wrong about all
+       * twelve. They carry no drug, no fill number, a nine-digit identifier where this pharmacy's
+       * prescription numbers are six, flat amounts of $5.00 and $10.00, and a fill date of
+       * 2026-12-31 — a day in the future, which is a stand-in something substituted, not a fact.
+       * Health Mart Atlas, on the 30 September EFT. There are no claims behind them to be owed.
+       *
+       * A line with no drug and no fill number is not a claim payment that failed to match. It is
+       * money on a remittance that belongs to no fill — an administration fee, an incentive, a
+       * programme payment — and the action is to find out what it is, not to go hunting a
+       * prescription that was never there. Said as one thing, the true half taught him to distrust
+       * the sentence and the false half sent him looking for nothing.
+       */
+      const couldBeAFill = (p: (typeof stranded)[number]) => Boolean(p.ndc11) || p.fillNumber !== null;
+      const mismatched = stranded.filter(couldBeAFill);
+      const notAFill = stranded.filter((p) => !couldBeAFill(p));
+
+      if (mismatched.length > 0) {
+        const cents = mismatched.reduce((n, p) => n + p.amountCents, 0);
+        const payers = [...new Set(mismatched.map((p) => p.payer ?? "an unnamed payer"))];
         out.push({
           key: "payments-stranded",
           level: "now",
-          title: `${stranded.length} payment${stranded.length === 1 ? "" : "s"} for a prescription this site has never seen, ${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          title: `${mismatched.length} payment${mismatched.length === 1 ? "" : "s"} for a prescription this site has never seen, ${money(cents)}`,
           why:
-            `From ${payers.slice(0, 3).join(", ")}${payers.length > 3 ? ` and ${payers.length - 3} more` : ""}, for fills this site holds claims for. ` +
-            `A payment for a fill older than the records cannot match and is not counted here; these can and did not, which means the prescription number, ` +
-            `the fill date, the drug or the BIN disagrees between their file and the claim. Until it is looked at, those claims go on being owed by a payer that has already paid.`,
+            `From ${payers.slice(0, 3).join(", ")}${payers.length > 3 ? ` and ${payers.length - 3} more` : ""}. Each names a drug or a fill, so it is a fill that ought to match and did not — ` +
+            `the prescription number, the fill date, the drug or the BIN disagrees between their file and the claim. ` +
+            `A payment for a fill older than the books cannot match and is not counted here. Until it is looked at, those claims go on being owed by a payer that has already paid.`,
           href: "/claims",
           action: "Look at them",
+        });
+      }
+
+      if (notAFill.length > 0) {
+        const cents = notAFill.reduce((n, p) => n + p.amountCents, 0);
+        const payers = [...new Set(notAFill.map((p) => p.payer ?? "an unnamed payer"))];
+        const future = notAFill.filter((p) => (p.dateFilled ?? "") > today).length;
+        out.push({
+          key: "payments-not-a-fill",
+          level: "soon",
+          title: `${notAFill.length} payment${notAFill.length === 1 ? "" : "s"} on a remittance that belong to no fill, ${money(cents)}`,
+          why:
+            `From ${payers.slice(0, 3).join(", ")}${payers.length > 3 ? ` and ${payers.length - 3} more` : ""}, with no drug and no fill number against them` +
+            `${future > 0 ? `, and ${future === notAFill.length ? "every one" : `${future}`} dated in the future, which is a stand-in rather than a day anything was dispensed` : ""}. ` +
+            `So these are not claim payments that failed to match — there is no prescription behind them to find. They are money the payer itemised against something else: an administration ` +
+            `fee, an incentive, a programme payment. What they are decides whether they are revenue and where, and nothing here can read that off the figures.`,
+          href: "/claims",
+          action: "See the lines",
         });
       }
     }
@@ -759,13 +800,23 @@ export async function alerts(): Promise<Alert[]> {
      * sentence test is all there is, and an arrival nobody recorded either way is left alone rather
      * than assumed to have failed.
      */
+    /*
+     * Recognised and refused, and nothing else — which took two goes to get right.
+     *
+     * The first version fired on anything the sweep marked uncounted, and immediately picked up two
+     * unrecognised PDFs and the Purchase Drill Down. Neither is a refusal. Something unrecognised is
+     * usually nothing at all, and the drill down is recognised, filed, and deliberately left for the
+     * model to read — it says "could not be loaded" because Claude is stopped at its monthly ceiling,
+     * which has its own row on this list already. Two rows for one cause is the thing this is meant
+     * to replace.
+     *
+     * So `imported === false` is a corroborator rather than the test. `storyOf` decides, and the
+     * widened phrase list is what closed the gap that lost September's sales summary.
+     */
+    const needsTheModel = /needs the model/i;
     const refused = recent
       .map((r) => ({ row: r, story: storyOf(r) }))
-      .filter(({ row, story }) =>
-        row.imported === false
-          ? story.outcome !== "ignored" && story.outcome !== "filed_only"
-          : row.imported === null && (story.outcome === "held" || story.outcome === "rejected"),
-      )
+      .filter(({ row, story }) => (story.outcome === "held" || story.outcome === "rejected") && !needsTheModel.test(row.routeResult ?? ""))
       .sort((a, b) => a.row.receivedAt.localeCompare(b.row.receivedAt));
     if (refused.length > 0) {
       const names = [...new Set(refused.map(({ row }) => kindWords(row.routedAs) ?? row.fileName ?? "a document"))];
@@ -831,8 +882,15 @@ export async function alerts(): Promise<Alert[]> {
           level: periodHasEnded || days <= 7 ? "now" : "soon",
           title:
             days < 0
-              ? `The ${period.label} quality summary was due ${period.dueOn}`
-              : `The ${period.label} quality summary is due ${period.dueOn}`,
+              /*
+               * It says CQI, because that is the word he uses. This read "The August–September 2026
+               * quality summary is due" and he went looking for it twice on 1 October, having asked
+               * "is CQI due?" in those words, and did not find it. It was on the page both times. A row
+               * somebody cannot find while scanning for the only name they have for it is not on the
+               * page in any sense that counts; the regulation's phrase goes in the detail.
+               */
+              ? `CQI summary for ${period.label} was due ${period.dueOn}`
+              : `CQI summary for ${period.label} is due ${period.dueOn}`,
           why: `${left} ${days < 0 ? `That was ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ago.` : `${days} day${days === 1 ? "" : "s"} from today.`} K.A.R. 68-19-1 asks for a summary for each period, communicated to the staff.`,
           href: "/cqi",
           action: summary ? "Finish it" : "Start it",
