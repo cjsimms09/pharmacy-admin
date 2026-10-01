@@ -90,6 +90,8 @@ const KIND_WORDS: Record<string, string> = {
   parmed_eft_notice: "Parmed EFT debit notice",
   /* Stock loaned or sold to another location, and what is still out. See loan-report.ts. */
   loan_report: "Loan Search Results",
+  /* The operating account's statement, read by recognition where it is a scan. Placed from the Money page. See ocr.ts. */
+  bank_statement: "Bank statement",
   /* One Veridikal ACH itemised (eVoucher or Denial Conversion): claim payments posted, nothing banked. See veridikal-report-store.ts. */
   veridikal_report: "Veridikal voucher payments",
   /* How the till was paid. Checks the card batch and the claims; books nothing. See sales-by-payment.ts. */

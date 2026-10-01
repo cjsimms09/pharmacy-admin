@@ -39,7 +39,9 @@ export async function readBankStatement(fd: FormData) {
   if (/^%PDF/.test(buf.subarray(0, 8).toString("latin1"))) {
     const documentId = await keepStatement(file, "Scanned bank statement", user.id);
     if (!documentId) redirect(`${back}&error=${encodeURIComponent("The statement could not be stored, so it was not read. Nothing was placed.")}`);
-    const solved = await solveScanned(buf, {});
+    const kept = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId), columns: { id: true, storageKey: true } });
+    if (!kept) redirect(`${back}&error=${encodeURIComponent("The statement was stored and could not be read back. Nothing was placed.")}`);
+    const solved = await solveScanned(kept, {});
     if (!solved.ok) redirect(`${back}&error=${encodeURIComponent(`${solved.why} Nothing was placed.`)}`);
     if (solved.unproven.length > 0) redirect(`${back}&scan=${documentId}`);
     return placeStatementLines(scannedLines(solved), { documentId, fileName: file.name, skipped: 0, user, back, notes: solved.notes });
@@ -98,11 +100,26 @@ async function knownAmounts(): Promise<number[]> {
   ].filter((c) => c > 0);
 }
 
-async function solveScanned(buf: Buffer, confirmed: Record<number, number>) {
+/*
+ * The statement's words come from its text layer where it has one, and from recognition where it does not.
+ *
+ * August's statement, the bank's own download, carries a text layer and `pdfItems` reads it. September's
+ * arrived as a forwarded scan — thirteen pages of JPEG, no text at all — and `pdfItems` returned nothing,
+ * so the Money page had nothing to show and the owner was told the file could not be read. It can:
+ * `ocr.ts` recognises the pages on this machine and hands back words in the same frame, cached per
+ * document so the half-minute is paid once. The reader and the solver downstream see no difference.
+ */
+async function solveScanned(doc: { id: string; storageKey: string }, confirmed: Record<number, number>) {
   const { pdfItems } = await import("@/lib/pdf-text");
   const { readRaw } = await import("@/lib/scanned-bank-statement");
   const { solveStatement } = await import("@/lib/scanned-bank-solve");
-  return solveStatement(readRaw(pdfItems(buf)), { known: await knownAmounts(), confirmed });
+  const buf = await readFile(doc.storageKey);
+  let items = pdfItems(buf);
+  if (items.length === 0) {
+    const { scanItemsForDocument } = await import("@/lib/ocr");
+    items = await scanItemsForDocument(doc.id, buf);
+  }
+  return solveStatement(readRaw(items), { known: await knownAmounts(), confirmed });
 }
 
 function scannedLines(solved: Extract<SolvedStatement, { ok: true }>): BankLine[] {
@@ -114,7 +131,7 @@ export async function scannedStatementReview(documentId: string): Promise<{ file
   await requireManager();
   const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
   if (!doc || doc.category !== "bank_statement") return null;
-  const solved = await solveScanned(await readFile(doc.storageKey), {});
+  const solved = await solveScanned(doc, {});
   if (!solved.ok) return { fileName: doc.fileName, unproven: [], why: solved.why };
   return { fileName: doc.fileName, unproven: solved.unproven, why: null };
 }
@@ -133,7 +150,7 @@ export async function confirmScannedStatement(fd: FormData) {
     const cents = m ? parseCents(String(v)) : null;
     if (m && cents !== null && cents > 0) confirmed[Number(m[1])] = Math.abs(cents);
   }
-  const solved = await solveScanned(await readFile(doc!.storageKey), confirmed);
+  const solved = await solveScanned(doc!, confirmed);
   if (!solved.ok) redirect(`${back}&scan=${documentId}&error=${encodeURIComponent(solved.why)}`);
   if (solved.unproven.length > 0) {
     const u = solved.unproven[0];

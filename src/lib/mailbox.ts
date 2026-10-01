@@ -930,7 +930,48 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
              * Checked before the general reader because the general reader has nothing to say about
              * it, and booked only when the page's own arithmetic ties — see `readRxSystemsInvoice`.
              */
-            if (pdfWords && looksLikeRxSystemsInvoice(pdfWords, from)) {
+            /*
+             * The bank statement, forwarded as a scan.
+             *
+             * Emprise's statement arrives as thirteen pages of JPEG with no text layer, so `pdfWords` is
+             * empty and every rule below that reads words sees nothing. September 2026's was filed as "a
+             * PDF this does not recognise" and the owner found it by asking whether it had come. Nothing
+             * in the mailbox had ever routed a bank statement at all; only the upload button on the Money
+             * page reached that reader, which is the wrong way round for a document the month cannot
+             * close without.
+             *
+             * A PDF with no text whose subject names a bank statement is recognised on this machine
+             * (`ocr.ts`, half a minute, cached), and it is a statement if the recognised page carries
+             * both a beginning and an ending balance. Filed as one, with the lines left for the Money
+             * page: the solver proves every figure against the daily balances there and asks the owner
+             * for the ones it cannot, which is a decision and not a thing the sweep makes for him.
+             */
+            if (pdfWords !== null && !pdfWords.trim() && /bank\s*statement/i.test(subject) && docId) {
+              try {
+                const { scanItemsForDocument } = await import("./ocr");
+                const { readRaw } = await import("./scanned-bank-statement");
+                const raw = readRaw(await scanItemsForDocument(docId, buf));
+                const { beginningText, endingText, statementDateText } = raw.summary;
+                if (beginningText && endingText) {
+                  const period = /(\d{1,2})\/\d{1,2}\/(\d{2,4})/.exec(statementDateText ?? "");
+                  const month = period ? `${period[2].length === 2 ? `20${period[2]}` : period[2]}-${period[1].padStart(2, "0")}` : null;
+                  await db
+                    .update(schema.documents)
+                    .set({ category: "bank_statement", title: `Emprise statement${month ? `, ${month}` : ""}`, ...(month ? { effectiveOn: `${month}-28` } : {}) })
+                    .where(eq(schema.documents.id, docId));
+                  routedAs = "bank_statement";
+                  counted = false;
+                  routeResult =
+                    `Emprise's statement, a scan with no text layer, recognised on this machine: beginning ${beginningText}, ending ${endingText}, ` +
+                    `${raw.lines.length} lines and ${raw.balances.length} daily balances read. The lines are placed from the Money page, where every figure is ` +
+                    `proved against the daily balances and anything the scan dropped is asked for${month ? `: /money?period=${month}&scan=${docId}` : "."}`;
+                } else {
+                  routeResult = "A scan with no text layer, named as a bank statement, and recognition found no beginning and ending balance on it. Filed as a document.";
+                }
+              } catch (e) {
+                routeResult = `A scan named as a bank statement that could not be recognised: ${String(e).slice(0, 120)}. Filed as a document.`;
+              }
+            } else if (pdfWords && looksLikeRxSystemsInvoice(pdfWords, from)) {
               const read = readRxSystemsInvoice(pdfWords);
               if (read.ok) {
                 const booked = await bookSuppliesInvoice(read.invoice, { vendorName: "Rx Systems", from, documentId: docId });
