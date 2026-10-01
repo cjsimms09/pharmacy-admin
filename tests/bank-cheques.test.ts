@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { placeLine, type MatchContext } from "../src/lib/bank-statement";
+import { placeLine, placeLines, type MatchContext } from "../src/lib/bank-statement";
 
 /**
  * The cheque that pays the delivery driver, and the month boundary it lands on.
@@ -118,5 +118,24 @@ describe("the cheque candidates reach the matcher", () => {
     assert.match(text, /\n\s+standing,\n/);
     const action = await readFile("src/app/(app)/money/bank.ts", "utf8");
     assert.match(action, /matchContext\(\[\.\.\.new Set\(fresh\.map\(\(l\) => l\.on\.slice\(0, 7\)\)\)\]\)/);
+  });
+});
+
+describe("a cheque he has already said what it is for", () => {
+  const base = { payers: [], suppliers: [], vendors: [], unpaidBills: [], unpaidInvoices: [], standing: [] };
+  test("names an invoice on file: the cheque pays it", () => {
+    const ctx = { ...base, unpaidInvoices: [{ id: "i9", invoiceNumber: "7000000031", supplierId: null, supplier: "ParMed", totalCents: 27_440, invoiceDate: "2026-09-26" }], expectedCheques: [{ amountCents: 27_440, invoiceNumber: "7000000031", note: "He said so on 1 October." }] };
+    const p = placeLines([{ on: "2026-10-03", description: "CHECK 2458", amountCents: -27_440, key: "c" }], ctx)[0].placement;
+    assert.equal(p.kind, "pays_invoice");
+  });
+  test("names an invoice not on file: the cheque is noted by number and stops asking", () => {
+    const ctx = { ...base, expectedCheques: [{ amountCents: 27_440, invoiceNumber: "7000000031", note: "He said so on 1 October." }] };
+    const p = placeLines([{ on: "2026-10-03", description: "CHECK 2458", amountCents: -27_440, key: "c" }], ctx)[0].placement;
+    assert.equal(p.kind, "noted");
+    assert.match(p.why, /not on file yet/);
+  });
+  test("a cheque of another amount is still a question", () => {
+    const ctx = { ...base, expectedCheques: [{ amountCents: 27_440, invoiceNumber: null, note: "x" }] };
+    assert.equal(placeLines([{ on: "2026-10-03", description: "CHECK 2459", amountCents: -27_441, key: "c" }], ctx)[0].placement.kind, "unplaced");
   });
 });

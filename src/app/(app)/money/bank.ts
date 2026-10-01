@@ -220,9 +220,10 @@ async function placeStatementLines(
    */
   const days = fresh.map((l) => l.on).sort();
   /* A receipt an earlier statement already confirmed is not available to be confirmed again. */
-  const confirmedAlready = new Set(
-    (await db.query.bankLines.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId).filter((id): id is string => id !== null),
-  );
+  const confirmedAlready = new Set([
+    ...(await db.query.bankLines.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId).filter((id): id is string => id !== null),
+    ...(await db.query.bankLineReceipts.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId),
+  ]);
   const heldForBank: HeldForBank[] = days.length
     ? (
         await db.query.cashReceipts.findMany({
@@ -245,6 +246,8 @@ async function placeStatementLines(
     let placedAs: string = placement.kind;
     let why: string = placement.why;
     let receiptId: string | null = null;
+    /* Every receipt this line confirms; the first goes in the column, all of them in bank_line_receipts. */
+    const receiptIds: string[] = [];
     let expenseId: string | null = null;
     let invoiceId: string | null = null;
     /*
@@ -275,6 +278,7 @@ async function placeStatementLines(
     if (match.kind === "confirms") {
       claimed.add(match.receipt.id);
       receiptId = match.receipt.id;
+      receiptIds.push(match.receipt.id);
       placedAs = "confirms_deposit";
       why = match.why;
       confirmed++;
@@ -283,6 +287,7 @@ async function placeStatementLines(
       /* Several receipts paid in as one deposit. The line keeps the first; `why` names them all. */
       for (const r of match.receipts) claimed.add(r.id);
       receiptId = match.receipts[0].id;
+      receiptIds.push(...match.receipts.map((r) => r.id));
       placedAs = "confirms_deposit";
       why = match.why;
       confirmed++;
@@ -294,6 +299,7 @@ async function placeStatementLines(
     } else if (placement.kind === "confirms_rebate") {
       claimed.add(placement.receiptId);
       receiptId = placement.receiptId;
+      receiptIds.push(placement.receiptId);
       placedAs = "confirms_deposit";
       why = placement.why;
       confirmed++;
@@ -323,6 +329,9 @@ async function placeStatementLines(
       depositCents += line.amountCents;
     } else if (placement.kind === "before_books") {
       placedAs = "before_books";
+    } else if (placement.kind === "noted") {
+      placedAs = "noted";
+      why = `${placement.category}: ${placement.why}`;
     } else if (placement.kind === "facilitator_late") {
       /* The remittance already counts the payment; only the interest is new money. */
       placedAs = "already_counted";
@@ -330,6 +339,7 @@ async function placeStatementLines(
     } else if (placement.kind === "confirms_run") {
       for (const id of placement.receiptIds) claimed.add(id);
       receiptId = placement.receiptIds[0];
+      receiptIds.push(...placement.receiptIds);
       placedAs = "confirms_deposit";
       why = placement.why;
       confirmed++;
@@ -447,8 +457,9 @@ async function placeStatementLines(
         unplaced++;
       }
     }
+    const lineId = newId();
     await db.insert(schema.bankLines).values({
-      id: newId(),
+      id: lineId,
       key: line.key,
       on: line.on,
       description: line.description,
@@ -461,6 +472,7 @@ async function placeStatementLines(
       documentId,
       createdBy: user.id,
     });
+    if (receiptIds.length) await db.insert(schema.bankLineReceipts).values(receiptIds.map((rid) => ({ lineId, receiptId: rid }))).onConflictDoNothing();
   }
   await audit({
     action: "bank.statement_read",
@@ -553,7 +565,14 @@ export async function replaceUnplaced(months: string[], user: { id: string; name
  */
 export async function decideBankLine(
   lineId: string,
-  decision: { kind: "before_books"; note: string } | { kind: "books_bill"; category: string; vendor: string; note: string } | { kind: "deposit"; payer: string; receiptKind: "third_party" | "patient" | "other"; note: string },
+  decision:
+    | { kind: "before_books"; note: string }
+    | { kind: "books_bill"; category: string; vendor: string; note: string }
+    | { kind: "deposit"; payer: string; receiptKind: "third_party" | "patient" | "other"; note: string }
+    /** Named and set aside: what it is, booked nowhere, so it stops asking. For a purchase whose own invoice is still to come. */
+    | { kind: "noted"; category: string; note: string }
+    /** The counter paying in the register's days from..to, with whatever the drawers and the bank disagree by booked as cash over and short. */
+    | { kind: "confirms_run"; from: string; to: string; note: string },
   user: { id: string; name: string },
 ): Promise<{ ok: true; said: string } | { ok: false; why: string }> {
   const line = await db.query.bankLines.findFirst({ where: eq(schema.bankLines.id, lineId) });
@@ -562,6 +581,26 @@ export async function decideBankLine(
   const by = `${user.name}, ${new Date().toISOString().slice(0, 10)}`;
   if (decision.kind === "before_books") {
     await db.update(schema.bankLines).set({ placedAs: "before_books", why: `${decision.note} (${by})` }).where(eq(schema.bankLines.id, lineId));
+  } else if (decision.kind === "noted") {
+    await db.update(schema.bankLines).set({ placedAs: "noted", why: `${decision.category}: ${decision.note} Nothing is booked from the line. (${by})` }).where(eq(schema.bankLines.id, lineId));
+  } else if (decision.kind === "confirms_run") {
+    if (line.amountCents <= 0) return { ok: false, why: "A payment is not a counter deposit." };
+    const confirmedAlready = new Set((await db.query.bankLines.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId).filter((id): id is string => id !== null));
+    const run = (await db.query.cashReceipts.findMany({ where: and(like(schema.cashReceipts.sourceKey, "register|%"), gte(schema.cashReceipts.receivedOn, decision.from), lte(schema.cashReceipts.receivedOn, decision.to)) })).filter((r) => !confirmedAlready.has(r.id));
+    if (run.length === 0) return { ok: false, why: `No unconfirmed register days between ${decision.from} and ${decision.to}.` };
+    const sum = run.reduce((n, r) => n + r.amountCents, 0);
+    const diff = line.amountCents - sum;
+    if (diff > 0) {
+      await addCashReceipt({ month: line.on.slice(0, 7), kind: "other", amountCents: diff, payer: "Cash over", notes: `The counter deposit of ${line.on} was ${money(diff)} more than the register's days ${decision.from} to ${decision.to}. ${decision.note} (${by})`, receivedOn: line.on, sourceKey: `bank-overshort|${line.key}`, documentId: line.documentId, createdBy: user.id });
+    } else if (diff < 0) {
+      await seedCategories();
+      const category = (await categories(true)).find((c) => c.name === "Cash over and short");
+      const key = `BANK|${line.key}|short`;
+      const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.invoiceNumber, key), columns: { id: true } });
+      if (!existing) await saveExpense({ vendorId: null, categoryId: category?.id ?? null, invoiceNumber: key, invoiceDate: line.on, paidOn: line.on, amountCents: -diff, description: `Cash short: the counter deposit of ${line.on} against the register's days ${decision.from} to ${decision.to}`, notes: `${decision.note} (${by})`, documentId: line.documentId, status: "confirmed", source: "manual", createdBy: user.id });
+    }
+    await db.insert(schema.bankLineReceipts).values(run.map((r) => ({ lineId, receiptId: r.id }))).onConflictDoNothing();
+    await db.update(schema.bankLines).set({ placedAs: "confirms_deposit", receiptId: run[0].id, why: `The counter paying in the register's ${run.length} days ${decision.from} to ${decision.to} (${money(sum)})${diff === 0 ? ", to the cent." : `, ${money(Math.abs(diff))} ${diff > 0 ? "over" : "short"} — booked as cash over and short.`} ${decision.note} (${by})` }).where(eq(schema.bankLines.id, lineId));
   } else if (decision.kind === "books_bill") {
     if (line.amountCents >= 0) return { ok: false, why: "A deposit cannot be booked as a cost." };
     await seedCategories();

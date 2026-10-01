@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 const now = () => sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`;
@@ -2218,6 +2218,16 @@ export const bankLines = sqliteTable(
     createdAt: text("created_at").notNull().default(now()),
   },
   (t) => [index("bank_lines_on_idx").on(t.on)],
+);
+
+/** Every receipt a bank line confirmed — the whole set, where `bank_lines.receipt_id` holds only the first (0133). */
+export const bankLineReceipts = sqliteTable(
+  "bank_line_receipts",
+  {
+    lineId: text("line_id").notNull().references(() => bankLines.id, { onDelete: "cascade" }),
+    receiptId: text("receipt_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.lineId, t.receiptId] }), index("bank_line_receipts_receipt_idx").on(t.receiptId)],
 );
 
 export const claimImports = sqliteTable("claim_imports", {

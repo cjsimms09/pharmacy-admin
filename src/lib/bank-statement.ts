@@ -209,6 +209,8 @@ export type Placement =
    * $1,315.21 is seventeen days of it. The remittance already counts the payment; only the interest is new money.
    */
   | { kind: "facilitator_late"; day: string; remitCents: number; interestCents: number; why: string }
+  /** Named and set aside: what the line is, said once, booked nowhere. For a cheque whose invoice is not on file yet. */
+  | { kind: "noted"; category: string; why: string }
   | { kind: "unplaced"; why: string };
 
 /** The most a late facilitator payment may exceed its remittance by and still be that remittance plus interest. */
@@ -306,6 +308,8 @@ export type MatchContext = {
   cadences?: CadenceBySupplier;
   /** Remittance days a bank line has already confirmed the facilitator paid, so a late payment is only matched to a day still waiting. */
   facilitatorConfirmedDays?: string[];
+  /** Cheques the owner has said what they are for, by amount, before the bank shows them (cheque-expectations.ts). */
+  expectedCheques?: { amountCents: number; invoiceNumber: string | null; note: string }[];
 };
 
 /**
@@ -659,7 +663,7 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
    * cheque that has changed by forty dollars is worth knowing about and is exactly what a
    * tolerance would hide.
    */
-  if (/^(CHECK|CHQ|CHEQUE|DRAFT)\s*#?\s*\d+$/i.test(d.trim()) && ctx.standing?.length) {
+  if (/^(CHECK|CHQ|CHEQUE|DRAFT)\s*#?\s*\d+$/i.test(d.trim())) {
     /*
      * Only the figures this cheque could be paying.
      *
@@ -691,7 +695,7 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
     const before = new Date(Date.parse(`${lineMonth}-01T00:00:00Z`));
     before.setUTCMonth(before.getUTCMonth() - 1);
     const payable = new Set([lineMonth, before.toISOString().slice(0, 7)]);
-    const candidates = ctx.standing.filter((c) => !c.month || payable.has(c.month));
+    const candidates = (ctx.standing ?? []).filter((c) => !c.month || payable.has(c.month));
     const exact = candidates.filter((c) => c.amountCents === out);
     if (exact.length === 1) {
       return {
@@ -717,6 +721,17 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
      * rent rise is wide enough to swallow an unrelated cheque of similar size, and the wrong answer
      * is worse than none: it would have had somebody change a standing cost that was correct.
      */
+    /*
+     * What he said the cheque was for when he wrote it. An invoice named and on file is marked paid; one named and
+     * not on file is noted by its number, so the line stops asking and the invoice, when it comes, finds its cheque.
+     */
+    const expected = (ctx.expectedCheques ?? []).filter((e) => e.amountCents === out);
+    if (expected.length === 1) {
+      const e = expected[0];
+      const named = e.invoiceNumber ? ctx.unpaidInvoices.find((v) => (v.invoiceNumber ?? "") === e.invoiceNumber) : undefined;
+      if (named) return { kind: "pays_invoice", invoiceId: named.id, supplier: named.supplier ?? "the supplier", why: `The cheque he said pays invoice ${e.invoiceNumber}, which is on file for exactly this. ${e.note}` };
+      return { kind: "noted", category: e.invoiceNumber ? `Invoice ${e.invoiceNumber}` : "Cheque, as he said", why: `${e.note}${e.invoiceNumber ? ` Invoice ${e.invoiceNumber} is not on file yet; when it arrives it is already paid.` : ""}` };
+    }
     return {
       kind: "unplaced",
       why:

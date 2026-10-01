@@ -7,6 +7,7 @@ import { allSuppliers } from "./suppliers-registry";
 import { CARD_STATEMENT_BILL } from "./card-statement";
 import { withinWindow } from "./deposit-gate";
 import { cadences } from "./draw-cadence-store";
+import { chequeExpectations } from "./cheque-expectations";
 import { SITE_STARTS_ON } from "./books-start";
 
 /**
@@ -97,7 +98,11 @@ export async function matchContext(months: string[] = []): Promise<MatchContext>
     .filter((r) => r.remitOn && r.amountCents > 0 && !banked(r))
     .map((r) => ({ id: r.id, payer: r.payerName ?? "payer", remitOn: r.remitOn!, amountCents: r.amountCents, paymentNumber: r.paymentNumber && /\d{6}/.test(r.paymentNumber) ? r.paymentNumber : null, remitNumber: r.remitNumber }));
   /* The rebate statement's receipts no bank line has confirmed: what a day's HEW credits add up to. */
-  const confirmedReceipts = new Set((await db.query.bankLines.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId).filter((id): id is string => id !== null));
+  /* Every receipt a line confirmed: the column holds the first, bank_line_receipts the whole set (0133). */
+  const confirmedReceipts = new Set([
+    ...(await db.query.bankLines.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId).filter((id): id is string => id !== null),
+    ...(await db.query.bankLineReceipts.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId),
+  ]);
   const rebateReceipts = (await db.query.cashReceipts.findMany({ where: like(schema.cashReceipts.sourceKey, "REBATE|%"), columns: { id: true, amountCents: true, receivedOn: true } })).filter((r) => !confirmedReceipts.has(r.id));
   const firstPostage = postageBills.map((b) => b.on).sort()[0] ?? null;
   /* The register's daily cash-and-cheque deposits no bank line has confirmed: what a counter deposit is a run of. */
@@ -117,6 +122,7 @@ export async function matchContext(months: string[] = []): Promise<MatchContext>
     rebateReceipts,
     registerDeposits,
     cadences: await cadences(),
+    expectedCheques: await chequeExpectations(),
     facilitatorConfirmedDays,
     booksStartOn: SITE_STARTS_ON,
     firstPostageBillOn: firstPostage,
