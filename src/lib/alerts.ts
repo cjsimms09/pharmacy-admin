@@ -710,6 +710,86 @@ export async function alerts(): Promise<Alert[]> {
     /* A checklist is never worth taking the dashboard down for. */
     void e;
   }
+
+  /*
+   * ── The quality summary, which has a date on it ──────────────────
+   *
+   * K.A.R. 68-19-1 requires a continuous quality improvement summary for each period, prepared and
+   * communicated to the staff. The site has modelled that since the start — periods, due dates,
+   * corrective-action reviews, the lot — and has never once said so on the front page. The owner,
+   * 1 October 2026: "is CQI due?". It was: August–September, due on the 15th, sitting in draft since
+   * 2 September with nobody told.
+   *
+   * A date somebody has to meet, held in a screen nobody has a reason to open, is the same as not
+   * being held at all. Thirty days is where it starts — enough to do something about, not so early
+   * that it becomes furniture.
+   */
+  try {
+    const { currentCqiObligation } = await import("./cqi");
+    const { period, summary } = await currentCqiObligation();
+    const days = Math.round((Date.parse(period.dueOn) - Date.parse(today)) / 86_400_000);
+    if (days <= 30) {
+      const left = !summary
+        ? "Nothing is started for it."
+        : summary.status === "final"
+          ? "It is finalised."
+          : summary.communicatedOn
+            ? "It is drafted and communicated, and still needs finalising."
+            : "It is drafted, and has not been communicated to the staff or finalised.";
+      if (!summary || summary.status !== "final") {
+        out.push({
+          key: `cqi-${period.periodStart}`,
+          level: days <= 7 ? "now" : "soon",
+          title:
+            days < 0
+              ? `The ${period.label} quality summary was due ${period.dueOn}`
+              : `The ${period.label} quality summary is due ${period.dueOn}`,
+          why: `${left} ${days < 0 ? `That was ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ago.` : `${days} day${days === 1 ? "" : "s"} from today.`} K.A.R. 68-19-1 asks for a summary for each period, communicated to the staff.`,
+          href: "/cqi",
+          action: summary ? "Finish it" : "Start it",
+        });
+      }
+    }
+  } catch (e) {
+    void e;
+  }
+
+  /*
+   * ── Last month's fridge and room temperatures, signed off ────────
+   *
+   * The readings arrive by themselves and are complete; what makes them a record rather than a pile
+   * of numbers is somebody having looked at the month and said so. August 2026 was signed off.
+   * September was not, and nothing anywhere said anything about it — the owner found it by asking.
+   *
+   * No deadline is claimed here, because none is written down that this can point to. What is said
+   * is what is true: the month has ended, its readings are in, and nobody has reviewed them. It
+   * hardens from "soon" to "now" at a fortnight, on the same reasoning as the checklist above —
+   * after two weeks it is not a reminder any more.
+   *
+   * One row for all the sensors, not one each. The owner on alerts generally: one per thing is how
+   * a morning list becomes something to scroll past.
+   */
+  try {
+    const { monthJustFinished } = await import("./monthly-checklist");
+    const { unsignedTemperatureMonths } = await import("./temp-review");
+    const month = monthJustFinished(today);
+    const unsigned = await unsignedTemperatureMonths(month);
+    if (unsigned.length > 0) {
+      const day = Number(today.slice(8, 10));
+      out.push({
+        key: `temps-unsigned-${month}`,
+        level: day >= 14 ? "now" : "soon",
+        title: `${unsigned.length === 1 ? "One sensor's" : `${unsigned.length} sensors'`} ${monthLabel(month)} temperatures are not signed off`,
+        why:
+          `${unsigned.map((u) => `${u.name} (${u.readings} readings${u.outOfRange > 0 ? `, ${u.outOfRange} out of range` : ""})`).join("; ")}. ` +
+          `The readings are in and the month has ended; what makes them a record is somebody having reviewed them and said so.`,
+        href: "/temps",
+        action: "Review the month",
+      });
+    }
+  } catch (e) {
+    void e;
+  }
   // Worst first, and within a level the oldest problem first — which is the order somebody would
   // work them in anyway.
   const rank: Record<AlertLevel, number> = { now: 0, soon: 1 };

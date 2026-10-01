@@ -147,10 +147,18 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
   });
 
   /* ── 2. The ProviderPay account history ────────────────────────── */
+  /*
+   * Judged on when it was taken, like the two above, and for the same reason.
+   *
+   * This asked only whether a file of that name had been uploaded since the 1st, so September's
+   * history — pulled on 11 September — read as "filed" for the whole month while holding eleven
+   * days of it. The sweeps it is there to explain run to the 30th.
+   */
   const ppAccount = await db.query.documents.findMany({
     where: and(like(schema.documents.fileName, "%ransaction%istory%"), gte(schema.documents.uploadedAt, from)),
-    columns: { id: true },
+    columns: { id: true, uploadedAt: true },
   });
+  const ppAccountPulledAt = ppAccount.map((d) => d.uploadedAt).sort().at(-1) ?? null;
   items.push({
     key: "provider_pay_account",
     name: "Wells Fargo / ProviderPay account history",
@@ -158,8 +166,11 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
       "The other side of the same account: what each payer paid in, and what was swept across to the operating account. " +
       "It is what proves the deposits on the bank statement are the payments on the report and not more money.",
     from: "the ProviderPay portal: Account summary → look up the TIN → Wells Fargo account → View history, then Export",
-    done: ppAccount.length > 0,
-    says: ppAccount.length > 0 ? `filed` : "the sweeps cannot be tied to the deposits",
+    done: coversTheMonth(ppAccount.length, ppAccountPulledAt, month),
+    says:
+      ppAccount.length === 0
+        ? "the sweeps cannot be tied to the deposits"
+        : `filed${coverage(ppAccountPulledAt, null, month)}`,
     cents: null,
   });
 
