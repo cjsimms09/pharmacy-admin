@@ -282,3 +282,72 @@ describe("the fixed monthly debits and the counter's deposits (1 October 2026)",
     assert.deepEqual(p.kind === "confirms_run" ? p.receiptIds : [], ["d1", "d2"]);
   });
 });
+
+describe("his answers of 1 October, the second round", () => {
+  const base: MatchContext = { payers: [], suppliers: [{ id: "rrc", name: "RrcPharmaSolution" }, { id: "ipc", name: "IPC", accountNumber: "10689648" }], vendors: [], unpaidBills: [], unpaidInvoices: [], booksStartOn: "2026-09-01" };
+  const one = (on: string, description: string, amountCents: number, ctx: MatchContext = base) => placeLines([{ on, description, amountCents, key: description + amountCents }], ctx)[0].placement;
+
+  test("copay-programme money banks under the programme's own payer, whatever else the line says", () => {
+    const p = one("2026-09-09", "POC NETWORK TECH/RSCOPAY REDSAIL CLAIMS COPAY 10274407 West Wichita", 21_198, { ...base, payers: ["Hippo Network LLC", "RedSail Claims"] });
+    assert.equal(p.kind, "deposit");
+    assert.match(p.kind === "deposit" ? p.payer ?? "" : "", /copay/i);
+  });
+
+  test("Anthropic is a subscription, booked from the line", () => {
+    const p = one("2026-09-25", "Purch ANTHROPIC* CLAUDE SUB SAN FRANCISCO CA", -16_412);
+    assert.equal(p.kind, "books_bill");
+    assert.equal(p.kind === "books_bill" ? [p.category, p.vendor].join("|") : "", "Software and systems|Anthropic");
+  });
+
+  test("a card purchase from a drug supplier is confirmed by PioneerRx's receipt of the same amount — the receipt is the invoice", () => {
+    const ctx = { ...base, receipts: [{ id: "r1", number: "7000000001", supplier: "RrcPharmaSolution", totalCents: 822_000, invoiceDate: "2026-09-23" }] };
+    const p = one("2026-09-24", "Purch IN *RRC PHARMA SOLUTIO INGLEWOOD CA", -822_000, ctx);
+    assert.equal(p.kind, "already_counted");
+    assert.match(p.why, /PioneerRx received/);
+    const none = one("2026-09-24", "Purch IN *RRC PHARMA SOLUTIO INGLEWOOD CA", -822_001, ctx);
+    assert.equal(none.kind, "unplaced");
+  });
+
+  test("a wholesaler's draw is the day's receiving its cadence names, even among thirty candidates", () => {
+    const receipts = [
+      { id: "a", number: "7000000002", supplier: "IPC", totalCents: 10_480, invoiceDate: "2026-09-17" },
+      { id: "b", number: "7000000003", supplier: "IPC", totalCents: 84_162, invoiceDate: "2026-09-17" },
+      { id: "c", number: "7000000004", supplier: "IPC", totalCents: 94_642, invoiceDate: "2026-09-10" },
+    ];
+    const cadences = { IPC: { lagDays: 7, spanDays: 1, from: 3, says: "a draw pays the billing of a week before" } };
+    const p = one("2026-09-24", "Independent Phar/WAREHOUSE 10689648 WEST WICHITA FAMILY PH", -94_642, { ...base, receipts, cadences });
+    assert.equal(p.kind, "pays_invoices");
+    assert.deepEqual(p.kind === "pays_invoices" ? p.invoiceIds.sort() : [], ["a", "b"]);
+  });
+
+  test("two remittance sets of the same cents: the one remitted nearest the deposit is the deposit's", () => {
+    const remits = [
+      { id: "old", payer: "SS&C HEALTH", remitOn: "2026-09-15", amountCents: 200_800, paymentNumber: "999000000000011", remitNumber: "7000000011" },
+      { id: "new", payer: "SS&C HEALTH", remitOn: "2026-09-23", amountCents: 200_800, paymentNumber: null, remitNumber: "7000000012" },
+    ];
+    const p = one("2026-09-24", "ProviderPay/EDI PYMNTS 489121084100001 West Wichita Family Ph", 200_800, { ...base, remits });
+    assert.equal(p.kind, "banks_remits");
+    assert.deepEqual(p.kind === "banks_remits" ? p.remits.map((r) => r.id) : [], ["new"]);
+  });
+
+  test("the facilitator paying a remittance late, with interest, is that remittance plus the interest — and only where that day still waits", () => {
+    const ctx = { ...base, facilitatorPaid: [{ on: "2026-08-18", cents: 131_521 }, { on: "2026-08-19", cents: 121_618 }], facilitatorConfirmedDays: ["2026-08-19"] };
+    const p = one("2026-09-04", "MTF PM NGS/MTF PMT", 131_696, ctx);
+    assert.equal(p.kind, "facilitator_late");
+    assert.deepEqual(p.kind === "facilitator_late" ? [p.day, p.interestCents] : [], ["2026-08-18", 175]);
+    const confirmed = one("2026-09-04", "MTF PM NGS/MTF PMT", 131_696, { ...ctx, facilitatorConfirmedDays: ["2026-08-18", "2026-08-19"] });
+    assert.equal(confirmed.kind, "facilitator_unmatched");
+  });
+});
+
+describe("a wholesaler's ACH in the books' first fortnight", () => {
+  test("the invoices the ledger names are settled, and the rest is said to be August's — not 'worth a look'", () => {
+    const ctx: MatchContext = { payers: [], suppliers: [{ id: "mck", name: "Mckesson" }], vendors: [], unpaidBills: [], unpaidInvoices: [], booksStartOn: "2026-09-01", settled: [{ supplier: "Mckesson", invoiceNumber: "7000000021", checkNumber: "CKACH00000002", netCents: 10_000_000 }] };
+    const early = placeLines([{ on: "2026-09-08", description: "MCKESSON DRUG/AUTO ACH ACH00000002 WEST WICHITA FAM PHCY", amountCents: -11_500_000, key: "m1" }], ctx)[0].placement;
+    assert.equal(early.kind, "settles_ach");
+    assert.equal(early.kind === "settles_ach" ? early.agrees : false, true);
+    assert.match(early.why, /August's invoices/);
+    const late = placeLines([{ on: "2026-09-29", description: "MCKESSON DRUG/AUTO ACH ACH00000002 WEST WICHITA FAM PHCY", amountCents: -11_500_000, key: "m2" }], ctx)[0].placement;
+    assert.equal(late.kind === "settles_ach" ? late.agrees : true, false);
+  });
+});

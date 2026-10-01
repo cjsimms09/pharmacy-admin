@@ -121,6 +121,22 @@ type Rule = {
 };
 
 const RULES: Rule[] = [
+  /*
+   * Copay-programme money, first, because the line also says REDSAIL and CLAIMS and would otherwise be read as
+   * the pharmacy system's bill or a plan's payment. The owner, 1 October 2026: "POC/REDsail is copay money I think."
+   * Manufacturer copay assistance for claims already dispensed, paid through POC Network under RedSail's programme.
+   */
+  {
+    kind: "copay_program",
+    counterparty: "POC Network (RedSail copay)",
+    test: /RSCOPAY|REDSAILCLAIMSCOPAY|REDSAILADMINFEECOPAY|POCNETWORK/,
+    side: "in",
+    lands: "revenue",
+    category: "third_party",
+    feed: "the copay programme's statements",
+    mayAlreadyBeCounted: "third-party revenue, wherever the copay programme's statement has been read",
+    why: "Copay assistance money for claims already dispensed, paid through POC Network.",
+  },
   /* ── Money out: the wholesalers ─────────────────────────────────── */
   {
     kind: "wholesaler_ach",
@@ -359,6 +375,19 @@ const RULES: Rule[] = [
     why: "Mailers and packing, bought by card — the cost of getting a prescription to a patient.",
   },
   { kind: "software", counterparty: "Jotform", test: /JOTFORM/, side: "out", lands: "operating", category: "Software and systems", feed: null, why: "A Jotform subscription." },
+  /* The owner, 1 October 2026: "anthropic is a subscription". */
+  { kind: "software", counterparty: "Anthropic", test: /ANTHROPIC/, side: "out", lands: "operating", category: "Software and systems", feed: null, why: "The Anthropic subscription, paid by card." },
+  {
+    /* The owner, 1 October 2026: "wholesale is xymogen (OTC) products, match to invoices in pioneer". Billed as WholeScripts, received in PioneerRx as Xymogen. */
+    kind: "supplier_card",
+    counterparty: "Xymogen",
+    test: /WHOLESCRIPTS/,
+    side: "out",
+    lands: "cost_of_goods",
+    category: null,
+    feed: "PioneerRx's receiving from Xymogen",
+    why: "Xymogen's OTC products, billed through WholeScripts and paid by card.",
+  },
 
   /* ── Money out: not a cost at all ───────────────────────────────── */
   {

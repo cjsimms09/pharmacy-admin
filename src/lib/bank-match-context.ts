@@ -6,6 +6,7 @@ import { unpaid, vendors } from "./expenses";
 import { allSuppliers } from "./suppliers-registry";
 import { CARD_STATEMENT_BILL } from "./card-statement";
 import { withinWindow } from "./deposit-gate";
+import { cadences } from "./draw-cadence-store";
 import { SITE_STARTS_ON } from "./books-start";
 
 /**
@@ -88,10 +89,17 @@ export async function matchContext(): Promise<MatchContext> {
     .map((r) => ({ id: r.id, amountCents: r.amountCents, receivedOn: r.receivedOn! }))
     .sort((a, b) => a.receivedOn.localeCompare(b.receivedOn));
 
+  /* Remittance days the statement has already confirmed the facilitator paid, so a late payment is only tied to a day still waiting. */
+  const facilitatorConfirmedDays = (await db.query.bankLines.findMany({ where: eq(schema.bankLines.placedAs, "already_counted"), columns: { on: true, description: true } }))
+    .filter((l) => /\bMTF\b/i.test(l.description))
+    .map((l) => l.on);
+
   return {
     remits,
     rebateReceipts,
     registerDeposits,
+    cadences: await cadences(),
+    facilitatorConfirmedDays,
     booksStartOn: SITE_STARTS_ON,
     firstPostageBillOn: firstPostage,
     receipts: receiving.map((r) => ({ id: r.id, number: r.invoiceNumber ?? r.id.slice(0, 8), supplier: r.supplier, totalCents: r.totalCents, invoiceDate: r.invoiceDate })),

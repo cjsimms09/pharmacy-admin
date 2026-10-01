@@ -26,26 +26,26 @@ so the answer can be checked rather than taken on trust.
 | **19 plans still unclassified** | the residual after 459 were adopted and 15 he decided himself | Almost all of it is the one question no document on file answers: is this employer insured, or does it fund its own plan. Needs a Form 5500 or the plan document, one plan at a time. Each row now shows what the plan pays for and whether it ever pays alone, which is what settles a card. |
 | **Parmed's September ACH pays for twelve August purchases** | **$2,825.92, all of it cash out in September** | Parmed's EFT debit notice of 26 September names twelve invoices, every one dated 17–31 August, and the Parmed invoice feed here begins on 9 September — so this site holds none of them. The payment is recorded and the bank debit will place itself against it, but no cost reaches any month, because nothing was ever counted for those purchases. That is right on the accrual side: August is out of books. **The question is the cash side.** The money genuinely leaves the operating account in September and will be on the Emprise statement. Does September's cash cost of goods carry $2,825.92 for goods bought before the books begin, or does the cash account treat it the way the accrual account does and count nothing? Measured 28 September 2026. |
 
-## September's bank statement — placed 1 October, 27 lines open
+## September's bank statement — placed 1 October, 11 lines open
 
 Read from the scan, proved against its own daily balances to the cent (opening $341,931.59, closing $311,631.53,
 162 lines). First placement left 89 lines "unmatched"; the matcher was then allowed to see what was already on
 file — the register's daily card takings, the remittance register, the rebate receipt, and the books' own first
 day — and 52 placed themselves (`replaceUnplaced`, scripts/support/replace-unplaced.ts). Later the same day, on his
 answers: the fixed monthly debits book themselves (sales tax, loan, CPESN, PioneerRx, ProviderPay fee, Heartland
-fees), and a counter deposit is a run of the register's days in order — 89 → 27. The 27 still open, by what
-settles each:
+fees), and a counter deposit is a run of the register's days in order — 89 → 27. His second round: copay money
+banks as copay money, Anthropic is a subscription, RRC's card charges are PioneerRx's receipts, IPC's draws are
+the day's receiving its cadence names, the facilitator's late payment is its 18 Aug remittance plus $1.75
+interest, the 8 Sept McKesson ACH settles the 27 invoices it names with the rest said to be August's — 89 → 11.
+The 11 still open, by what settles each:
 
 | Class | Lines | Money | What settles it |
 |---|---|---|---|
-| McKesson ACH 8 Sept and 29 Sept | 2 | −$246,004.84 | the AP report pulled after month end: the one on file (25 Sept) shows 27 invoices = $106,322.62 against $124,007.43 taken on the 8th, and nothing after it |
-| Access Health 28 Sept, ProviderPay 24 Sept | 2 | +$30,941.18 | the 835s for 25–28 Sept (none in the register), and the Payments export for 19–30 Sept |
+| McKesson ACH 29 Sept | 1 | −$121,997.41 | McKesson's own ledger: the AP report read 1 Oct still lists the 29 Sept-due invoices as open ($139,218.37 of them), so their ledger had not posted the ACH; the next weekly report ties it with no action |
+| Access Health 28 Sept | 1 | +$28,933.18 | the remit summary on file has no Health Mart Atlas remittance between 24 Sept ($1,443.57) and 29 Sept ($20,068.82); one is missing from the export, or ProviderPay had not posted it |
 | Cheques 2453–2457 | 5 | −$9,832.89 | him: what each was for |
 | Counter deposits | 3 | +$2,830.96 | 16–19 Sept: the register says $1,089.77 (to the 18th) or $1,142.76 (to the 19th); the bank got $1,112.76 on the 23rd — the drawers and the bank disagree by $22.99 or $30.00 that week, and the 30 Sept deposit cannot be placed until that one is. $232.67 on the 16th matches no run at all. |
-| Card purchases: RRC ×2, Wholescripts ×2, Uline, Anthropic ×2 | 7 | −$14,135.02 | their invoices or receipts forwarded, or a rule per vendor |
-| POC Network / RedSail copay ×4 | 4 | +$462.98 | a decision on what this money is |
-| IPC 24, 28, 30 Sept | 3 | −$6,002.53 | no invoice set adds to them; IPC's statement would |
-| MTF 4 Sept | 1 | +$1,316.96 | 14 of 15 MTF deposits matched the day's remittances exactly; this one matches none. Closest: the 18 Aug remittance at $1,315.21 — $1.75 apart. Not a misread (the balances prove the line). |
+| WholeScripts (Xymogen) ×2 | 2 | −$3,062.14 | PioneerRx received Xymogen $1,252.62 (1 Sept) and $2,399.22 (29 Sept); the card was charged $2,219.26 (18 Sept) and $842.88 (30 Sept) — no pair agrees |
 | HMA $110 "12 payments" | — | — | already on the register above |
 
 Pre-flight: no physical act; the 37 are "no document pairs with the line", not "the money is wrong" — the balances

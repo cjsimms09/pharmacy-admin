@@ -323,6 +323,10 @@ async function placeStatementLines(
       depositCents += line.amountCents;
     } else if (placement.kind === "before_books") {
       placedAs = "before_books";
+    } else if (placement.kind === "facilitator_late") {
+      /* The remittance already counts the payment; only the interest is new money. */
+      placedAs = "already_counted";
+      await addCashReceipt({ month: line.on.slice(0, 7), kind: "other", amountCents: placement.interestCents, payer: "Medicare Transaction Facilitator (interest)", notes: `Interest on the facilitator's remittance of ${placement.day} (${money(placement.remitCents)}), paid ${line.on}.`, receivedOn: line.on, sourceKey: `bank-mtf-interest|${line.key}`, documentId, createdBy: user.id });
     } else if (placement.kind === "confirms_run") {
       for (const id of placement.receiptIds) claimed.add(id);
       receiptId = placement.receiptIds[0];

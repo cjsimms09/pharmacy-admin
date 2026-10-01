@@ -21,6 +21,9 @@
 
 import { readBankDescriptor } from "./bank-descriptors";
 import { invoicesPaidBy } from "./pays-invoices";
+import { datesDrawnOn, type Cadence } from "./draw-cadence";
+type CadenceBySupplier = Record<string, Cadence>;
+import { COPAY_PAYER } from "./copay-remit";
 
 export type BankLine = {
   /** YYYY-MM-DD. */
@@ -197,7 +200,21 @@ export type Placement =
    * the cent, or within a dollar with the difference booked as cash over and short — never more.
    */
   | { kind: "confirms_run"; receiptIds: string[]; from: string; to: string; overShortCents: number; why: string }
+  /**
+   * The facilitator paying a remittance late, with interest.
+   *
+   * September 2026's one unmatched MTF deposit, $1,316.96 on the 4th, matched no remittance day; the remittance of
+   * 18 August, $1,315.21, matched no deposit — and the month's deposits exceeded the month's remittances by exactly
+   * the deposit. The IRA requires the facilitator to refund within fourteen days and pay interest after; $1.75 on
+   * $1,315.21 is seventeen days of it. The remittance already counts the payment; only the interest is new money.
+   */
+  | { kind: "facilitator_late"; day: string; remitCents: number; interestCents: number; why: string }
   | { kind: "unplaced"; why: string };
+
+/** The most a late facilitator payment may exceed its remittance by and still be that remittance plus interest. */
+export const FACILITATOR_INTEREST_RATE = 0.01;
+/** How long after its remittance day a late facilitator payment is looked for. */
+export const FACILITATOR_LATE_DAYS = 30;
 
 /** The most a counter deposit may differ from the register's days and still be those days, in cents. */
 export const CASH_OVER_SHORT_CENTS = 100;
@@ -285,6 +302,10 @@ export type MatchContext = {
   firstPostageBillOn?: string | null;
   /** The register's daily cash-and-cheque deposits no bank line has confirmed, oldest first. */
   registerDeposits?: { id: string; amountCents: number; receivedOn: string }[];
+  /** Each wholesaler's draw cadence, learned from the draws already settled (draw-cadence.ts): which days' billing a draw on a given day is for. */
+  cadences?: CadenceBySupplier;
+  /** Remittance days a bank line has already confirmed the facilitator paid, so a late payment is only matched to a day still waiting. */
+  facilitatorConfirmedDays?: string[];
 };
 
 /**
@@ -409,15 +430,24 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
     if (covered.length > 0) {
       const cents = covered.reduce((n, x) => n + x.netCents, 0);
       const agrees = cents === -line.amountCents;
+      /*
+       * In the books' first fortnight the bank takes more than the ledger shows: the rest is August's invoices,
+       * which the report on file does not reach back to. The owner, 1 October 2026: "ignore the 8th, it will
+       * have things that predate the site." The invoices the report names are settled; the rest is said.
+       */
+      const remainder = -line.amountCents - cents;
+      const opening = !agrees && remainder > 0 && ctx.booksStartOn !== undefined && line.on >= ctx.booksStartOn && line.on <= plusDays(ctx.booksStartOn, OPENING_PAYABLES_DAYS);
       return {
         kind: "settles_ach",
         supplier: meaning.counterparty,
         reference: ref,
         invoices: covered.map((x) => x.invoiceNumber),
-        agrees,
+        agrees: agrees || opening,
         why: agrees
           ? `${ref} covers ${covered.length} ${meaning.counterparty} invoices and comes to exactly this debit. The money is already the cash cost of goods, from their own report, so nothing is booked from this line.`
-          : `${ref} covers ${covered.length} ${meaning.counterparty} invoices coming to ${(cents / 100).toFixed(2)}, and the bank took ${((-line.amountCents) / 100).toFixed(2)} — worth a look.`,
+          : opening
+            ? `${ref} covers ${covered.length} ${meaning.counterparty} invoices coming to ${(cents / 100).toFixed(2)}; the bank took ${((-line.amountCents) / 100).toFixed(2)}. The ${(remainder / 100).toFixed(2)} beyond them is August's invoices, from before the books began on ${ctx.booksStartOn}, which their report does not reach back to. Nothing is booked from this line.`
+            : `${ref} covers ${covered.length} ${meaning.counterparty} invoices coming to ${(cents / 100).toFixed(2)}, and the bank took ${((-line.amountCents) / 100).toFixed(2)} — worth a look.`,
       };
     }
   }
@@ -507,6 +537,22 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
           why: "The Medicare facilitator paying. Its remittance for this day comes to exactly this, and already counts it payment by payment.",
         };
       }
+      /* A remittance day still waiting for its deposit, paid late with interest: one such day within 1% below the deposit, or nothing. */
+      const confirmedDays = new Set(ctx.facilitatorConfirmedDays ?? []);
+      const late = (ctx.facilitatorPaid ?? []).filter((p) => {
+        const gap = daysBetween(p.on, line.on);
+        return !confirmedDays.has(p.on) && gap > 0 && gap <= FACILITATOR_LATE_DAYS && p.cents > 0 && line.amountCents > p.cents && line.amountCents - p.cents <= p.cents * FACILITATOR_INTEREST_RATE;
+      });
+      if (late.length === 1) {
+        const interest = line.amountCents - late[0].cents;
+        return {
+          kind: "facilitator_late",
+          day: late[0].on,
+          remitCents: late[0].cents,
+          interestCents: interest,
+          why: `The Medicare facilitator paying its remittance of ${late[0].on} (${(late[0].cents / 100).toFixed(2)}) late, with ${(interest / 100).toFixed(2)} of interest. The remittance already counts the payment; the interest is banked from this line.`,
+        };
+      }
       return {
         kind: "facilitator_unmatched",
         why:
@@ -533,7 +579,17 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
           const gap = daysBetween(r.remitOn, line.on);
           return hma === viaAccessHealth && gap >= 0 && gap <= REMIT_WINDOW_DAYS;
         });
-        const sets = remitSetsFor(pool, line.amountCents);
+        let sets = remitSetsFor(pool, line.amountCents);
+        /*
+         * Two sets, different days: the deposit follows its remittances by a day, so the set remitted nearest the
+         * deposit is the one — SS&C's $2,008.00 of 23 September was the deposit of the 24th, not its twin of the 15th.
+         */
+        if (sets.length > 1) {
+          const latest = (s: RegisterRemit[]) => s.map((r) => r.remitOn).sort().at(-1)!;
+          const nearest = sets.map(latest).sort().at(-1)!;
+          const near = sets.filter((s) => latest(s) === nearest);
+          if (near.length === 1) sets = near;
+        }
         if (sets.length === 1) {
           const set = sets[0];
           return {
@@ -554,6 +610,8 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
      * and DrHouse paying for its scripts. Their claims count them on accrual; only the bank line counts the cash.
      */
     if (meaning.kind === "transfer_in") return { kind: "deposit", receiptKind: "other", payer: "WWFP (drugs sold at cost)", why: meaning.says };
+    /* Copay-programme money, banked under the same payer the programme's statements use, so a statement finds it banked. */
+    if (meaning.kind === "copay_program") return { kind: "deposit", receiptKind: "third_party", payer: COPAY_PAYER, why: meaning.says };
     if (meaning.kind === "direct_payer") return { kind: "deposit", receiptKind: "third_party", payer: meaning.counterparty, why: meaning.says };
     if (meaning.kind === "other_receipt") {
       return { kind: "unplaced", why: `${meaning.says} Not banked from the statement until it is agreed what this money is and where it belongs.` };
@@ -698,7 +756,21 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
     const key = fold(meaning.counterparty).slice(0, 6);
     const inv = ctx.unpaidInvoices.filter((v) => fold(v.supplier).startsWith(key) && v.totalCents === out);
     if (inv.length === 1) return { kind: "pays_invoice", invoiceId: inv[0].id, supplier: inv[0].supplier ?? meaning.counterparty, why: `the ${meaning.counterparty} invoice for exactly this amount, paid by debit card` };
-    return { kind: "unplaced", why: `${meaning.says} ${inv.length > 1 ? "More than one of their invoices is for this amount; mark the right one paid by hand." : "No invoice of theirs for this amount is on file, so the cost of goods does not have it yet: forward their invoice, which books it and this line will mark it paid."}` };
+    /*
+     * Then PioneerRx's receiving, which is where these purchases actually are: RRC's two September card charges
+     * were both received there to the cent and neither invoice was ever emailed. The owner, 1 October 2026:
+     * "match to invoices in pioneer". The receipt is the cost record, so the line confirms it and books nothing.
+     */
+    const received = (ctx.receipts ?? []).filter((r) => fold(r.supplier).startsWith(key) && r.totalCents === out && r.invoiceDate && Math.abs(daysBetween(r.invoiceDate, line.on)) <= 10);
+    if (received.length === 1) {
+      return {
+        kind: "already_counted",
+        what: meaning.counterparty,
+        where: "the cost of goods, from PioneerRx's receiving",
+        why: `${meaning.says} PioneerRx received ${meaning.counterparty}'s ${received[0].number} of ${received[0].invoiceDate} for exactly this; that receipt is the cost, so nothing is booked from the line.`,
+      };
+    }
+    return { kind: "unplaced", why: `${meaning.says} ${inv.length > 1 || received.length > 1 ? "More than one of their invoices is for this amount; mark the right one paid by hand." : "No invoice of theirs for this amount is on file — emailed or received in PioneerRx — so the cost of goods does not have it yet: forward their invoice, which books it and this line will mark it paid."}` };
   }
   /*
    * A payment to a supplier that is already on file with the invoices inside it.
@@ -742,16 +814,10 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
    * that could tie it to a bill already on file has had its turn — a PioneerRx invoice filed before the debit still
    * wins, and the next month's invoice finds this month's debit already booked and books nothing.
    */
-  const FIXED: Record<string, { vendor: string; says: string }> = {
-    sales_tax: { vendor: "Kansas Department of Revenue", says: "the state's sales tax draft" },
-    loan_payment: { vendor: "Loan", says: "the loan payment, all of it under principal until the lender's statement splits out the interest" },
-    network_fee: { vendor: "CPESN", says: "the CPESN network membership" },
-    software: { vendor: "RedSail Technologies (PioneerRx)", says: "PioneerRx's monthly system charge, billed in arrears, with no invoice of theirs on file for this amount" },
-    providerpay_fee: { vendor: "ProviderPay", says: "ProviderPay's monthly fee" },
-  };
-  const fixed = FIXED[meaning.kind];
-  if (fixed && meaning.category) {
-    return { kind: "books_bill", category: meaning.category, vendor: fixed.vendor, why: `${fixed.says}: a fixed monthly debit, booked from the line under ${meaning.category}.` };
+  const BOOKED_FROM_LINE = new Set(["sales_tax", "loan_payment", "network_fee", "software", "providerpay_fee", "mailers"]);
+  if (BOOKED_FROM_LINE.has(meaning.kind) && meaning.category) {
+    const vendor = meaning.counterparty === "the loan" ? "Loan" : meaning.counterparty;
+    return { kind: "books_bill", category: meaning.category, vendor, why: `${meaning.says} A recurring debit nobody bills for in time, booked from the line under ${meaning.category}.` };
   }
 
   const vendor = ctx.vendors.find((v) => mentions(d, v.name));
@@ -787,8 +853,15 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
       .filter((v) => sameSupplier(v.supplier, supplier.name))
       .filter((v) => v.totalCents !== null && v.invoiceDate !== null)
       .map((v) => ({ id: v.id, number: v.number, on: v.invoiceDate!, cents: v.totalCents! }));
-    const fromInvoices = invoicesPaidBy(out, line.on, emailed);
-    const paid = fromInvoices.kind === "settles" ? fromInvoices : invoicesPaidBy(out, line.on, received);
+    /*
+     * With the supplier's cadence where it has been learned: IPC draws on a day for one day's billing a week
+     * before, and the two receipts of 17 September are the draw of the 24th to the cent — a set no amount search
+     * would choose from thirty candidates, and the one the cadence names outright.
+     */
+    const cadence = ctx.cadences?.[supplier.name] ?? Object.entries(ctx.cadences ?? {}).find(([k]) => sameSupplier(k, supplier.name))?.[1];
+    const period = cadence ? datesDrawnOn(cadence, line.on) : undefined;
+    const fromInvoices = invoicesPaidBy(out, line.on, emailed, period);
+    const paid = fromInvoices.kind === "settles" ? fromInvoices : invoicesPaidBy(out, line.on, received, period);
     if (paid.kind === "settles") {
       return {
         kind: "pays_invoices",
