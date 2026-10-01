@@ -151,7 +151,14 @@ export function gateDeposit(held: BankedReceipt[], incoming: IncomingReceipt): G
        * so for a remittance the payer is not required to agree: same amount inside the window is refused and
        * said (Session 2, money map G-835-1).
        */
-      (feedOf(incoming.sourceKey) === "835" || !incoming.payer || !h.payer || head(h.payer) === head(incoming.payer)),
+      /*
+       * And the same the other way about: a receipt banked from an 835 — by the remittance import, or by a bank line
+       * tied to the remittances behind it — carries the 835's name for the payer ("SS&C HEALTH"), and the payment
+       * report will arrive naming the same money "ARGUS HEALTH SYS". Twenty-five of September's twenty-five deposits
+       * carried the same payment number in both, so the reference rule above catches nearly all of them; this is for
+       * the ones the register holds without a payment number yet.
+       */
+      (feedOf(incoming.sourceKey) === "835" || feedOf(h.sourceKey) === "835" || !incoming.payer || !h.payer || head(h.payer) === head(incoming.payer)),
   );
   if (clash) {
     return {
@@ -198,6 +205,8 @@ export type HeldForBank = { id: string; amountCents: number; receivedOn: string 
 
 export type BankDepositMatch =
   | { kind: "confirms"; receipt: HeldForBank; why: string }
+  /** Two or three receipts the bank paid in as one deposit, and only one such set adds up: the line confirms them all. */
+  | { kind: "confirms_many"; receipts: HeldForBank[]; why: string }
   | { kind: "ambiguous"; candidates: HeldForBank[]; why: string }
   | { kind: "none" };
 
@@ -243,20 +252,26 @@ export function matchHeldDeposit(
     /*
      * Two or three receipts the bank paid in as one deposit — two card batches settled together, say.
      * No single receipt matches, so this used to bank the line as new money on top of both (Session 2,
-     * money map checkpoint 1, case D, proven on a snapshot). Which receipts they are cannot be recorded
-     * against one bank line, so the line goes to a person, named — never banked.
+     * money map checkpoint 1, case D, proven on a snapshot). Never banked. Where exactly one set of receipts
+     * adds up to the deposit, the line confirms that set — six ProviderPay deposits in September 2026 were
+     * each exactly the day's payer payments paid in together, and sat "unmatched" with the answer written
+     * on them. Where more than one set adds up, nothing is guessed: the line goes to a person, named.
      */
     const pool = held.filter((h) => !claimed.has(h.id) && h.amountCents > 0 && h.amountCents < line.amountCents && h.receivedOn && h.receivedOn <= line.on && withinWindow(h.receivedOn, line.on));
     const combos = receiptsSummingTo(pool, line.amountCents);
     if (combos.length === 0) return { kind: "none" };
     const describeAll = (c: HeldForBank[]) => c.map((h) => `${money(h.amountCents)}${h.payer ? ` from ${h.payer}` : ""}${h.receivedOn ? ` on ${h.receivedOn}` : ""}`).join(" + ");
+    if (combos.length === 1) {
+      return {
+        kind: "confirms_many",
+        receipts: combos[0],
+        why: `This deposit is exactly ${describeAll(combos[0])}, already banked separately and paid in together. The statement confirms those receipts; nothing new is banked.`,
+      };
+    }
     return {
       kind: "ambiguous",
       candidates: combos[0],
-      why:
-        combos.length === 1
-          ? `This deposit is exactly ${describeAll(combos[0])}, already banked separately — probably paid in together. Those receipts are this money: nothing needs banking, and banking it with the form would count it twice.`
-          : `This deposit equals more than one combination of receipts already banked (${combos.map(describeAll).join("; or ")}). Nothing is banked. Check which; do not bank it with the form, which would count it twice.`,
+      why: `This deposit equals more than one combination of receipts already banked (${combos.map(describeAll).join("; or ")}). Nothing is banked. Check which; do not bank it with the form, which would count it twice.`,
     };
   }
   const describe = (h: HeldForBank) =>

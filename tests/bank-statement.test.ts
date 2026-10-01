@@ -137,3 +137,83 @@ test("REGRESSION: every scanned spelling of Prescription/TRANSFER is the practic
     assert.equal(placeLines([{ on: "2026-08-10", description: d, amountCents: 100_00, key: d }], ctx4)[0].placement.kind, "deposit", d);
   }
 });
+
+/*
+ * What September 2026's statement taught the matcher: eighty-nine lines sat "unmatched" while the register, the
+ * remittances, the rebate receipt and the books' own first day explained fifty-two of them. Invented figures.
+ */
+describe("the lines September 2026 could not place, and what explains them", () => {
+  const base = { payers: [], suppliers: [{ id: "ipc", name: "IPC", accountNumber: "10689648" }], vendors: [], unpaidBills: [], unpaidInvoices: [], booksStartOn: "2026-09-01" };
+  const remits = [
+    { id: "r1", payer: "SS&C HEALTH", remitOn: "2026-09-29", amountCents: 5_817_764, paymentNumber: "999000000000001", remitNumber: "7000000001" },
+    { id: "r2", payer: "SS&C HEALTH", remitOn: "2026-09-29", amountCents: 402_755, paymentNumber: "999000000000002", remitNumber: "7000000002" },
+    { id: "r3", payer: "EXPRESS SCRIPTS INC", remitOn: "2026-09-29", amountCents: 615_764, paymentNumber: "999000000000003", remitNumber: "7000000003" },
+    { id: "r4", payer: "SS&C HEALTH", remitOn: "2026-09-19", amountCents: 180_800, paymentNumber: null, remitNumber: "7000000004" },
+    { id: "r5", payer: "Health Mart Atlas", remitOn: "2026-09-29", amountCents: 2_006_882, paymentNumber: "99900001", remitNumber: "7000000005" },
+    { id: "r6", payer: "MYMATRIXX", remitOn: "2026-09-21", amountCents: 1_448, paymentNumber: null, remitNumber: "7000000006" },
+  ];
+
+  test("a ProviderPay deposit is the other payers' remittances of the day before — including one held back for eleven days", () => {
+    const [{ placement }] = placeLines([{ on: "2026-09-30", description: "ProviderPay/EDI PYMNTS 489121084100001 West Wichita Family Ph", amountCents: 7_017_083, key: "pp" }], { ...base, remits });
+    assert.equal(placement.kind, "banks_remits");
+    assert.deepEqual(placement.kind === "banks_remits" ? placement.remits.map((r) => r.id).sort() : [], ["r1", "r2", "r3", "r4"]);
+  });
+
+  test("an Access Health deposit takes only Health Mart Atlas's remittances, and a remittance stands behind one deposit", () => {
+    const out = placeLines(
+      [
+        { on: "2026-09-30", description: "ACCESS HEALTH/ACCESS HEA 1722734 West Wichita Family Ph", amountCents: 2_006_882, key: "ah" },
+        { on: "2026-09-30", description: "ACCESS HEALTH/ACCESS HEA 1722734 West Wichita Family Ph", amountCents: 2_006_882, key: "ah2" },
+      ],
+      { ...base, remits },
+    );
+    assert.equal(out[0].placement.kind, "banks_remits");
+    assert.deepEqual(out[0].placement.kind === "banks_remits" ? out[0].placement.remits.map((r) => r.id) : [], ["r5"]);
+    assert.equal(out[1].placement.kind, "psao_deposit");
+  });
+
+  test("two sets of remittances that both add up leave the deposit for a person", () => {
+    const twice = [...remits, { id: "r7", payer: "LucyRx", remitOn: "2026-09-29", amountCents: 180_800, paymentNumber: null, remitNumber: "7000000007" }];
+    const [{ placement }] = placeLines([{ on: "2026-09-30", description: "ProviderPay/EDI PYMNTS 489121084100001 West Wichita Family Ph", amountCents: 7_017_083, key: "pp" }], { ...base, remits: twice });
+    assert.equal(placement.kind, "psao_deposit");
+    assert.match(placement.why, /More than one set/);
+  });
+
+  test("a bare counter deposit equal to a cheque-paying payer's remittance is that cheque", () => {
+    const [{ placement }] = placeLines([{ on: "2026-09-30", description: "Deposit", amountCents: 1_448, key: "dep" }], { ...base, remits });
+    assert.equal(placement.kind, "banks_remits");
+    assert.match(placement.why, /MYMATRIXX.*cheque/);
+  });
+
+  test("a bare deposit nothing equals is still nobody's", () => {
+    const [{ placement }] = placeLines([{ on: "2026-09-30", description: "Deposit", amountCents: 73_517, key: "dep" }], { ...base, remits });
+    assert.equal(placement.kind, "unplaced");
+  });
+
+  test("a wholesaler's draw in the books' first fortnight, with nothing to tie it to, is before the books — not unmatched", () => {
+    const early = placeLines([{ on: "2026-09-03", description: "Independent Phar/WAREHOUSE 10689648 WEST WICHITA FAMILY PH", amountCents: -118_566, key: "ipc1" }], base)[0].placement;
+    assert.equal(early.kind, "before_books");
+    const later = placeLines([{ on: "2026-09-24", description: "Independent Phar/WAREHOUSE 10689648 WEST WICHITA FAMILY PH", amountCents: -94_642, key: "ipc2" }], base)[0].placement;
+    assert.equal(later.kind, "unplaced");
+  });
+
+  test("a postage top-up from before the first confirmation on file books itself; one after it waits for its email", () => {
+    const ctx = { ...base, postageBills: [{ amountCents: 10_000, on: "2026-09-08" }], firstPostageBillOn: "2026-09-08" };
+    const before = placeLines([{ on: "2026-09-01", description: "Purch STAMPS.COM WASHINGTON DC *HkAE5821 08/31 08:25", amountCents: -10_000, key: "s1" }], ctx)[0].placement;
+    assert.equal(before.kind, "books_bill");
+    const after = placeLines([{ on: "2026-09-21", description: "Purch STAMPS.COM WASHINGTON DC *HkAE5821 09/20 08:25", amountCents: -10_000, key: "s2" }], ctx)[0].placement;
+    assert.equal(after.kind, "unplaced");
+  });
+
+  test("the day's rebate credits together confirm the rebate receipt; apart they stay pieces", () => {
+    const lines = [
+      { on: "2026-09-17", description: "HEW LLC/GENERIC 237.WWICHITA WEST WICHITA", amountCents: 898_431, key: "g" },
+      { on: "2026-09-17", description: "HEW LLC/BRAND 237.WWICHITA WEST WICHITA", amountCents: 136_293, key: "b" },
+      { on: "2026-09-17", description: "HEW LLC/FEES MISC 237.WWICHITA WEST WICHITA", amountCents: 35_000, key: "f" },
+    ];
+    const whole = placeLines(lines, { ...base, rebateReceipts: [{ id: "reb", amountCents: 1_069_724, receivedOn: "2026-09-17" }] });
+    assert.deepEqual(whole.map((o) => o.placement.kind), ["confirms_rebate", "confirms_rebate", "confirms_rebate"]);
+    const short = placeLines(lines.slice(0, 2), { ...base, rebateReceipts: [{ id: "reb", amountCents: 1_069_724, receivedOn: "2026-09-17" }] });
+    assert.deepEqual(short.map((o) => o.placement.kind), ["rebate_part", "rebate_part"]);
+  });
+});

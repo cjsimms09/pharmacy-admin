@@ -65,7 +65,7 @@ export type BankReview = {
  * deliberately — an unlisted kind falls to `booked`, which is the safe direction: it appears as
  * something the site acted on, and a person reading the page will see it and say otherwise.
  */
-const CONFIRMS_ONLY = new Set(["card_deposit", "psao_deposit", "already_counted", "confirms_standing", "settles_ach", "own_transfer"]);
+const CONFIRMS_ONLY = new Set(["card_deposit", "psao_deposit", "already_counted", "confirms_standing", "settles_ach", "own_transfer", "before_books"]);
 const NEEDS_YOU = new Set(["unplaced", "facilitator_unmatched", "rebate_part"]);
 
 const money = (c: number) => `$${(Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

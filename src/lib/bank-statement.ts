@@ -168,7 +168,39 @@ export type Placement =
   | { kind: "facilitator_unmatched"; why: string }
   /** A piece of a wholesaler rebate paid in several credits. Never matched one at a time, never banked. */
   | { kind: "rebate_part"; why: string }
+  /** The pieces of one day's rebate, which together are exactly the rebate receipt the statement banked. */
+  | { kind: "confirms_rebate"; receiptId: string; why: string }
+  /**
+   * A PSAO deposit that is exactly a set of remittances in the register, none of them banked yet.
+   *
+   * The payer payment report is the door for this money, and it reaches the day it was pulled: September's
+   * reached the 18th, and every ProviderPay and Access Health deposit after it sat "unmatched" while the 835s
+   * behind each one sat in the register, dated a day or two before the deposit. The line banks one receipt per
+   * remittance, under the remittance's own payment number, so the report's copy is refused when it comes.
+   */
+  | { kind: "banks_remits"; remits: RegisterRemit[]; why: string }
+  /**
+   * Money whose documents predate the books.
+   *
+   * The site started on 1 September 2026 with nothing before it, by decision. The first fortnight's wholesaler
+   * debits settle August's invoices, and the first card deposit is the last days of August's takings: nothing on
+   * file can tie them and nothing should. Said as that, not as "unmatched", which asks somebody to look for a
+   * document that was never going to be here.
+   */
+  | { kind: "before_books"; why: string }
   | { kind: "unplaced"; why: string };
+
+/** A remittance in the register that no receipt yet stands for. */
+export type RegisterRemit = { id: string; payer: string; remitOn: string; amountCents: number; paymentNumber: string | null; remitNumber: string };
+
+/** How long a wholesaler's draw can lag the books' first day and still be paying for August. */
+export const OPENING_PAYABLES_DAYS = 14;
+/** How many days after the books began the card processor can still be paying in August's takings. */
+export const OPENING_TAKINGS_DAYS = 3;
+/** How far back a deposit's remittances can be dated: a payer that held one back paid it eleven days later in September. */
+export const REMIT_WINDOW_DAYS = 14;
+/** How long a payer's cheque can sit before it is paid in at the counter. */
+export const CHEQUE_WINDOW_DAYS = 45;
 
 export type MatchContext = {
   /** PBMs and plans seen on the claims, and any payer typed before. */
@@ -229,7 +261,45 @@ export type MatchContext = {
    * things it seems like it matches.) the rest of the checks should allow me to categorize."
    */
   standing?: { name: string; amountCents: number; paidDay: number | null; month?: string }[];
+  /** Remittances in the register that no cash receipt stands for yet — what a PSAO deposit or a counter deposit may be. */
+  remits?: RegisterRemit[];
+  /** Rebate receipts the rebate statement banked and no bank line has confirmed. */
+  rebateReceipts?: { id: string; amountCents: number; receivedOn: string | null }[];
+  /** The books' first day. Before it there is nothing on file, by decision. */
+  booksStartOn?: string;
+  /** The earliest postage confirmation on file: a Stamps.com charge before it had no email to be counted from. */
+  firstPostageBillOn?: string | null;
 };
+
+/**
+ * Every set of remittances adding to the deposit, stopping at two — one answer is a match, two is a question.
+ *
+ * At most eight remittances to a deposit, which is wider than any PSAO deposit on file (four), and a pool of
+ * at most forty, which a fortnight never reaches.
+ */
+export function remitSetsFor(pool: RegisterRemit[], amountCents: number): RegisterRemit[][] {
+  const xs = pool.filter((r) => r.amountCents > 0 && r.amountCents <= amountCents).slice(0, 40).sort((a, b) => b.amountCents - a.amountCents);
+  const found: RegisterRemit[][] = [];
+  const walk = (start: number, left: number, chosen: RegisterRemit[]) => {
+    if (found.length >= 2) return;
+    if (left === 0) {
+      if (chosen.length) found.push([...chosen]);
+      return;
+    }
+    if (chosen.length >= 8) return;
+    for (let i = start; i < xs.length && found.length < 2; i++) {
+      if (xs[i].amountCents > left) continue;
+      chosen.push(xs[i]);
+      walk(i + 1, left - xs[i].amountCents, chosen);
+      chosen.pop();
+    }
+  };
+  walk(0, amountCents, []);
+  return found;
+}
+
+const daysBetween = (a: string, b: string) => (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000;
+const plusDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
 const RETAIL = /\b(square|clover|toast|stripe|merchant|card\s*(services|settlement|deposit)|visa|mastercard|amex|american express|discover|bankcard|worldpay|heartland|elavon|fiserv|cash deposit|counter deposit|mobile deposit|atm deposit)\b/i;
 const FACILITATOR = /transaction facilitator|\bmtf\b|\bcms\b|medicare/i;
@@ -359,6 +429,19 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
     if (/SEGUNDO/.test(d.toUpperCase().replace(/[^A-Z]/g, ""))) {
       return { kind: "books_bill", category: "Postage and shipping", vendor: "Stamps.com", why: "Stamps.com's own charge from El Segundo, which is mailing and comes with no confirmation email. Booked as postage from this line." };
     }
+    /*
+     * A charge from before the confirmations began arriving. Endicia's emails were forwarded from 8 September 2026; the
+     * top-ups of 31 August and 3 September had none to be counted from, and waiting for one that was never sent leaves a
+     * cost out of the books for ever. The line is the only door, so it books the bill — only before the first email on file.
+     */
+    if (ctx.firstPostageBillOn === undefined ? false : ctx.firstPostageBillOn === null || line.on < ctx.firstPostageBillOn) {
+      return {
+        kind: "books_bill",
+        category: "Postage and shipping",
+        vendor: "Stamps.com",
+        why: `A postage top-up from before the first purchase confirmation on file${ctx.firstPostageBillOn ? ` (${ctx.firstPostageBillOn})` : ""}, so no email will ever book it. Booked as postage from this line.`,
+      };
+    }
     return {
       kind: "unplaced",
       why: "A postage charge with no Endicia or Stamps.com purchase confirmation on file for this amount within three days. The confirmation email books it; if it never came, this is a cost the books do not have.",
@@ -419,7 +502,36 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
      * The PSAO's deposits — Access Health and ProviderPay — are banked by the payer payment report and the EFT notice.
      * The line confirms one of those receipts or waits; it never banks, or a misread amount banks the deposit twice.
      */
-    if (meaning.kind === "psao_remittance") return { kind: "psao_deposit", why: meaning.says };
+    if (meaning.kind === "psao_remittance") {
+      /*
+       * The remittances behind the deposit, from the register, where the payment report has not reached this day.
+       *
+       * An Access Health deposit is Health Mart Atlas's remittance of the day before; a ProviderPay deposit is the
+       * other payers' remittances of the day before, paid in together — and sometimes one a payer held back for
+       * eleven days. Exactly one set of unbanked remittances adding to the cent, or nothing: two sets is a question.
+       */
+      if (ctx.remits?.length) {
+        const viaAccessHealth = /access\s*health/i.test(d);
+        const pool = ctx.remits.filter((r) => {
+          const hma = /health\s*mart|access\s*health/i.test(r.payer);
+          const gap = daysBetween(r.remitOn, line.on);
+          return hma === viaAccessHealth && gap >= 0 && gap <= REMIT_WINDOW_DAYS;
+        });
+        const sets = remitSetsFor(pool, line.amountCents);
+        if (sets.length === 1) {
+          const set = sets[0];
+          return {
+            kind: "banks_remits",
+            remits: set,
+            why: `${meaning.says} This deposit is exactly ${set.map((r) => `${(r.amountCents / 100).toFixed(2)} from ${r.payer} remitted ${r.remitOn}`).join(" + ")}, none of them banked yet: banked here, one receipt per remittance under its payment number, so the payment report's copy is refused when it arrives.`,
+          };
+        }
+        if (sets.length > 1) {
+          return { kind: "psao_deposit", why: `${meaning.says} More than one set of remittances in the register adds up to this deposit, so which it is cannot be told from the amount.` };
+        }
+      }
+      return { kind: "psao_deposit", why: meaning.says };
+    }
     /* Named receipts nobody has said how to count yet (prescription transfers, Veridian, POC Network): a person decides. */
     /*
      * Money with no other document, named by the owner (15 September): the practice paying for drugs sold to it at cost,
@@ -441,6 +553,22 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
     const supplier = ctx.suppliers.find((s) => mentions(d, s.name)) ?? namedByAccount(line.description, ctx.suppliers);
     if (supplier) return { kind: "deposit", receiptKind: "rebate", payer: supplier.name, why: `names ${supplier.name}: a wholesaler paying in is a rebate or a credit` };
     if (RETAIL.test(d)) return { kind: "deposit", receiptKind: "retail", payer: null, why: "reads as card or cash takings" };
+    /*
+     * A bare "Deposit" is what the counter pays in: the drawers' cash, and the cheques payers post instead of paying
+     * by ACH. MyMatrixx pays by cheque; its three September remittances in the register turned up on the statement as
+     * bare deposits of the same cents, up to 26 days later. One remittance, equal to the cent, not through the PSAO,
+     * not banked, within the window — or nothing.
+     */
+    if (/^deposit\b/i.test(d.trim()) && ctx.remits?.length) {
+      const cheques = ctx.remits.filter((r) => {
+        const gap = daysBetween(r.remitOn, line.on);
+        return r.amountCents === line.amountCents && !/provider\s*pay|health\s*mart|access\s*health/i.test(r.payer) && gap >= 0 && gap <= CHEQUE_WINDOW_DAYS;
+      });
+      if (cheques.length === 1) {
+        const r = cheques[0];
+        return { kind: "banks_remits", remits: [r], why: `A counter deposit of exactly ${r.payer}'s remittance of ${r.remitOn}, which they pay by cheque. Banked here under that remittance.` };
+      }
+    }
     return { kind: "unplaced", why: "a deposit from nobody the site knows; bank it by hand with the payer" };
   }
   const out = -line.amountCents;
@@ -629,6 +757,18 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
   }
 
   if (vendor) return { kind: "unplaced", why: `names ${vendor.name} but no open bill of theirs is for this amount` };
+  /*
+   * A wholesaler paid in the books' first fortnight, with nothing on file to tie it to. McKesson's 1 September draw and
+   * IPC's first three were August's invoices; the site began on the 1st with none of them, by decision. Not "unmatched",
+   * which sends somebody looking for an invoice that was never going to be here.
+   */
+  const namedSupplier = supplier?.name ?? (meaning.kind === "wholesaler_ach" || meaning.kind === "wholesaler_payment" ? meaning.counterparty : null);
+  if (namedSupplier && ctx.booksStartOn && line.on >= ctx.booksStartOn && line.on <= plusDays(ctx.booksStartOn, OPENING_PAYABLES_DAYS)) {
+    return {
+      kind: "before_books",
+      why: `${namedSupplier}, paid within ${OPENING_PAYABLES_DAYS} days of the books starting on ${ctx.booksStartOn}, with no invoice set on file that adds to it. The invoices it settles predate the books, and nothing is booked: the goods were August's.`,
+    };
+  }
   if (supplier) return { kind: "unplaced", why: `names ${supplier.name} but no open invoice of theirs is for this amount` };
   return { kind: "unplaced", why: "a payment the site cannot tie to a bill or an invoice" };
 }
@@ -660,15 +800,49 @@ export function placeLines(lines: BankLine[], ctx: MatchContext): { line: BankLi
    * covered four $100 top-ups in September, and the one with no confirmation was called counted (Session 2, G-POST-1).
    */
   const postage = ctx.postageBills ? [...ctx.postageBills] : undefined;
+  /* And a remittance stands behind one deposit. */
+  let remits = ctx.remits ? [...ctx.remits] : undefined;
   const out: { line: BankLine; placement: Placement }[] = [];
   for (const line of lines) {
-    const placement = placeLine(line, { ...ctx, unpaidBills: bills, unpaidInvoices: invoices, postageBills: postage });
+    const placement = placeLine(line, { ...ctx, unpaidBills: bills, unpaidInvoices: invoices, postageBills: postage, remits });
     if (postage && placement.kind === "already_counted" && readBankDescriptor(line.description, line.amountCents).kind === "postage") {
       postage.splice(postageBillFor(postage, line), 1);
     }
     if (placement.kind === "pays_bill") bills.splice(bills.findIndex((b) => b.id === placement.expenseId), 1);
     if (placement.kind === "pays_invoice") invoices.splice(invoices.findIndex((v) => v.id === placement.invoiceId), 1);
+    if (placement.kind === "banks_remits" && remits) {
+      const used = new Set(placement.remits.map((r) => r.id));
+      remits = remits.filter((r) => !used.has(r.id));
+    }
     out.push({ line, placement });
+  }
+  /*
+   * The rebate, whole. McKesson pays it as separate brand, generic and fee credits on one day; the rebate statement
+   * banked the whole as one receipt. The pieces of one day, together, are that receipt to the cent — or they stay
+   * pieces for a person, as before.
+   */
+  if (ctx.rebateReceipts?.length) {
+    const taken = new Set<string>();
+    const byDay = new Map<string, number[]>();
+    out.forEach((o, i) => {
+      if (o.placement.kind === "rebate_part") byDay.set(o.line.on, [...(byDay.get(o.line.on) ?? []), i]);
+    });
+    for (const [day, idx] of byDay) {
+      const sum = idx.reduce((n, i) => n + out[i].line.amountCents, 0);
+      const whole = ctx.rebateReceipts.filter((r) => !taken.has(r.id) && r.amountCents === sum && (!r.receivedOn || Math.abs(daysBetween(r.receivedOn, day)) <= 7));
+      if (whole.length !== 1) continue;
+      taken.add(whole[0].id);
+      for (const i of idx) {
+        out[i] = {
+          line: out[i].line,
+          placement: {
+            kind: "confirms_rebate",
+            receiptId: whole[0].id,
+            why: `One of ${idx.length} credits on ${day} that together are exactly the ${(sum / 100).toFixed(2)} rebate the rebate statement banked. The statement confirms that receipt; nothing new is banked.`,
+          },
+        };
+      }
+    }
   }
   return out;
 }

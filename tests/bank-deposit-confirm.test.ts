@@ -119,7 +119,7 @@ describe("money the statement banked first, and the feed that arrives after it",
     assert.equal(v.bank, false);
   });
 
-  test("REGRESSION: two batches paid in as one deposit are named for a person, not banked as new money", () => {
+  test("REGRESSION: two batches paid in as one deposit confirm both, and are never banked as new money", () => {
     /* Case D. */
     const held: HeldForBank[] = [
       { id: "a", amountCents: 221_744, receivedOn: "2026-09-05", payer: "Card batch", reference: "1" },
@@ -127,9 +127,27 @@ describe("money the statement banked first, and the feed that arrives after it",
       { id: "c", amountCents: 461_473, receivedOn: "2026-09-04", payer: "Card batch", reference: "3" },
     ];
     const m = matchHeldDeposit(held, { amountCents: 271_744, on: "2026-09-07", payer: null }, new Set());
+    assert.equal(m.kind, "confirms_many");
+    assert.deepEqual(m.kind === "confirms_many" ? m.receipts.map((c) => c.id) : [], ["a", "b"]);
+    assert.match(m.kind === "confirms_many" ? m.why : "", /nothing new is banked/);
+  });
+
+  test("two sets that both add up to the deposit are left for a person", () => {
+    const held: HeldForBank[] = [
+      { id: "a", amountCents: 100_00, receivedOn: "2026-09-05", payer: "Card batch", reference: "1" },
+      { id: "b", amountCents: 200_00, receivedOn: "2026-09-06", payer: "Card batch", reference: "2" },
+      { id: "c", amountCents: 150_00, receivedOn: "2026-09-04", payer: "Card batch", reference: "3" },
+      { id: "d", amountCents: 150_00, receivedOn: "2026-09-04", payer: "Card batch", reference: "4" },
+    ];
+    const m = matchHeldDeposit(held, { amountCents: 300_00, on: "2026-09-07", payer: null }, new Set());
     assert.equal(m.kind, "ambiguous");
-    assert.deepEqual(m.kind === "ambiguous" ? m.candidates.map((c) => c.id) : [], ["a", "b"]);
-    assert.match(m.kind === "ambiguous" ? m.why : "", /nothing needs banking, and banking it with the form would count it twice/);
+    assert.match(m.kind === "ambiguous" ? m.why : "", /more than one combination/);
+  });
+
+  test("a payment report naming the payer its own way is refused against the 835 that banked the deposit", () => {
+    const from835 = { amountCents: 180_800, receivedOn: "2026-09-30", payer: "SS&C HEALTH", sourceKey: "835|ss&c health|999000000001|2026-09-19", reference: "999000000001", createdBy: "u" };
+    const v = gateDeposit([from835], { amountCents: 180_800, receivedOn: "2026-09-30", payer: "ARGUS HEALTH SYS", sourceKey: "payer-payment|x", reference: "77" });
+    assert.equal(v.bank, false);
   });
 
   test("a deposit no combination explains is still new money", () => {
@@ -183,9 +201,9 @@ describe("the edges Session 2 found after the card fix (G-CARD-9, -10, -11)", ()
     assert.equal(receiptsSummingTo([{ amountCents: 100 }, { amountCents: 200 }], 250).length, 0);
   });
 
-  test("REGRESSION: a card deposit is offered only card batch receipts", async () => {
+  test("REGRESSION: a card deposit is offered only card takings — the batch report's, or the register's day", async () => {
     const text = await readFile("src/app/(app)/money/bank.ts", "utf8");
-    assert.match(text, /placement\.kind === "card_deposit" \? heldForBank\.filter\(\(h\) => h\.sourceKey\?\.startsWith\("card-batch\|"\)\)/);
+    assert.match(text, /placement\.kind === "card_deposit" \? heldForBank\.filter\(\(h\) => h\.sourceKey\?\.startsWith\("card-batch\|"\) \|\| h\.sourceKey\?\.startsWith\("register-card\|"\)\)/);
   });
 });
 

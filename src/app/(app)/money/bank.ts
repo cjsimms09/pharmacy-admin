@@ -10,7 +10,8 @@ import { audit } from "@/lib/audit";
 import { newId } from "@/lib/crypto";
 import { storeFile } from "@/lib/files";
 import { parseCsv } from "@/lib/reference";
-import { lineKey, parseBankStatement, placeLines, type BankLine, type MatchContext } from "@/lib/bank-statement";
+import { lineKey, parseBankStatement, placeLines, OPENING_TAKINGS_DAYS, type BankLine, type MatchContext } from "@/lib/bank-statement";
+import { SITE_STARTS_ON } from "@/lib/books-start";
 import type { SolvedStatement, Unproven } from "@/lib/scanned-bank-solve";
 import { readFile } from "@/lib/files";
 import { parseCents } from "@/lib/money";
@@ -260,8 +261,13 @@ async function placeStatementLines(
     const isCredit = placement.kind === "deposit" || placement.kind === "card_deposit" || placement.kind === "psao_deposit" || (placement.kind === "unplaced" && line.amountCents > 0);
     const match = isCredit
       ? matchHeldDeposit(
-          /* A card deposit confirms only a card batch, never another payer's receipt of the same amount (G-CARD-11). */
-          placement.kind === "card_deposit" ? heldForBank.filter((h) => h.sourceKey?.startsWith("card-batch|")) : heldForBank,
+          /*
+           * A card deposit confirms only card takings, never another payer's receipt of the same amount (G-CARD-11).
+           * Card takings are banked by the emailed batch report, or by the register's day where no batch was
+           * forwarded (`register-card|`, register.ts) — the register banked every day of September 2026 and the
+           * processor's deposits, two business days behind it, were refused as "no card batch report on file".
+           */
+          placement.kind === "card_deposit" ? heldForBank.filter((h) => h.sourceKey?.startsWith("card-batch|") || h.sourceKey?.startsWith("register-card|")) : heldForBank,
           { amountCents: line.amountCents, on: line.on, payer: placement.kind === "deposit" ? placement.payer : placement.kind === "card_deposit" ? "Card batch" : null },
           claimed,
         )
@@ -273,10 +279,54 @@ async function placeStatementLines(
       why = match.why;
       confirmed++;
       confirmedCents += line.amountCents;
+    } else if (match.kind === "confirms_many") {
+      /* Several receipts paid in as one deposit. The line keeps the first; `why` names them all. */
+      for (const r of match.receipts) claimed.add(r.id);
+      receiptId = match.receipts[0].id;
+      placedAs = "confirms_deposit";
+      why = match.why;
+      confirmed++;
+      confirmedCents += line.amountCents;
     } else if (match.kind === "ambiguous") {
       placedAs = "unplaced";
       why = match.why;
       unplaced++;
+    } else if (placement.kind === "confirms_rebate") {
+      claimed.add(placement.receiptId);
+      receiptId = placement.receiptId;
+      placedAs = "confirms_deposit";
+      why = placement.why;
+      confirmed++;
+      confirmedCents += line.amountCents;
+    } else if (placement.kind === "banks_remits") {
+      /*
+       * One receipt per remittance, under the remittance's own payment number and the 835 feed's own key shape, so
+       * the payment report's copy of the same money is refused by the gate when it arrives (deposit-gate.ts).
+       */
+      for (const r of placement.remits) {
+        const made = await addCashReceipt({
+          month: line.on.slice(0, 7),
+          kind: "third_party",
+          amountCents: r.amountCents,
+          payer: r.payer,
+          notes: `From the bank statement line of ${line.on} (${line.description.replace(/\s+/g, " ").trim()}), tied to remittance ${r.remitNumber} of ${r.remitOn}.`,
+          receivedOn: line.on,
+          reference: r.paymentNumber ?? r.remitNumber,
+          sourceKey: `835|${r.payer.trim().toLowerCase()}|${r.paymentNumber ?? r.remitNumber}|${r.remitOn}`,
+          documentId,
+          createdBy: user.id,
+        });
+        if (made.id && !receiptId) receiptId = made.id;
+      }
+      placedAs = "banks_remits";
+      deposits++;
+      depositCents += line.amountCents;
+    } else if (placement.kind === "before_books") {
+      placedAs = "before_books";
+    } else if (placement.kind === "card_deposit" && line.on <= shiftDays(SITE_STARTS_ON, OPENING_TAKINGS_DAYS)) {
+      /* The processor paying in the last days of August, which the books never had. */
+      placedAs = "before_books";
+      why = `Card takings paid in on ${line.on}, two business days behind the register — the days before the books began on ${SITE_STARTS_ON}. No receipt was ever going to be on file for them; nothing is banked.`;
     } else if (placement.kind === "books_bill") {
       /* A cost whose only record is this line. Keyed by the line, so a statement read twice books it once. */
       const key = `BANK|${line.key}`;
@@ -447,4 +497,22 @@ export async function lastStatementLines(months: string[]): Promise<{ placed: nu
     placed: mine.filter((r) => r.placedAs !== "unplaced").length,
     unplaced: mine.filter((r) => r.placedAs === "unplaced").map((r) => ({ id: r.id, on: r.on, description: r.description, amountCents: r.amountCents, why: r.why })),
   };
+}
+
+/**
+ * Places again the lines nothing could place, after the matcher has learned something.
+ *
+ * "Reader improves, nothing re-reads" is the fault that left eighty-nine of September 2026's lines "unmatched" while
+ * the register, the remittances and the rebate receipt that explain them were on file. An unplaced line created
+ * nothing — no receipt, no bill, no paid mark — so it can be dropped and read afresh with no trace; a line that was
+ * placed is never touched here. Keyed the same way, so a line that still cannot be placed comes back as itself.
+ */
+export async function replaceUnplaced(months: string[], user: { id: string; name: string }): Promise<{ tried: number; said: string }> {
+  const rows = (await db.query.bankLines.findMany({ where: eq(schema.bankLines.placedAs, "unplaced") })).filter((r) => months.includes(r.on.slice(0, 7)));
+  if (rows.length === 0) return { tried: 0, said: "Nothing was unplaced." };
+  const lines: BankLine[] = rows.map((r) => ({ on: r.on, description: r.description, amountCents: r.amountCents, key: r.key }));
+  const documentId = rows.find((r) => r.documentId)?.documentId ?? null;
+  await db.delete(schema.bankLines).where(inArray(schema.bankLines.id, rows.map((r) => r.id)));
+  const said = await placeStatementLines(lines, { documentId, fileName: `re-placing ${months.join(", ")}`, skipped: 0, user, back: "/money", quiet: true });
+  return { tried: rows.length, said };
 }
