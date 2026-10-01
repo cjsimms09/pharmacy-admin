@@ -74,6 +74,7 @@ const KIND_WORDS: Record<string, string> = {
   postage: "Postage bought",
   /* Not a bill: every row is an invoice already counted. It says when the money leaves. */
   ap_transactions: "McKesson accounts payable",
+  ap_history: "McKesson AP transaction history",
   mck_returns: "McKesson returns and credits",
   report_summary: "A totals sheet",
   /* One card settlement batch: counter takings, banked as cash only. See card-batch.ts. */

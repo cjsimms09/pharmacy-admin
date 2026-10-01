@@ -310,6 +310,11 @@ export type MatchContext = {
   facilitatorConfirmedDays?: string[];
   /** Cheques the owner has said what they are for, by amount, before the bank shows them (cheque-expectations.ts). */
   expectedCheques?: { amountCents: number; invoiceNumber: string | null; note: string }[];
+  /**
+   * What each wholesaler's statement of account says the bank will take, by due date: the invoices net of discount
+   * less that week's credits, none of them settled yet. A debit equal to one, on its day, is those invoices.
+   */
+  statementDebits?: { supplier: string; dueOn: string; statementDate?: string; netCents: number; invoices: string[] }[];
 };
 
 /**
@@ -452,6 +457,30 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
           : opening
             ? `${ref} covers ${covered.length} ${meaning.counterparty} invoices coming to ${(cents / 100).toFixed(2)}; the bank took ${((-line.amountCents) / 100).toFixed(2)}. The ${(remainder / 100).toFixed(2)} beyond them is August's invoices, from before the books began on ${ctx.booksStartOn}, which their report does not reach back to. Nothing is booked from this line.`
             : `${ref} covers ${covered.length} ${meaning.counterparty} invoices coming to ${(cents / 100).toFixed(2)}, and the bank took ${((-line.amountCents) / 100).toFixed(2)} — worth a look.`,
+      };
+    }
+  }
+
+  /*
+   * The wholesaler's statement of account, where their ledger has not yet posted the ACH.
+   *
+   * McKesson's statement as of 25 September 2026 listed 42 invoices due the 29th, net of discount, and that
+   * week's return credits; together they are the 29 September debit to the cent — and their accounts-payable
+   * report, read the morning after, still showed every one of those invoices open. The statement is the key
+   * their ledger has not turned yet. Exact, on the due date or the day after, or nothing.
+   */
+  if ((meaning.kind === "wholesaler_ach" || meaning.kind === "wholesaler_payment") && line.amountCents < 0 && ctx.statementDebits?.length) {
+    const fold = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const due = ctx.statementDebits.filter((d) => fold(d.supplier) === fold(meaning.counterparty) && d.netCents === -line.amountCents && daysBetween(d.dueOn, line.on) >= 0 && daysBetween(d.dueOn, line.on) <= 1);
+    if (due.length === 1) {
+      const d = due[0];
+      return {
+        kind: "settles_ach",
+        supplier: meaning.counterparty,
+        reference: `statement ${d.statementDate ?? "?"} due ${d.dueOn}`,
+        invoices: d.invoices,
+        agrees: true,
+        why: `${meaning.counterparty}'s statement of account says the bank takes exactly this on ${d.dueOn}: ${d.invoices.length} invoices net of discount, less that week's credits. The money is already the cash cost of goods from their invoices, so nothing is booked from this line.`,
       };
     }
   }

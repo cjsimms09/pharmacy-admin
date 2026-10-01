@@ -1,5 +1,6 @@
 import "server-only";
 import { looksLikeReturnsDetail, looksLikeApTransactions } from "./ap-transactions";
+import { looksLikeApHistory } from "./ap-history";
 import { looksLikeCopayRemit } from "./copay-remit";
 import { parseCsvRows } from "./reference";
 import { readSheet, readSheets } from "./xlsx";
@@ -41,7 +42,7 @@ import { ALLOWED_MIME, EXCEL_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "providerpay_account" | "mck_remit_summary" | "mck_remit_detail" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "parmed_eft_notice" | "loan_report" | "sales_by_payment" | "empty_report" | "unrecognised";
+export type RouteKind = "ap_history" | "claims" | "rx_transactions" | "payer_payments" | "providerpay_account" | "mck_remit_summary" | "mck_remit_detail" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "parmed_eft_notice" | "loan_report" | "sales_by_payment" | "empty_report" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -417,6 +418,15 @@ export function classify(fileName: string, buf: Buffer): Classification {
       kind: "report_summary",
       why: "A totals sheet from a report whose detail is read separately. Filed, and deliberately not read — the same money added up is not more of it.",
       headers: [],
+    };
+  }
+  if (looksLikeApHistory(buf.subarray(0, 4096).toString("utf8"))) {
+    return {
+      kind: "ap_history",
+      why:
+        "McKesson's Accounts Payable Transaction History: every invoice with its dates, the cash discount and the net. " +
+        "No ACH numbers, so it cannot tie a bank debit on its own; kept as statement lines beside the Open & Closed report, which can.",
+      headers: ["Receivable Number", "Transaction Date", "Due Date", "Transaction Type", "Purchase History Extended Price ($)", "Cash Discount ($)", "Accounts Payable (Gross Amount) $"],
     };
   }
   if (looksLikeApTransactions(buf.subarray(0, 4096).toString("utf8"))) {

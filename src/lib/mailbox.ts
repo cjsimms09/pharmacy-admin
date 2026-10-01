@@ -915,6 +915,24 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
             /* The sweep's own answer to "did this reach the books", kept rather than inferred later. */
             let counted: boolean | null = null;
             /*
+             * A statement of account is kept, not only filed. The reader had run on every one since the first
+             * arrived and nothing stored what it read, so the key that ties a wholesaler's ACH to its invoices
+             * sat in the vault (supplier-statement-store.ts).
+             */
+            if (asStatement && supplierKind === "statement" && pdfWords) {
+              const { keepStatementText } = await import("./supplier-statement-store");
+              try {
+                const kept = await keepStatementText(pdfWords, docId);
+                routedAs = "supplier_statement";
+                routeResult = kept.says;
+                counted = true;
+              } catch (e) {
+                routedAs = "supplier_statement";
+                routeResult = `Filed as a statement, but its lines could not be kept: ${String(e).slice(0, 120)}`;
+                counted = false;
+              }
+            }
+            /*
              * A supplies invoice is spending, and goes to the books rather than the invoice archive.
              *
              * The owner, of the Rx Systems invoice that landed here as "a PDF this does not
@@ -1458,6 +1476,14 @@ export async function importRecognised(
     } else if (cls.kind === "report_summary") {
       /* Recognised on purpose and read on purpose: the detail beside it carries the same money. */
       routeResult = "A totals sheet. The detail it summarises is read separately, so nothing was taken from this.";
+    } else if (cls.kind === "ap_history") {
+      /* The Transaction History: figures and dates, no payments. Kept as statement lines; the owner sends it monthly (1 October 2026). */
+      const { readApHistory } = await import("./ap-history");
+      const { storeSupplierStatement } = await import("./supplier-statement-store");
+      const read = readApHistory(buf.toString("utf8"), new Date().toISOString().slice(0, 10));
+      const r = await storeSupplierStatement(read, filed?.documentId ?? null);
+      routeResult = `${r.says}${read.unreadable.length ? ` ${read.unreadable.length} row${read.unreadable.length === 1 ? "" : "s"} could not be read.` : ""}`;
+      imported = r.written + r.updated > 0;
     } else if (cls.kind === "ap_transactions") {
       /*
        * McKesson's weekly Accounts Payable report: when the money leaves, and with what.
@@ -1746,7 +1772,16 @@ export async function rereadInboxItem(itemId: string, ctx: { userId: string; use
       .update(schema.documents)
       .set({ category: "supplier_statement", title: `${supplierName} ${word}${subject ? ` — ${subject}` : ""}` })
       .where(eq(schema.documents.id, doc.id));
-    const text = `Read again ${stamp}: this is a ${word} from ${supplierName}, not an invoice. ${kind.why} Filed under supplier statements.`;
+    let keptSays = "";
+    if (kind.kind === "statement" && words) {
+      const { keepStatementText } = await import("./supplier-statement-store");
+      try {
+        keptSays = ` ${(await keepStatementText(words, doc.id)).says}`;
+      } catch (e) {
+        keptSays = ` Its lines could not be kept: ${String(e).slice(0, 120)}.`;
+      }
+    }
+    const text = `Read again ${stamp}: this is a ${word} from ${supplierName}, not an invoice. ${kind.why} Filed under supplier statements.${keptSays}`;
     await db.update(schema.inboxItems).set({ routedAs: "supplier_statement", routeResult: text, reason: null, imported: true }).where(eq(schema.inboxItems.id, itemId));
     await audit({ action: "inbox.reread", userId: ctx.userId, userName: ctx.userName, entity: "document", entityId: doc.id, details: text.slice(0, 200) });
     return text;

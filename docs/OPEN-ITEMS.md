@@ -26,7 +26,7 @@ so the answer can be checked rather than taken on trust.
 | **19 plans still unclassified** | the residual after 459 were adopted and 15 he decided himself | Almost all of it is the one question no document on file answers: is this employer insured, or does it fund its own plan. Needs a Form 5500 or the plan document, one plan at a time. Each row now shows what the plan pays for and whether it ever pays alone, which is what settles a card. |
 | **Parmed's September ACH pays for twelve August purchases** | **$2,825.92, all of it cash out in September** | Parmed's EFT debit notice of 26 September names twelve invoices, every one dated 17–31 August, and the Parmed invoice feed here begins on 9 September — so this site holds none of them. The payment is recorded and the bank debit will place itself against it, but no cost reaches any month, because nothing was ever counted for those purchases. That is right on the accrual side: August is out of books. **The question is the cash side.** The money genuinely leaves the operating account in September and will be on the Emprise statement. Does September's cash cost of goods carry $2,825.92 for goods bought before the books begin, or does the cash account treat it the way the accrual account does and count nothing? Measured 28 September 2026. |
 
-## September's bank statement — placed 1 October, 4 lines open
+## September's bank statement — placed 1 October, 3 lines open
 
 Read from the scan, proved against its own daily balances to the cent (opening $341,931.59, closing $311,631.53,
 162 lines). First placement left 89 lines "unmatched"; the matcher was then allowed to see what was already on
@@ -43,12 +43,16 @@ invoice, $71.10 a technician's licence renewal — 89 → 8. Then: WholeScripts 
 invoice; the drawer week settled as 16–19 Sept, $30.00 short, booked as cash over and short; a bank line now records
 every receipt it confirms (bank_line_receipts, 0133), which freed the 30 Sept deposit — 89 → 4. Cheques he has said
 what they are for before the bank shows them are kept (cheque-expectations.ts): $274.40 pays a named invoice; the
-$1,341 delivery cheque will confirm September's round when October's statement comes. The 4 still open:
+$1,341 delivery cheque will confirm September's round when October's statement comes. Evening: McKesson's own
+statement of account (two PDFs he dropped in) settles the 29 Sept ACH to the cent — 42 invoices net $135,383.37 less
+$13,385.96 of credits dated the 25th = $121,997.41; the site had a statement reader since September and nothing stored
+or matched what it read. Now stored (supplier-statement-store.ts) and matched (statement grouping, credits applied at
+the next draw). The AP Transaction History he emailed is read as statement lines (ap-history.ts); it carries no ACH
+numbers, so the weekly Open & Closed report stays the one that ties bank debits. 89 → 3. The 3 still open:
 
 | Class | Lines | Money | What settles it |
 |---|---|---|---|
-| McKesson ACH 29 Sept | 1 | −$121,997.41 | McKesson's own ledger: the AP report read 1 Oct still lists the 29 Sept-due invoices as open ($139,218.37 of them), so their ledger had not posted the ACH; the next weekly report ties it with no action |
-| Access Health 28 Sept | 1 | +$28,933.18 | the remit summary on file has no Health Mart Atlas remittance between 24 Sept ($1,443.57) and 29 Sept ($20,068.82); one is missing from the export, or ProviderPay had not posted it |
+| Access Health 28 Sept | 1 | +$28,933.18 | not in ProviderPay's Payments export for 24–30 Sept (he pulled it; every other Health Mart Atlas payment in it was already on file), so it did not come through ProviderPay. Needs Access Health's own EFT notice or portal entry for that date. |
 | Cheques 2453 ($58.79, 15 Sept) and 2456 ($5,800.00, 22 Sept) | 2 | −$5,858.79 | him: the payee of each |
 | HMA $110 "12 payments" | — | — | already on the register above |
 

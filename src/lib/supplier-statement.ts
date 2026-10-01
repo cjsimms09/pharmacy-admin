@@ -75,7 +75,8 @@ export type ExpectedDebit = {
 };
 
 const cents = (s: string): number => Math.round(Number(s.replace(/[$,\s]/g, "")) * 100);
-const MONEY = String.raw`\(?-?[\d,]+\.\d{2}\)?`;
+/* A credit prints its figures with the minus AFTER the number — "5,619.06-P" — and a flag letter: past, future, or blank for current. */
+const MONEY = String.raw`\(?-?[\d,]+\.\d{2}-?\)?`;
 
 /** MM/DD/YYYY as the statement prints it, to the ISO the rest of the site uses. */
 function iso(mdy: string): string | null {
@@ -88,9 +89,11 @@ function iso(mdy: string): string | null {
 
 /** A figure in brackets is a credit, which is how this layout writes a negative. */
 function signed(raw: string): number {
-  const bracketed = /^\(.*\)$/.test(raw.trim());
-  const n = cents(raw.replace(/[()]/g, ""));
-  return bracketed ? -n : n;
+  const t = raw.trim();
+  const bracketed = /^\(.*\)$/.test(t);
+  const trailing = /-\)?$/.test(t);
+  const n = cents(t.replace(/[()-]/g, ""));
+  return bracketed || trailing || t.startsWith("-") ? -n : n;
 }
 
 /**
@@ -106,8 +109,8 @@ const MCK_LINE = new RegExp(
   // then collapsed into one: thirty-eight lines read as six, and $126,538.20 read as $30,094.45.
   String.raw`^(\d{2}\/\d{2}\/\d{4})(\d{2}\/\d{2}\/\d{4})(\d{10})` + // billed, due, invoice number
     String.raw`(.*?)` + // order reference and branch, neither kept
-    String.raw`([A-Za-z][A-Za-z ]{2,20}?)\s*` + // what the line is
-    String.raw`(${MONEY})\s+(${MONEY})\s*[A-Z]?\s*(${MONEY})`, // discount, gross, net
+    String.raw`([A-Za-z][A-Za-z ]{2,20}?)?\s*` + // what the line is — the controlled-substance account's statement prints nothing here
+    String.raw`(${MONEY})\s*[A-Z]?\s+(${MONEY})\s*[A-Z]?\s*(${MONEY})`, // discount, gross, net, each with its past/future flag
 );
 
 export function readSupplierStatement(text: string): StatementRead {
@@ -161,7 +164,7 @@ export function readSupplierStatement(text: string): StatementRead {
     if (seen.has(key)) continue;
     seen.add(key);
 
-    lines.push({ invoiceNumber, billedOn, dueOn, grossCents, discountCents, netCents, kind: kindRaw.trim() });
+    lines.push({ invoiceNumber, billedOn, dueOn, grossCents, discountCents, netCents, kind: (kindRaw ?? "").trim() || "Invoice" });
   }
 
   return {

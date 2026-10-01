@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, eq, gte, inArray, like, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { matchHeldDeposit, shiftDays, DEPOSIT_WINDOW_DAYS, type HeldForBank } from "@/lib/deposit-gate";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
@@ -430,6 +430,24 @@ async function placeStatementLines(
       );
       for (const v of open) await db.update(schema.supplierInvoices).set({ paidOn: line.on }).where(eq(schema.supplierInvoices.id, v.id));
       invoices += open.length;
+      /* The statement's rows for this due date are cleared by the bank line, credits included, so the group is not offered again. */
+      const stmt = /^statement (\S+) due (\d{4}-\d{2}-\d{2})$/.exec(placement.reference);
+      if (stmt) {
+        const [, statementDate, dueOn] = stmt;
+        await db
+          .update(schema.supplierStatementLines)
+          .set({ clearingDate: line.on, clearingDocument: `BANK|${line.key}` })
+          .where(
+            and(
+              sql`lower(${schema.supplierStatementLines.supplier}) = ${placement.supplier.toLowerCase()}`,
+              isNull(schema.supplierStatementLines.checkNumber),
+              isNull(schema.supplierStatementLines.clearingDocument),
+              eq(schema.supplierStatementLines.statementDate, statementDate),
+              /* The invoices due that day, and every open credit dated on or before it — applied at this draw, as the statement says. */
+              or(eq(schema.supplierStatementLines.dueOn, dueOn), and(lt(schema.supplierStatementLines.netCents, 0), lte(schema.supplierStatementLines.dueOn, dueOn))),
+            ),
+          );
+      }
       why = `${placement.why} ${open.length} of the ${placement.invoices.length} invoices were on file and are marked paid ${line.on}.`;
     } else {
       /*
