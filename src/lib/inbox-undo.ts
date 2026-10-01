@@ -161,6 +161,12 @@ const EFFECTS: Record<string, KindEffect> = {
       "the payments stay, and each can be removed on the invoices page, which frees the invoices it paid. The credit stays banked, keyed on the memo's day and amount — so the memo itself, read afterwards, does not bank it again.",
     at: { href: "/inventory/invoices", label: "Invoices" },
   },
+  loan_report: {
+    short: "reads it, books nothing",
+    writes: "nothing at all — the report prints no total to check its arithmetic against, and whether these sales are already in the till is a question for the owner",
+    reversal: "kept",
+    leaves: "the document, filed under its own date, and the inbox line saying what is on it. No money moved, so there is nothing to take back out.",
+  },
   parmed_eft_notice: {
     short: "records the ACH, banks nothing",
     writes:

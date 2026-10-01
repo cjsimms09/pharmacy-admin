@@ -737,9 +737,24 @@ export async function alerts(): Promise<Alert[]> {
             ? "It is drafted and communicated, and still needs finalising."
             : "It is drafted, and has not been communicated to the staff or finalised.";
       if (!summary || summary.status !== "final") {
+        /*
+         * It shouts once the period it covers has ended, not seven days before the due date.
+         *
+         * The owner looked for this twice on 1 October and did not find it: it was on the page at
+         * "soon", which the dashboard folds shut under "renewals and rounds that take weeks" — a
+         * fair description of a licence renewal and the wrong one for a dated filing under K.A.R.
+         * 68-19-1. Behind that fold he would not have seen it until the 8th.
+         *
+         * A day count is the wrong test anyway. A summary cannot be written for a period that has
+         * not finished, and the moment it has, the work is ready to do and an afternoon long — so
+         * the thing that changes its standing is the period closing, not the due date approaching.
+         * August–September closed on 30 September; from 1 October this is simply outstanding work
+         * on a closed period, which is what "now" means.
+         */
+        const periodHasEnded = period.periodEnd < today;
         out.push({
           key: `cqi-${period.periodStart}`,
-          level: days <= 7 ? "now" : "soon",
+          level: periodHasEnded || days <= 7 ? "now" : "soon",
           title:
             days < 0
               ? `The ${period.label} quality summary was due ${period.dueOn}`

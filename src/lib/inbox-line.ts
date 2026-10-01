@@ -88,6 +88,8 @@ const KIND_WORDS: Record<string, string> = {
   ipd_statement: "IPD statement of account",
   /* The invoices inside one Parmed ACH, the day before it leaves the bank. See parmed-eft-notice-store.ts. */
   parmed_eft_notice: "Parmed EFT debit notice",
+  /* Stock loaned or sold to another location, and what is still out. See loan-report.ts. */
+  loan_report: "Loan Search Results",
   /* One Veridikal ACH itemised (eVoucher or Denial Conversion): claim payments posted, nothing banked. See veridikal-report-store.ts. */
   veridikal_report: "Veridikal voucher payments",
   /* How the till was paid. Checks the card batch and the claims; books nothing. See sales-by-payment.ts. */

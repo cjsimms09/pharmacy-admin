@@ -1154,6 +1154,29 @@ export async function importRecognised(
       const r = await fileIpdStatement({ text: pdfText(buf), documentId: filed?.documentId ?? null, fileName }, { name: ctx.userName ?? "Automatic check", id: ctx.userId ?? undefined });
       routeResult = r.refused ? `Held, nothing stored: ${r.says}` : r.says;
       imported = !r.refused && (r.payments > 0 || r.banked > 0);
+    } else if (cls.kind === "loan_report") {
+      /*
+       * PioneerRx's Loan Search Results: read, filed, and nothing booked.
+       *
+       * The page prints no total, so there is nothing on it to check the arithmetic against, and
+       * whether these sales are already in the till's own figures is a question for the owner. Both
+       * reasons point the same way: say what it holds and book none of it. See loan-report.ts.
+       */
+      const { readLoanReport, describeLoanReport } = await import("./loan-report");
+      const { pdfText } = await import("./pdf-text");
+      const read = readLoanReport(pdfText(buf));
+      if (!read) {
+        routeResult = "This reads as a Loan Search Results report and no row on it could be read. Filed as a document.";
+      } else {
+        routeResult = describeLoanReport(read);
+        if (filed?.documentId) {
+          await db
+            .update(schema.documents)
+            .set({ title: `Loan Search Results${read.printedOn ? ` — ${read.printedOn}` : ""}`, ...(read.printedOn ? { effectiveOn: read.printedOn } : {}) })
+            .where(eq(schema.documents.id, filed.documentId));
+        }
+      }
+      imported = Boolean(read);
     } else if (cls.kind === "parmed_eft_notice") {
       /*
        * Parmed's EFT debit notice: the invoices inside one ACH, the day before it leaves the bank.

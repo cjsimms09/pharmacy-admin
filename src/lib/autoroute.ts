@@ -6,6 +6,7 @@ import { readSheet, readSheets } from "./xlsx";
 import { looksLikeVeridikalReport } from "./veridikal-report";
 import { looksLikeIpdStatement } from "./ipd-statement";
 import { looksLikeParmedEftNotice } from "./parmed-eft-notice";
+import { looksLikeLoanReport } from "./loan-report";
 import { mapColumns } from "./claims";
 import { mapSupplierColumns } from "./suppliers";
 import { looksLikePioneerCatalog } from "./pioneer-catalog";
@@ -40,7 +41,7 @@ import { ALLOWED_MIME, EXCEL_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "providerpay_account" | "mck_remit_summary" | "mck_remit_detail" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "parmed_eft_notice" | "sales_by_payment" | "empty_report" | "unrecognised";
+export type RouteKind = "claims" | "rx_transactions" | "payer_payments" | "providerpay_account" | "mck_remit_summary" | "mck_remit_detail" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "parmed_eft_notice" | "loan_report" | "sales_by_payment" | "empty_report" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -237,6 +238,14 @@ export function classify(fileName: string, buf: Buffer): Classification {
        */
       if (looksLikeParmedEftNotice(text)) {
         return { kind: "parmed_eft_notice", why: "Parmed's EFT debit notice: the invoices one ACH is about to take, and what they come to.", headers: [] };
+      }
+      /*
+       * PioneerRx's Loan Search Results: stock that left the building to somebody who is not a
+       * patient. It arrived on 30 September 2026 and was filed as "a PDF this does not recognise",
+       * with 35 sales to the clinic and the surgery centre on it. See loan-report.ts.
+       */
+      if (looksLikeLoanReport(text)) {
+        return { kind: "loan_report", why: "PioneerRx's Loan Search Results: stock loaned or sold to another location, and what is still out.", headers: [] };
       }
       /* Health Mart Atlas's itemised EFT: the claim payments inside one deposit. See accesshealth-payment.ts. */
       if (looksLikeAccessHealthPayment(text)) {
