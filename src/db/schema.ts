@@ -3854,3 +3854,16 @@ export const engineRun = sqliteTable("engine_run", {
   wrote: text("wrote"),
   error: text("error"),
 });
+
+/** Cash ahead (0135): one row per day from the last proven bank balance forward — inflows, outflows, the balance they leave, the items behind them. Rebuilt whole each engine pass. */
+export const cashAhead = sqliteTable("cash_ahead", {
+  day: text("day").primaryKey(),
+  inflowCents: integer("inflow_cents").notNull().default(0),
+  outflowCents: integer("outflow_cents").notNull().default(0),
+  balanceCents: integer("balance_cents").notNull(),
+  /** JSON: [{ kind: "in" | "out", cents, label, basis }], the day's items, largest first. */
+  items: text("items"),
+  /** "statement" | "projected": whether the day has bank lines behind it or only the projection. */
+  basis: text("basis"),
+  computedAt: text("computed_at").notNull(),
+});

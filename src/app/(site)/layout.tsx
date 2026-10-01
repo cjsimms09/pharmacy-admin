@@ -11,7 +11,7 @@ import { noteRequest } from "@/lib/activity";
  */
 const NAV = [
   { href: "/v2/today", label: "Today" },
-  { href: "/money", label: "Money" },
+  { href: "/v2/money", label: "Money" },
   { href: "/claims", label: "Claims" },
   { href: "/compliance", label: "Compliance" },
   { href: "/inbox", label: "Documents" },

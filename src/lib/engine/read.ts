@@ -62,3 +62,42 @@ export async function todayView(): Promise<TodayView> {
     engine: { lastRun: runs[0]?.finishedAt ?? runs[0]?.startedAt ?? null, lastRebuild, error: runs[0]?.error ?? null },
   };
 }
+
+export type MoneyView = {
+  month: typeof schema.monthStatus.$inferSelect | null;
+  months: string[];
+  lines: { id: string; on: string; description: string; amountCents: number; placedAs: string; why: string | null; state: "booked" | "confirmed" | "needs_you" }[];
+  proofs: { proof: string; scope: string | null; runAt: string; passed: boolean; says: string }[];
+  cashAhead: (typeof schema.cashAhead.$inferSelect)[];
+  cashAssumptions: { computedAt: string; from: string; openingCents: number | null; openingFrom: string | null; assumptions: string[] } | null;
+  standing: { name: string; amountCents: number }[];
+};
+
+/** Money: the month's figures, its bank lines as the matcher left them, its proofs, and the four weeks ahead. */
+export async function moneyView(month: string): Promise<MoneyView> {
+  const { bankReview } = await import("../bank-review-store");
+  const [status, all, review, proofs, cash, assumptionRows, standing] = await Promise.all([
+    db.query.monthStatus.findFirst({ where: (t, { eq }) => eq(t.month, month) }),
+    db.query.monthStatus.findMany({ columns: { month: true }, orderBy: [desc(schema.monthStatus.month)] }),
+    bankReview(month),
+    db.all(sql`select proof, scope, run_at, passed, says from proof_run p where coalesce(scope, '') = ${month} and run_at = (select max(run_at) from proof_run q where q.proof = p.proof and coalesce(q.scope, '') = coalesce(p.scope, '')) order by proof`) as Promise<{ proof: string; scope: string | null; run_at: string; passed: number; says: string }[]>,
+    db.query.cashAhead.findMany({ orderBy: (t, { asc }) => [asc(t.day)] }),
+    db.all(sql`select value from settings where key = 'cash_ahead_assumptions'`) as Promise<{ value: string | null }[]>,
+    db.query.standingCosts.findMany({ columns: { name: true, amountCents: true } }),
+  ]);
+  let cashAssumptions: MoneyView["cashAssumptions"] = null;
+  try {
+    cashAssumptions = assumptionRows[0]?.value ? JSON.parse(assumptionRows[0].value) : null;
+  } catch {
+    cashAssumptions = null;
+  }
+  return {
+    month: status ?? null,
+    months: all.map((m) => m.month),
+    lines: review.lines.map((l) => ({ id: l.id, on: l.on, description: l.description, amountCents: l.amountCents, placedAs: l.placedAs, why: l.why, state: l.state })),
+    proofs: proofs.map((p) => ({ proof: p.proof, scope: p.scope, runAt: p.run_at, passed: Boolean(p.passed), says: p.says })),
+    cashAhead: cash,
+    cashAssumptions,
+    standing: standing.map((s) => ({ name: s.name, amountCents: s.amountCents })),
+  };
+}

@@ -1,6 +1,7 @@
 import { and, eq, gte, lte, like, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { SITE_STARTS_ON } from "../books-start";
+import { payerCycles, cycleDays } from "./cycles";
 
 /**
  * The month as the engine last computed it: the bank's figures, the receipts-to-bank gap with every dollar named,
@@ -108,17 +109,14 @@ export async function computeMonth(month: string, today: string): Promise<MonthF
   const rev = (await db.all(sql`select coalesce(sum(remit_cents + copay_cents), 0) c from claims where status = 'paid' and coalesce(sold_on, date_filled) >= ${from} and coalesce(sold_on, date_filled) <= ${to} and coalesce(sold_on, date_filled) >= ${SITE_STARTS_ON}`)) as { c: number }[];
 
   /* What the payers owe on the month's fills, and how much of it is past the payer's own measured cycle. */
-  const paidDays = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, julianday(p.received_on) - julianday(c.date_filled) days from claim_payments p join claims c on c.id = p.claim_id where p.source = 'plan' and c.date_filled >= ${SITE_STARTS_ON}`)) as { payer: string; days: number }[];
-  const by = new Map<string, number[]>();
-  for (const r of paidDays) by.set(r.payer, [...(by.get(r.payer) ?? []), r.days]);
-  const p90 = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(0.9 * s.length))]; };
+  const cycles = await payerCycles();
   const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.remit_cents cents, julianday(${today}) - julianday(c.date_filled) age from claims c where c.date_filled >= ${from} and c.date_filled <= ${to} and c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; cents: number; age: number }[];
   let arUnpaid = 0;
   let arDue = 0;
   for (const u of unpaid) {
     arUnpaid += u.cents;
-    const xs = by.get(u.payer) ?? [];
-    if (xs.length >= 25 && u.age > p90(xs)) arDue += u.cents;
+    const days = cycleDays(cycles, u.payer);
+    if (days !== null && u.age > days) arDue += u.cents;
   }
 
   const held = await db.query.monthStatus.findFirst({ where: eq(schema.monthStatus.month, month) });

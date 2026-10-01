@@ -38,6 +38,8 @@ export async function engineRefresh(reason: string, opts: { proofs?: boolean; to
       const figures = [];
       for (const m of months) figures.push(await writeMonth(m, today, now));
       wrote.months = months;
+      const { writeCashAhead } = await import("./cash-ahead");
+      wrote.cashAhead = await writeCashAhead(today, now);
       const { computeNeedsYou, writeNeedsYou } = await import("./needs-you");
       wrote.needsYou = await writeNeedsYou(await computeNeedsYou(today), now);
       if (opts.proofs) {

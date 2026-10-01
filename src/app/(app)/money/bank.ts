@@ -606,7 +606,9 @@ export async function decideBankLine(
     /** Named and set aside: what it is, booked nowhere, so it stops asking. For a purchase whose own invoice is still to come. */
     | { kind: "noted"; category: string; note: string }
     /** The counter paying in the register's days from..to, with whatever the drawers and the bank disagree by booked as cash over and short. */
-    | { kind: "confirms_run"; from: string; to: string; note: string },
+    | { kind: "confirms_run"; from: string; to: string; note: string }
+    /** A cheque that is one of the standing costs (rent, payroll, the accountant): confirmed, never booked — the cash account already carries it. */
+    | { kind: "standing"; name: string; note: string },
   user: { id: string; name: string },
 ): Promise<{ ok: true; said: string } | { ok: false; why: string }> {
   const line = await db.query.bankLines.findFirst({ where: eq(schema.bankLines.id, lineId) });
@@ -615,6 +617,9 @@ export async function decideBankLine(
   const by = `${user.name}, ${new Date().toISOString().slice(0, 10)}`;
   if (decision.kind === "before_books") {
     await db.update(schema.bankLines).set({ placedAs: "before_books", why: `${decision.note} (${by})` }).where(eq(schema.bankLines.id, lineId));
+  } else if (decision.kind === "standing") {
+    if (line.amountCents >= 0) return { ok: false, why: "A deposit is not a standing cost." };
+    await db.update(schema.bankLines).set({ placedAs: "confirms_standing", why: `${decision.name}, paid by cheque. The standing cost already carries it, so nothing is booked from this line. ${decision.note} (${by})` }).where(eq(schema.bankLines.id, lineId));
   } else if (decision.kind === "noted") {
     await db.update(schema.bankLines).set({ placedAs: "noted", why: `${decision.category}: ${decision.note} Nothing is booked from the line. (${by})` }).where(eq(schema.bankLines.id, lineId));
   } else if (decision.kind === "confirms_run") {

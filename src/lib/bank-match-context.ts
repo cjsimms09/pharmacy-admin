@@ -8,6 +8,7 @@ import { CARD_STATEMENT_BILL } from "./card-statement";
 import { withinWindow } from "./deposit-gate";
 import { cadences } from "./draw-cadence-store";
 import { chequeExpectations } from "./cheque-expectations";
+import { openStatementDebits } from "./engine/statement-debits";
 import { SITE_STARTS_ON } from "./books-start";
 
 /**
@@ -53,37 +54,8 @@ export async function matchContext(months: string[] = []): Promise<MatchContext>
   const cardFeeBills = (await db.query.expenses.findMany({ where: and(like(schema.expenses.invoiceNumber, `${CARD_STATEMENT_BILL}%`), eq(schema.expenses.status, "confirmed")) }))
     .filter((b) => !claimedBills.has(b.id))
     .map((b) => ({ id: b.id, vendorName: b.vendorId ? vendorName.get(b.vendorId) ?? null : null, amountCents: b.amountCents, invoiceDate: b.invoiceDate }));
-  /* The statements of account: what the bank will take on each due date, from rows nothing has settled. */
-  const openRows = await db.query.supplierStatementLines.findMany({ columns: { supplier: true, invoiceNumber: true, dueOn: true, netCents: true, checkNumber: true, clearingDocument: true, statementDate: true } });
-  /*
-   * The invoices group by the due date the statement prints. The credits do not: a return credited on the 25th
-   * prints "due" the 25th and is taken off the draw of the 29th — McKesson's statement says so itself ("Pay This
-   * Amount: 121,997.41" against 135,383.37 of invoices due the 29th and 13,385.96 of credits dated the 25th), and
-   * the two settled draws before it each carried the week's returns the same way. So every open credit dated on or
-   * before a draw is applied to that draw.
-   */
-  /*
-   * Grouped the way the statement itself groups: the invoices due D that statement S lists, less the credits S
-   * lists (whatever "due" date a credit prints — the 25th's returns came off the 29th's draw), and never an
-   * invoice some other line already paid — the controlled-substance account's invoice is drawn separately and
-   * sits on its own statement. Rows the accounts-payable report alone put here carry no statement date and
-   * form no group: that report's ACH numbers settle them instead.
-   */
-  const paidNumbers = new Set(invoices.filter((v) => v.paidOn && v.invoiceNumber).map((v) => v.invoiceNumber!));
-  const open = openRows.filter((r) => !r.checkNumber && !r.clearingDocument && r.statementDate);
-  const byDue = new Map<string, { supplier: string; dueOn: string; statementDate: string; netCents: number; invoices: string[] }>();
-  for (const r of open) {
-    if (r.netCents <= 0 || paidNumbers.has(r.invoiceNumber)) continue;
-    const k = `${r.supplier.toLowerCase()}|${r.statementDate}|${r.dueOn}`;
-    const g = byDue.get(k) ?? { supplier: r.supplier, dueOn: r.dueOn, statementDate: r.statementDate!, netCents: 0, invoices: [] };
-    g.netCents += r.netCents;
-    g.invoices.push(r.invoiceNumber);
-    byDue.set(k, g);
-  }
-  for (const g of byDue.values()) {
-    for (const c of open) if (c.netCents < 0 && c.supplier.toLowerCase() === g.supplier.toLowerCase() && c.statementDate === g.statementDate && c.dueOn <= g.dueOn) g.netCents += c.netCents;
-  }
-  const statementDebits = [...byDue.values()].filter((g) => g.netCents > 0);
+  /* The statements of account: what the bank will take on each due date, from rows nothing has settled (engine/statement-debits.ts). */
+  const statementDebits = await openStatementDebits();
   /* The wholesaler's own ledger: what each ACH reference covered. What a McKesson debit is placed by. */
   const statementLines = (await db.query.supplierStatementLines.findMany({ columns: { supplier: true, invoiceNumber: true, checkNumber: true, netCents: true } }))
     .filter((l) => l.checkNumber)

@@ -2,6 +2,7 @@ import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { rankForAlertKey, rankForMoney, type Rank } from "./rank";
 import { SITE_STARTS_ON } from "../books-start";
+import { payerCycles, cycleDays } from "./cycles";
 
 /**
  * The one list: everything a person must answer, computed when data lands and every night, stored, ranked.
@@ -126,10 +127,7 @@ async function alertLines(): Promise<Line[]> {
  * cannot say late; it can say unmeasured and large), and a payer with claims past its own measured cycle.
  */
 async function claimPots(today: string): Promise<Line[]> {
-  const paid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, julianday(p.received_on) - julianday(c.date_filled) days from claim_payments p join claims c on c.id = p.claim_id where p.source = 'plan' and c.date_filled >= ${SITE_STARTS_ON}`)) as { payer: string; days: number }[];
-  const by = new Map<string, number[]>();
-  for (const r of paid) by.set(r.payer, [...(by.get(r.payer) ?? []), r.days]);
-  const p90 = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(0.9 * s.length))]; };
+  const cycles = await payerCycles();
   const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.remit_cents cents, julianday(${today}) - julianday(c.date_filled) age, c.date_filled filled from claims c where c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; pcn: string | null; cents: number; age: number; filled: string }[];
   /*
    * A manufacturer programme is not a plan. The owner, 1 October 2026, of DST / ConnectiveRx (PCN CNRX, every claim
@@ -139,9 +137,8 @@ async function claimPots(today: string): Promise<Line[]> {
   const programme = (payer: string, pcn: string | null) => /cnrx|connectiverx|copay|voucher|redsail|veridikal|dst pharmacy/i.test(`${payer} ${pcn ?? ""}`);
   const pots = new Map<string, { n: number; cents: number; dueN: number; dueCents: number; oldest: string; cycle: number | null; sample: number; programme: boolean; pcn: string | null }>();
   for (const u of unpaid) {
-    const xs = by.get(u.payer) ?? [];
-    const cycle = xs.length >= 25 ? p90(xs) : null;
-    const e = pots.get(u.payer) ?? { n: 0, cents: 0, dueN: 0, dueCents: 0, oldest: u.filled, cycle, sample: xs.length, programme: programme(u.payer, u.pcn), pcn: u.pcn };
+    const cycle = cycleDays(cycles, u.payer);
+    const e = pots.get(u.payer) ?? { n: 0, cents: 0, dueN: 0, dueCents: 0, oldest: u.filled, cycle, sample: cycles.get(u.payer)?.n ?? 0, programme: programme(u.payer, u.pcn), pcn: u.pcn };
     e.n++;
     e.cents += u.cents;
     if (u.filled < e.oldest) e.oldest = u.filled;
