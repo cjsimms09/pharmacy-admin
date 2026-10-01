@@ -322,7 +322,10 @@ async function placeStatementLines(
           documentId,
           createdBy: user.id,
         });
-        if (made.id && !receiptId) receiptId = made.id;
+        if (made.id) {
+          receiptIds.push(made.id);
+          if (!receiptId) receiptId = made.id;
+        }
       }
       placedAs = "banks_remits";
       deposits++;
@@ -335,7 +338,11 @@ async function placeStatementLines(
     } else if (placement.kind === "facilitator_late") {
       /* The remittance already counts the payment; only the interest is new money. */
       placedAs = "already_counted";
-      await addCashReceipt({ month: line.on.slice(0, 7), kind: "other", amountCents: placement.interestCents, payer: "Medicare Transaction Facilitator (interest)", notes: `Interest on the facilitator's remittance of ${placement.day} (${money(placement.remitCents)}), paid ${line.on}.`, receivedOn: line.on, sourceKey: `bank-mtf-interest|${line.key}`, documentId, createdBy: user.id });
+      const interest = await addCashReceipt({ month: line.on.slice(0, 7), kind: "other", amountCents: placement.interestCents, payer: "Medicare Transaction Facilitator (interest)", notes: `Interest on the facilitator's remittance of ${placement.day} (${money(placement.remitCents)}), paid ${line.on}.`, receivedOn: line.on, sourceKey: `bank-mtf-interest|${line.key}`, documentId, createdBy: user.id });
+      if (interest.id) {
+        receiptId = interest.id;
+        receiptIds.push(interest.id);
+      }
     } else if (placement.kind === "confirms_run") {
       for (const id of placement.receiptIds) claimed.add(id);
       receiptId = placement.receiptIds[0];
@@ -346,7 +353,8 @@ async function placeStatementLines(
       confirmedCents += line.amountCents;
       /* The cents the counter and the register disagree by, booked so the cash account still equals the bank. */
       if (placement.overShortCents > 0) {
-        await addCashReceipt({ month: line.on.slice(0, 7), kind: "other", amountCents: placement.overShortCents, payer: "Cash over", notes: `The counter deposit of ${line.on} was this much more than the register's days ${placement.from} to ${placement.to}.`, receivedOn: line.on, sourceKey: `bank-overshort|${line.key}`, documentId, createdBy: user.id });
+        const over = await addCashReceipt({ month: line.on.slice(0, 7), kind: "other", amountCents: placement.overShortCents, payer: "Cash over", notes: `The counter deposit of ${line.on} was this much more than the register's days ${placement.from} to ${placement.to}.`, receivedOn: line.on, sourceKey: `bank-overshort|${line.key}`, documentId, createdBy: user.id });
+        if (over.id) receiptIds.push(over.id);
       } else if (placement.overShortCents < 0) {
         await seedCategories();
         const category = (await categories(true)).find((c) => c.name === "Cash over and short");
