@@ -214,18 +214,40 @@ function deliveryLines(row: { itemsJson: string | null; itemsText: string | null
 /** One drug's worth of a delivery or an invoice, however many lines it was printed on. */
 type PerDrug = { quantity: number; extendedCents: number; description: string | null; lines: number };
 
-function byNdc(lines: Line[]): Map<string, PerDrug> {
-  const out = new Map<string, PerDrug>();
+/**
+ * A line on one of the two documents that carries no code at all.
+ *
+ * Kept rather than dropped, which is the whole of this change. `byNdc` used to skip these, so a
+ * delivery PioneerRx booked in without an NDC simply did not exist as far as the comparison was
+ * concerned — and the invoice line for it, having no counterpart, was reported as goods billed and
+ * never received. On 1 October 2026 that was eight McKesson lines and $38.62, on invoices whose own
+ * totals agreed with PioneerRx's to the cent: 7000000001 at $45.41 against $45.41, 7000000002 at
+ * $107.02 against $107.02, 7000000003 at $171.22 against $171.22. Every flagged line was on both
+ * documents with the same description, the same count and the same money; one side had no code for
+ * it. The same fault ran the other way on IPD 1018194, where our own reader holds the EpiPen line
+ * with no NDC and PioneerRx's booking of it was reported as a delivery nobody billed for.
+ *
+ * A missing code is a gap in the record of what arrived. It is not evidence that goods were billed
+ * and not delivered, and that is a claim against a wholesaler.
+ */
+type Uncoded = PerDrug & { description: string | null };
+
+function byNdc(lines: Line[]): { coded: Map<string, PerDrug>; uncoded: Uncoded[] } {
+  const coded = new Map<string, PerDrug>();
+  const uncoded: Uncoded[] = [];
   for (const l of lines) {
-    if (!l.ndc11) continue;
-    const at = out.get(l.ndc11) ?? { quantity: 0, extendedCents: 0, description: l.description, lines: 0 };
+    if (!l.ndc11) {
+      uncoded.push({ quantity: l.quantity, extendedCents: l.extendedCents, description: l.description, lines: 1 });
+      continue;
+    }
+    const at = coded.get(l.ndc11) ?? { quantity: 0, extendedCents: 0, description: l.description, lines: 0 };
     at.quantity += l.quantity;
     at.extendedCents += l.extendedCents;
     at.lines++;
     at.description = at.description ?? l.description;
-    out.set(l.ndc11, at);
+    coded.set(l.ndc11, at);
   }
-  return out;
+  return { coded, uncoded };
 }
 
 const money = (c: number) => `$${(Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -359,9 +381,9 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
     }
 
     /* ── Line by line, where both sides have lines ─────────────────── */
-    const billed = byNdc(linesOf.get(inv.id) ?? []);
-    const received = byNdc(deliveryLines(delivery));
-    if (billed.size === 0 || received.size === 0) {
+    const { coded: billed, uncoded: billedUncoded } = byNdc(linesOf.get(inv.id) ?? []);
+    const { coded: received, uncoded: receivedUncoded } = byNdc(deliveryLines(delivery));
+    if (billed.size + billedUncoded.length === 0 || received.size + receivedUncoded.length === 0) {
       /*
        * Silence rather than a wall of rows.
        *
@@ -449,6 +471,9 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
     const onlyBilled = [...billed].filter(([ndc]) => !received.has(ndc));
     const onlyReceived = [...received].filter(([ndc]) => !billed.has(ndc));
     const takenReceived = new Set<string>();
+    /* Uncoded lines already paired, so one cannot stand in for two different drugs. */
+    const claimedReceivedUncoded = new Set<Uncoded>();
+    const claimedBilledUncoded = new Set<Uncoded>();
     for (const [ndc, b] of onlyBilled) {
       const twin = onlyReceived.find(
         ([n, r]) => !takenReceived.has(n) && r.quantity === b.quantity && Math.abs(r.extendedCents - b.extendedCents) <= TOLERANCE_CENTS,
@@ -488,6 +513,29 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
         });
         continue;
       }
+      /*
+       * Before saying the goods never arrived, look among the lines PioneerRx booked with no code.
+       *
+       * Same count, same money to the cent, on the same invoice: that is the delivery, recorded
+       * without an NDC against it. Only a single unclaimed candidate counts — two lines at the same
+       * amount cannot say which is which, and guessing between them would put the wrong description
+       * on the money.
+       */
+      const blind = receivedUncoded.filter((u) => !claimedReceivedUncoded.has(u) && u.quantity === b.quantity && Math.abs(u.extendedCents - b.extendedCents) <= TOLERANCE_CENTS);
+      if (blind.length === 1) {
+        claimedReceivedUncoded.add(blind[0]);
+        linesCompared++;
+        codeDifferences.push({
+          invoiceNumber: number,
+          supplier,
+          description: b.description ?? blind[0].description,
+          billedNdc: ndc,
+          receivedNdc: "",
+          extendedCents: b.extendedCents,
+          why: "no-ndc",
+        });
+        continue;
+      }
       out.push({
         ...at,
         kind: "billed-not-received",
@@ -497,6 +545,24 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
         receivedCents: null,
         differenceCents: b.extendedCents,
         say: `${b.description ?? ndc} on ${supplier} ${number}: billed ${money(b.extendedCents)} for ${b.quantity}, and PioneerRx booked in none of it.`,
+      });
+    }
+    /* The mirror: our own reader holds a line with no code, and PioneerRx booked the same delivery. */
+    for (const u of billedUncoded) {
+      if (claimedBilledUncoded.has(u)) continue;
+      const twin = [...received].filter(([n, r]) => !takenReceived.has(n) && r.quantity === u.quantity && Math.abs(r.extendedCents - u.extendedCents) <= TOLERANCE_CENTS);
+      if (twin.length !== 1) continue;
+      takenReceived.add(twin[0][0]);
+      claimedBilledUncoded.add(u);
+      linesCompared++;
+      codeDifferences.push({
+        invoiceNumber: number,
+        supplier,
+        description: u.description ?? twin[0][1].description,
+        billedNdc: "",
+        receivedNdc: twin[0][0],
+        extendedCents: u.extendedCents,
+        why: "no-ndc",
       });
     }
     for (const [ndc, r] of onlyReceived) {
