@@ -48,6 +48,40 @@ export type MonthlyChecklist = {
 
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/**
+ * An export taken before the month ended cannot hold the month, whatever it holds.
+ *
+ * Both ProviderPay items were judged on whether the month had any rows at all, and on 1 October
+ * that read as done for September while every row in both came from one pull on 18 September: 28
+ * remittances and 31 payments that stop on the 18th, against 8,928 claims running to the 30th.
+ * Twelve days of what the plans paid, and twelve days of the cash for it, were not merely missing —
+ * the month's own checklist said they were in, and `month-close` reads these items as its document
+ * gates, so September could have been called closed on them.
+ *
+ * The test is the one fact that cannot be argued with: the day the export was read. A payer does not
+ * remit every day, so a last remittance on the 28th proves nothing either way — but an export pulled
+ * on the 18th cannot contain the 19th, and no judgement about what the month "probably" holds is
+ * needed. Pulled on or after the first of the following month, it covers the month; pulled inside
+ * the month, it is a part of it and says so.
+ */
+const dayAfter = (month: string): string => {
+  const [y, m] = month.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+};
+
+export const coversTheMonth = (rows: number, pulledAt: string | null, month: string): boolean =>
+  rows > 0 && pulledAt !== null && pulledAt.slice(0, 10) >= dayAfter(month);
+
+/** What a part-month export covers, said on the item rather than left for somebody to notice. */
+export const coverage = (pulledAt: string | null, reaches: string | null, month: string): string => {
+  if (!pulledAt) return "";
+  if (pulledAt.slice(0, 10) >= dayAfter(month)) return "";
+  return (
+    `, but this was pulled on ${pulledAt.slice(0, 10)} and so holds nothing after it` +
+    `${reaches ? ` — it reaches ${reaches}` : ""}. Pull it again now the month has ended`
+  );
+};
+
 export async function monthlyChecklist(month: string): Promise<MonthlyChecklist> {
   const { db, schema } = await import("@/db");
   const { and, eq, gte, lte, like } = await import("drizzle-orm");
@@ -71,10 +105,12 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
    */
   const remits = await db.query.remittanceRegister.findMany({
     where: and(gte(schema.remittanceRegister.remitOn, from), lte(schema.remittanceRegister.remitOn, to)),
-    columns: { amountCents: true, paymentNumber: true },
+    columns: { amountCents: true, paymentNumber: true, remitOn: true, lastSeenAt: true },
   });
   const remitCents = remits.reduce((n, r) => n + r.amountCents, 0);
   const unmatched = remits.filter((r) => !r.paymentNumber).length;
+  const remitsPulledAt = remits.map((r) => r.lastSeenAt).sort().at(-1) ?? null;
+  const remitsReach = remits.map((r) => r.remitOn ?? "").sort().at(-1) ?? null;
   items.push({
     key: "provider_pay_remits",
     name: "ProviderPay remittances — Remit Summary and Remit Detail",
@@ -83,11 +119,12 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
       "Take both: the detail carries the claim lines and the summary is what each remittance is checked against. " +
       "Without them the month's claims show as billed and never as paid.",
     from: "the ProviderPay portal: Data management → Remittances, search the whole month, select all, then Export → Remit Summary and Export → Remit Detail",
-    done: remits.length > 0,
+    done: coversTheMonth(remits.length, remitsPulledAt, month),
     says:
-      remits.length > 0
-        ? `${remits.length} remittances, ${money(remitCents)}${unmatched > 0 ? `, ${unmatched} not yet matched to a deposit by ProviderPay` : ""}`
-        : "no claim from this month knows what it was paid",
+      remits.length === 0
+        ? "no claim from this month knows what it was paid"
+        : `${remits.length} remittances, ${money(remitCents)}${unmatched > 0 ? `, ${unmatched} not yet matched to a deposit by ProviderPay` : ""}` +
+          coverage(remitsPulledAt, remitsReach, month),
     cents: remitCents || null,
   });
 
@@ -101,8 +138,11 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
       "The largest thing on the cash account by a wide margin, and the only file that says which payer sent what. " +
       "Until it is in, none of the month's payer money is on the account at all.",
     from: "the ProviderPay portal: Data management → Payments, search the whole month, select all, then Export",
-    done: payer.payments > 0,
-    says: payer.payments > 0 ? `${payer.payments} payments, ${money(payer.cents)}` : "nothing of the month's payer money is on the account",
+    done: coversTheMonth(payer.payments, payer.pulledAt, month),
+    says:
+      payer.payments === 0
+        ? "nothing of the month's payer money is on the account"
+        : `${payer.payments} payments, ${money(payer.cents)}` + coverage(payer.pulledAt, payer.reaches, month),
     cents: payer.cents || null,
   });
 

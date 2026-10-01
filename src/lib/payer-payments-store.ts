@@ -222,10 +222,23 @@ export async function bankedPayments(limit = 200) {
  * sitting in the vault under the right name is not the month's money; a receipt keyed
  * `payer-payment|…` is, and it is the same key the import dedupes on, so the two can never disagree.
  */
-export async function payerPaymentsFor(month: string): Promise<{ payments: number; cents: number }> {
+/*
+ * `pulledAt` and `reaches` are here because the count alone cannot say whether the month is in.
+ *
+ * On 1 October 2026 September had 31 payments on file and read as done, and every one of them came
+ * from one export taken on 18 September: the last twelve days of the month, the busiest of them,
+ * had no cash against 8,928 claims and nothing said so. The day the export was read settles it
+ * without having to guess what a full month ought to look like.
+ */
+export async function payerPaymentsFor(month: string): Promise<{ payments: number; cents: number; pulledAt: string | null; reaches: string | null }> {
   const rows = await db.query.cashReceipts.findMany({
     where: and(eq(schema.cashReceipts.month, month), like(schema.cashReceipts.sourceKey, "payer-payment|%")),
-    columns: { amountCents: true },
+    columns: { amountCents: true, receivedOn: true, createdAt: true },
   });
-  return { payments: rows.length, cents: rows.reduce((n, r) => n + r.amountCents, 0) };
+  return {
+    payments: rows.length,
+    cents: rows.reduce((n, r) => n + r.amountCents, 0),
+    pulledAt: rows.map((r) => r.createdAt).sort().at(-1) ?? null,
+    reaches: rows.map((r) => r.receivedOn).sort().at(-1) ?? null,
+  };
 }
