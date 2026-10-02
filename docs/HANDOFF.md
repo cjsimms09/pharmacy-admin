@@ -8,6 +8,15 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, early afternoon: the books and Today, laid out for reading.** The books (/money): six figures, no comparison
+  for a month in progress, the account with one sentence on the gap and the parts behind a press, "At the bank" in one
+  line with the three forms behind a press, the six-month strip saying "before the books" rather than "1 missing", and one
+  "Checks" card with a badge per line. Today (/): the scoreboard reads the stored books and the bank's last proven
+  balance (four figures); the return-credit alert and the money-list sections are gone with the buying pages; each
+  needs-you row is one sentence at rest with the rest behind "more"; nothing on the needs-you list is drawn again in the
+  late queue; the first button is "The books". Neither rendered yet: the deploy at 18:36 is followed by printing and
+  reading every changed page, and a second deploy after hours if the printout shows a fault.
+
 - **2 October, midday: the month accounts are stored by the engine** (src/lib/engine/accounts.ts, month_accounts). One shared
   read was 5.4 s and the books asked for four; now the books open from the store in 176 ms, the six-month strip in 19 ms,
   the twelve-month trend in 69 ms. The month in progress is recomputed on every pass when anything moved or the day did;

@@ -1,4 +1,3 @@
-import { tillLine } from "@/lib/till-line";
 import Link from "next/link";
 import { Suspense } from "react";
 import { cqiSnapshot, csInventoryStatus } from "@/lib/compliance";
@@ -9,7 +8,6 @@ import { StaffBoard } from "@/components/staff-board";
 import { invoiceIssues } from "@/lib/invoices";
 import { dailyCheck } from "@/lib/daily-check-store";
 import { alerts, SOON_DAYS, type Alert } from "@/lib/alerts";
-import { returnWarningNow, WARN_CREDIT_DAYS } from "@/lib/return-soon";
 import { claimsProofNow } from "@/lib/data-health-claims-proof-store";
 import { claimsProofAlert } from "@/lib/data-health-claims-proof";
 import { automationStatus, type JobStatus } from "@/lib/automation-status";
@@ -20,10 +18,9 @@ import { daysUntil, fmt, fmtLong, todayIso } from "@/lib/dates";
 import { getSettings } from "@/lib/settings";
 import { mailHealth } from "@/lib/mail-health";
 import { pendingUpdates } from "@/lib/updates";
-import { moneyPosition } from "@/lib/money-position";
-import { moneyFound } from "@/lib/money-found";
-import { moneyWaitingNow } from "@/lib/money-waiting-store";
 import { booksFor } from "@/lib/ledger-store";
+import { db, schema } from "@/db";
+import { desc, isNotNull } from "drizzle-orm";
 import { parsePeriod } from "@/lib/ledger";
 import { contractClocksDue } from "@/lib/contract-docs";
 import { formatCents } from "@/lib/money";
@@ -97,7 +94,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { ok, error } = await searchParams;
   // The signer's own name, to fill in the attestation form without asking them to remember it.
   const user = await requireUser();
-  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, clocks, returns, claimsProof, health] =
+  const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, clocks, claimsProof, health] =
     await Promise.all([
     complianceSummary(),
     dueList({ horizonDays: 60 }).then((d) => d.filter((x) => !String((x as { id?: string }).id ?? "").startsWith("cred-missing-pharmacy-"))),
@@ -119,19 +116,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
      */
     // Contract deadlines with a date on them, so a renewal window is on the same list as a licence.
     contractClocksDue(90).catch(() => [] as Awaited<ReturnType<typeof contractClocksDue>>),
-    /*
-     * Stock whose credit is about to drop, which is the only money on this page that expires.
-     *
-     * Everything else in the scoreboard is a measurement of how the month is going and is as true
-     * tomorrow as today. This is the one figure that stops being available: on the day the
-     * supplier's policy says, the credit steps down or the window shuts, and what was refundable
-     * money becomes stock. That makes it an alert rather than a figure.
-     *
-     * Caught, because the shelf is the heaviest read on the page and this screen has to render
-     * even when it fails. A missing warning is a page without one row; a thrown error is a
-     * pharmacist-in-charge who cannot see whether a licence has lapsed.
-     */
-    returnWarningNow().catch(() => null),
     /*
      * The claims proof, read back from what the nightly script left behind.
      *
@@ -226,6 +210,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   }
 
   const lateCount = lateTraining.length + lateCredentials.length + latePharmacy.length;
+  /* What the needs-you list already names is not drawn a second time in the late queue below it. */
+  const nowTitles = new Set(alertList.filter((a) => a.level === "now").map((a) => a.title));
 
   // ── One-click closures, pulled out of the pile ──
   // A duty whose entire content is one sentence and one button does not belong in a list of
@@ -398,7 +384,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         */
         actions={
           <>
-            <Link href="/money/found" className="btn btn-primary">Where the money is</Link>
+            <Link href="/money" className="btn btn-primary">The books</Link>
             <Link href={`/deliveries?month=${today.slice(0, 7)}`} className="btn">Today&rsquo;s deliveries</Link>
             {lateCount > 0 && <Link href="#now" className="btn btn-primary">Work through {lateCount}</Link>}
           </>
@@ -448,7 +434,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         later. Where a link in the chain is missing the card says which link and where to fix it,
         because the alternative is a confident zero that somebody prices an order against.
       */}
-      <Suspense fallback={<Pending title="Scoreboard" note="Working out the month to date…" tall />}>
+      <Suspense fallback={<Pending title="This month so far" note="Reading the books…" tall />}>
         <Scoreboard today={today} />
       </Suspense>
 
@@ -514,43 +500,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       {(() => {
         /*
-          One row, on the list everything else that needs doing is on.
-
-          Not a figure in the scoreboard above, because a figure is a measurement and this is a
-          deadline — and not a page of its own on this screen, because the pharmacist reads this
-          list from the doorway and a fourth place to look is a place nobody looks. It says the
-          same four things the Return soon page says, in the same words: the bottle, who sold it,
-          the dollars, and the day the credit changes.
-
-          "Now" only when something changes inside a week, which is about how long a return
-          authorisation, a box and a carrier take. Anything further out sits in the folded list
-          with the renewals, which is exactly what it is.
-
-          Nothing here is judged by whether a drug is moving. Only a date a supplier's own returns
-          policy put on it reaches this row — `warnableReturns` in return-soon.ts is the guard, and
-          the reason is that a fortnight of claims makes a monthly drug look dead. A screen may
-          show that with the caveat printed beside it. A red row on the doorway screen may not.
-        */
-        const returnAlert: Alert[] =
-          returns === null
-            ? []
-            : [
-                {
-                  key: "returns-on-a-clock",
-                  level: returns.soonestDays <= WARN_CREDIT_DAYS ? "now" : "soon",
-                  title:
-                    returns.atRiskCents > 0
-                      ? `${formatCents(returns.atRiskCents)} of return credit goes in ${returns.soonestDays} day${returns.soonestDays === 1 ? "" : "s"}`
-                      : `${formatCents(returns.sendBackWorthCents)} of stock is on a return clock`,
-                  why:
-                    returns.lines.length === 1
-                      ? returns.lines[0].says
-                      : `${returns.lines[0].says} And ${returns.lines.length - 1} more on a supplier's clock, ${formatCents(returns.sendBackWorthCents)} in all.`,
-                  href: "/purchasing/return-soon",
-                  action: "Send it back",
-                },
-              ];
-        /*
           The claims disagreeing with the reports they came from, which outranks everything here.
 
           The owner's words: "these things need to be right!! we need to make sure claims are
@@ -565,9 +514,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         */
         const proofWarning = claimsProofAlert(claimsProof);
         const proofAlert: Alert[] = proofWarning
-          ? [{ key: "claims-proof", level: "now", ...proofWarning, href: "/tools/data-health", action: "See what differs" }]
+          ? [{ key: "claims-proof", level: "now", ...proofWarning, href: "/money", action: "See the checks" }]
           : [];
-        const extra = [...proofAlert, ...returnAlert];
+        const extra = [...proofAlert];
         const now = [...alertList, ...extra].filter((a) => a.level === "now");
         const soon = [...alertList, ...extra].filter((a) => a.level === "soon");
         if (now.length === 0 && soon.length === 0) {
@@ -596,7 +545,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     <li key={a.key} className="flex flex-wrap items-start justify-between gap-2 py-2.5">
                       <span className="min-w-0">
                         <Link href={a.href} className="text-sm font-medium text-accent hover:underline">{a.title}</Link>
-                        <span className="mt-0.5 block text-xs text-ink-3">{a.why}</span>
+                        <Why text={a.why} />
                       </span>
                       <Link href={a.href} className="btn btn-sm btn-primary shrink-0">{a.action ?? "Fix it"}</Link>
                     </li>
@@ -621,7 +570,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                       <li key={a.key} className="flex flex-wrap items-start justify-between gap-2 py-2">
                         <span className="min-w-0">
                           <Link href={a.href} className="text-sm hover:underline">{a.title}</Link>
-                          <span className="mt-0.5 block text-xs text-ink-3">{a.why}</span>
+                          <Why text={a.why} />
                         </span>
                         <Link href={a.href} className="btn btn-sm shrink-0">{a.action ?? "Open"}</Link>
                       </li>
@@ -724,9 +673,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           */
           <LateQueue
             bands={[
-              { title: "Pharmacy duties", rows: latePharmacy.filter((r) => !r.attest), href: "/compliance", label: "Compliance" },
-              { title: "Licences and credentials", rows: lateCredentials, href: "/staff", label: "Staff" },
-              { title: "Training", rows: lateTraining, href: "/compliance/training", label: "Send training" },
+              { title: "Pharmacy duties", rows: latePharmacy.filter((r) => !r.attest && !nowTitles.has(r.title)), href: "/compliance", label: "Compliance" },
+              { title: "Licences and credentials", rows: lateCredentials.filter((r) => !nowTitles.has(r.title)), href: "/staff", label: "Staff" },
+              { title: "Training", rows: lateTraining.filter((r) => !nowTitles.has(r.title)), href: "/compliance/training", label: "Send training" },
             ]}
           />
         )}
@@ -923,269 +872,52 @@ function AutomationStrip({ jobs }: { jobs: JobStatus[] }) {
  * decides whether anything is late. Streamed in its own boundary, the checklist above and below it
  * is on screen while these are worked out, and a failure here costs this section, not the page.
  */
+/**
+ * The month so far, from the books the engine stored, and the bank's last proven balance. Four figures, one fact
+ * each. The buying levers that stood here — the ratio, the rebates earned, the facilitator's money — went with the
+ * buying pages on 2 October 2026; what remains is what he asked to see from the doorway.
+ */
 async function Scoreboard({ today }: { today: string }) {
-  const [money, books] = await Promise.all([
-    moneyPosition(),
-    /*
-     * The month's bottom line so far, from the books: gross profit less the bills in and the
-     * standing costs accrued to today. The scoreboard's other figures are dispensing; this is the
-     * one that says whether the month is making money after the doors are kept open.
-     */
-    booksFor(parsePeriod(today.slice(0, 7))!).catch(() => null),
+  const month = today.slice(0, 7);
+  const [books, proven] = await Promise.all([
+    booksFor(parsePeriod(month)!).catch(() => null),
+    db.query.monthStatus.findFirst({ where: isNotNull(schema.monthStatus.bankClosingCents), orderBy: [desc(schema.monthStatus.month)] }).catch(() => null),
   ]);
-  const net = books?.accrual ?? null;
+  const a = books?.accrual ?? null;
+  const dayOfMonth = Number(today.slice(8, 10));
   return (
-        <section className="mb-6">
-          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-sm font-semibold">Scoreboard</h2>
-            <span className="text-xs text-ink-3">
-              Month to date · {fmtLong(today)} · <Link href="/money" className="text-accent underline">the books</Link>
-            </span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {/*
-              What was dispensed and what it made — prescriptions only.
-
-              The transaction report does not carry front-of-shop merchandise, so this is not the
-              whole till and does not pretend to be. Cash fills are in it: a bottle the pharmacy
-              priced itself is revenue like any other, and for months they were thrown away on import,
-              which silently deleted the margin on the only business the pharmacy fully controls.
-            */}
-            <Figure
-              value={formatCents(money.dispensing.marginCents)}
-              label="Gross profit this month"
-              tone={money.dispensing.marginCents < 0 ? "crit" : "ok"}
-              href="/claims"
-              sub={
-                money.dispensing.fills === 0
-                  ? "No fills loaded for this month yet."
-                  : [
-                      `on ${formatCents(money.dispensing.revenueCents)} dispensed across ${money.dispensing.fills.toLocaleString()} fills`,
-                      money.dispensing.cashFills > 0
-                        ? `${formatCents(money.dispensing.cashMarginCents)} of it from cash`
-                        : null,
-                      /*
-                        Promised and unpaid, and whether any of it is late.
-
-                        The whole promise, as before — none of it has stopped being owed. What it now
-                        says is which part the payer still has time on, because "promised and unpaid"
-                        on money that adjudicated yesterday reads as a plan not paying.
-                      */
-                      money.dispensing.promisedCents > 0
-                        ? `${formatCents(money.dispensing.promisedCents)} promised and unpaid` +
-                          (money.dispensing.promisedNotDueCents > 0
-                            ? `, ${formatCents(money.dispensing.promisedNotDueCents)} of it not due yet`
-                            : "")
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
-              }
-            />
-
-            {/*
-              The bottom line so far: gross profit less the bills in and the standing costs accrued to
-              today. The one figure here that includes keeping the doors open, and it says what it is
-              missing rather than looking finished.
-            */}
-            <Figure
-              value={net ? formatCents(net.netProfitCents) : "—"}
-              label={net && net.netProfitCents < 0 ? "Net loss so far" : "Net profit so far"}
-              tone={!net ? "muted" : !net.usable ? "warn" : net.netProfitCents < 0 ? "crit" : "ok"}
-              href="/money"
-              sub={
-                !net
-                  ? "The books could not be drawn."
-                  : [
-                      `${formatCents(net.operatingCents)} to keep the doors open so far`,
-                      net.missing.length > 0 ? `${net.missing.length} line${net.missing.length === 1 ? "" : "s"} not yet in` : "every line in",
-                      books?.pace?.netAfterBillsSoFarCents != null ? `${formatCents(books.pace.netAfterBillsSoFarCents)} at this pace` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
-              }
-            />
-
-            {/*
-              Money actually banked from the facilitator, and only that.
-
-              An earlier version put "still owed" here from the gap between the report's gross profit
-              and ours. That gap is real but its cause is not knowable from a fill — one was $146.18
-              of facilitator money, another $5.56 on a generic Losartan that no facilitator would ever
-              pay — so forecasting from it invented a receivable. The gap belongs on the claims screen
-              as a reconciliation, not here as money coming.
-            */}
-            <Figure
-              value={formatCents(money.facilitator.receivedCents)}
-              label="Facilitator money in"
-              tone={money.facilitator.receivedCents > 0 ? "ok" : "muted"}
-              href="/remits/mtf"
-              sub={
-                [
-                  money.facilitator.payments > 0
-                    ? `${money.facilitator.payments} payment${money.facilitator.payments === 1 ? "" : "s"} this month`
-                    : "nothing received this month",
-                  money.facilitator.lastMonthCents > 0 ? `${formatCents(money.facilitator.lastMonthCents)} last month` : null,
-                  /* Only what can still be matched. The rest predate the feed and never will be. */
-                  money.facilitator.unmatched > 0
-                    ? `${money.facilitator.unmatched} not yet matched to a claim`
-                    : money.facilitator.beforeTheFeed > 0
-                      ? `all matched, bar ${money.facilitator.beforeTheFeed} filled before this feed began`
-                      : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")
-              }
-            />
-
-            {/* ── The ratio, which is the lever ───────────────────────── */}
-            <Figure
-              value={money.ratio?.percent !== null && money.ratio?.percent !== undefined ? `${money.ratio.percent.toFixed(2)}%` : "—"}
-              label={money.ratio ? `Scrubbed GCR — ${money.ratio.supplierName}` : "Scrubbed GCR"}
-              tone={money.ratio?.percent === null || money.ratio === null ? "muted" : money.ratio.next ? "warn" : "ok"}
-              href={money.ratio ? `/suppliers/${money.ratio.supplierId}/terms` : "/suppliers"}
-              sub={
-                money.ratio === null
-                  ? "No supplier on file yet."
-                  : money.ratio.percent === null
-                    ? "No drill down has been read yet — it arrives daily and files itself."
-                    : [
-                        money.ratio.contractGenericPercent !== null
-                          ? `${money.ratio.contractGenericPercent}% off a contract generic today`
-                          : "no ladder on file to price it",
-                        money.ratio.next
-                          ? `${money.ratio.next.shortByPercent.toFixed(2)}% short of ${money.ratio.next.rebatePercent}%`
-                          : "top band",
-                        money.ratio.source === "daily report" ? `today's report` : money.ratio.source === "monthly statement" ? `settled figure` : null,
-                        money.ratio.driftPercent !== null && Math.abs(money.ratio.driftPercent) > 0.5
-                          ? `today's drill down reads ${money.ratio.dailyPercent?.toFixed(2)}%, a different measure`
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")
-              }
-            />
-
-            {/* ── What the buying already done is earning ─────────────── */}
-            <Figure
-              value={formatCents(money.rebates.estimatedCents)}
-              label="Rebates earned this month"
-              tone={money.rebates.incomplete || money.rebates.unmarkedLines > 0 ? "warn" : money.rebates.estimatedCents > 0 ? "ok" : "muted"}
-              href="/suppliers"
-              sub={
-                money.rebates.purchasedCents === 0
-                  ? "No invoices loaded for this month yet."
-                  : [
-                      `on ${formatCents(money.rebates.purchasedCents)} bought`,
-                      money.rebates.bySupplier.length === 1 ? money.rebates.bySupplier[0].supplierName : `${money.rebates.bySupplier.length} suppliers`,
-                      money.rebates.unmarkedLines > 0 ? `${money.rebates.unmarkedLines} lines unmarked, earning nothing here` : null,
-                      money.rebates.incomplete ? "a supplier has no ladder on file" : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
-              }
-            />
-          </div>
-          {/*
-            The whole till, which is the only figure here that includes the front of shop.
-
-            Every other number on this scoreboard is dispensing. The System Sales Summary is the one
-            report that carries over-the-counter business too, and it is drawn by the calendar month
-            rather than by the day a claim was transmitted — so it is the figure that reconciles
-            against the bank, and it is labelled with the month it actually covers rather than being
-            quietly presented as this one.
-          */}
-          {money.sales && (() => {
-            /*
-             * Built rather than templated, because three of these five figures can be absent and a
-             * `?? 0` turns "nobody has told us" into "nothing was taken". This line used to lead with a
-             * bold $0.00 and then list $2,115.07 of counter takings underneath it, from a document that
-             * has never been filed.
-             */
-            const line = tillLine(money.sales);
-            return (
-              <p className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs text-ink-2">
-                <b>{line.headline}</b> — {line.detail} This is the only figure on this page that
-                includes the front of shop; everything above it is dispensing.
-              </p>
-            );
-          })()}
-
-          {/*
-            The report's own bottom line, which nothing on this site computed.
-
-            It is the only authoritative total sales figure the pharmacy has — the transaction report
-            prints a grand total, and that total is the thing to reconcile against the bank. Said as
-            the report's figure for the report's period, never quietly reinterpreted as the month's:
-            those are the same only when the file sent is the monthly one.
-          */}
-          {money.dispensing.reported && (
-            <p className="mt-2 text-xs text-ink-2">
-              <b>{formatCents(money.dispensing.reported.salesCents)} taken and{" "}
-              {formatCents(money.dispensing.reported.grossProfitCents)} made</b>{" "}
-              — the report&rsquo;s own grand total for the last file loaded
-              {money.dispensing.reported.from
-                ? `, covering ${money.dispensing.reported.from}${
-                    money.dispensing.reported.to && money.dispensing.reported.to !== money.dispensing.reported.from
-                      ? ` to ${money.dispensing.reported.to}`
-                      : ""
-                  }`
-                : ""}
-              . This is the one figure here nobody worked out — PioneerRx printed it — so it is what to
-              reconcile against the bank.
-            </p>
-          )}
-          {money.unreconciled.fills > 0 && (
-            <p className="mt-2 text-xs text-ink-3">
-              Separately, {formatCents(money.unreconciled.cents)} across {money.unreconciled.fills} fills is revenue the
-              daily report booked that this site has not found in the claim rows. It is not money coming — it is a column
-              to identify, and it may already be in the bank.{" "}
-              <Link href="/claims" className="text-accent underline">Reconcile it on Claims</Link>.
-            </p>
-          )}
-        </section>
+    <section className="mb-6">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold">This month so far</h2>
+        <span className="text-xs text-ink-3">
+          day {dayOfMonth} · <Link href="/money" className="text-accent underline">the books</Link>
+        </span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Figure value={a ? formatCents(a.netRevenueCents) : "—"} label="Net revenue" sub={a ? "earned at pickup" : "no account yet"} tone="muted" href="/money" />
+        <Figure value={a ? formatCents(a.grossProfitCents) : "—"} label="Gross profit" sub={a && a.grossMarginPercent !== null ? `${a.grossMarginPercent}% of net revenue` : "cost of goods not known"} tone={a && a.grossProfitCents < 0 ? "crit" : "ok"} href="/money" />
+        <Figure value={a ? formatCents(a.netProfitCents) : "—"} label={a && a.netProfitCents < 0 ? "Net loss so far" : "Net profit so far"} sub={a ? (a.missing.length ? `${a.missing.length} line${a.missing.length === 1 ? "" : "s"} still to come` : "every line in") : "no account yet"} tone={a && a.netProfitCents < 0 ? "crit" : "ok"} href="/money" />
+        <Figure value={proven?.bankClosingCents !== null && proven?.bankClosingCents !== undefined ? formatCents(proven.bankClosingCents) : "—"} label="Cash in bank" sub={proven ? `proven to the end of ${proven.month}` : "no statement read yet"} tone="muted" href={proven ? `/money/bank-review?month=${proven.month}` : "/money/bank-review"} />
+      </div>
+    </section>
   );
 }
 
-/** The three things worth the most, streamed on their own: money found is nineteen seconds from cold. */
-async function WorthTheMost() {
-  const found = await moneyFound().catch(() => null);
-  if (!found || found.rows.length === 0) return null;
+/** One sentence at rest; the rest behind a press. The owner, 2 October 2026: "I get a headache looking at this site and trying to read all the paragraphs and words." */
+function Why({ text }: { text: string }) {
+  const whole = text.replace(/\s+/g, " ").trim();
+  const first = whole.split(/(?<=\.)\s/)[0];
+  if (first.length >= whole.length) return <span className="mt-0.5 block text-xs text-ink-3">{whole}</span>;
   return (
-        <section className="mb-6">
-          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-sm font-semibold">Worth the most this morning</h2>
-            <span className="text-xs text-ink-3">
-              {formatCents(found.firstYearCents)} in the first year if all of it is done ·{" "}
-              <Link href="/money/found" className="text-accent underline">all {found.rows.length}</Link>
-            </span>
-          </div>
-          <ol className="grid gap-3 lg:grid-cols-3">
-            {found.rows.slice(0, 3).map((r, i) => (
-              <li key={r.key} className="card flex flex-col">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-xs text-ink-3">{i + 1}.</span>
-                  <span className="text-right">
-                    <span className="block text-lg font-semibold tabular-nums text-ink">{formatCents(r.amountCents)}</span>
-                    <span className="block text-[11px] text-ink-3">{r.cadence === "recurring_monthly" ? "a month" : "one-off"}</span>
-                  </span>
-                </div>
-                <p className="mt-1 text-sm font-medium">{r.says}</p>
-                <p className="mt-1 flex-1 text-xs text-ink-2">{r.todo}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <Link href={r.href} className="btn btn-sm btn-primary">Go and do it</Link>
-                  {found.ages[r.key] !== undefined && (
-                    <span className="text-[11px] text-ink-3">{found.ages[r.key] <= 1 ? "new today" : `${found.ages[r.key]} days on the list`}</span>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
+    <details className="mt-0.5 text-xs text-ink-3">
+      <summary className="cursor-pointer list-none">
+        {first} <span className="text-accent">more</span>
+      </summary>
+      <span className="block pt-1">{whole}</span>
+    </details>
   );
 }
 
-/** What stands in a streamed section's place while it is worked out: its heading, and a line saying so. */
 function Pending({ title, note, tall = false }: { title: string; note: string; tall?: boolean }) {
   return (
     <section className="mb-6" aria-busy="true">
@@ -1208,33 +940,3 @@ function Pending({ title, note, tall = false }: { title: string; note: string; t
  * Streamed like the others, and silent where nothing is waiting. The full list is /payers/waiting; this is the glance
  * that says whether anything needs chasing before the day starts.
  */
-async function MoneyWaiting() {
-  const waiting = await moneyWaitingNow().catch(() => null);
-  if (!waiting || waiting.rows.length === 0) return null;
-  return (
-    <section className="mb-6">
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold">Money waiting on somebody</h2>
-        <span className="text-xs text-ink-3">
-          {formatCents(waiting.totalCents)} in all ·{" "}
-          <Link href="/payers/waiting" className="text-accent underline">all {waiting.rows.length}</Link>
-        </span>
-      </div>
-      <ol className="grid gap-3 lg:grid-cols-3">
-        {waiting.rows.slice(0, 3).map((r) => (
-          <li key={r.key} className="card flex flex-col">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="min-w-0 truncate text-sm font-medium">{r.name}</span>
-              <span className="whitespace-nowrap text-lg font-semibold tabular-nums text-ink">{formatCents(r.cents)}</span>
-            </div>
-            <p className="mt-1 flex-1 text-xs text-ink-2">{r.settles}</p>
-            <div className="mt-2 flex items-center gap-2">
-              <Link href={r.href} className="btn btn-sm">Open it</Link>
-              {r.neverAnything && <span className="text-[11px] text-ink-3">nothing has ever arrived</span>}
-            </div>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
