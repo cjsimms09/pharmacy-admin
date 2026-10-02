@@ -34,6 +34,7 @@
  *      here, by the page somebody opens first, and joined by a row of tabs on every page in it.
  */
 import { FAMILIES, type FamilyTab } from "./families";
+import { isRetired } from "./retired";
 
 export type NavItem = {
   href: string;
@@ -49,7 +50,7 @@ export type NavItem = {
 };
 export type NavGroup = { href: string; label: string; blurb: string; items: NavItem[] };
 
-export const NAV: NavGroup[] = [
+const NAV_RAW: NavGroup[] = [
   {
     href: "/",
     label: "Today",
@@ -187,6 +188,46 @@ export const NAV: NavGroup[] = [
  * A page listed only through its family (`/plans` under the floor, `/intake` under what arrived)
  * belongs to the group of the page its family is listed by.
  */
+/**
+ * The menu after the owner's scope of 2 October 2026 (retired.ts): retired pages leave; the Buying group becomes
+ * Invoices around what survives of it; the bank joins Money where he can find it; the temperature logs come out from
+ * behind "more"; nothing is gated any more, because the gate was for sections still being built and remits and claims
+ * are now things he asked to keep. The literal above is left whole so the retired entries can be read until the code goes.
+ */
+const RELABEL: Record<string, { label: string; blurb: string }> = {
+  "/suppliers": { label: "Suppliers", blurb: "Each wholesaler on file: what it sends, from where, and how its invoices are read" },
+  "/payers": { label: "Payers", blurb: "Every BIN we bill, how each pays, and its 835 routing" },
+};
+
+export function retireNav(groups: NavGroup[]): NavGroup[] {
+  const out: NavGroup[] = [];
+  for (const g of groups) {
+    if (isRetired(g.href) && g.href !== "/purchasing") continue;
+    const items = g.items
+      .filter((i) => !isRetired(i.href))
+      .map((i) => ({ ...i, gated: false, ...(RELABEL[i.href] ?? {}), ...(i.href === "/temps" ? { hidden: false } : {}), ...(i.href === "/records" ? { hidden: true } : {}) }));
+    if (g.href === "/purchasing") {
+      const invoices = items.find((i) => i.href === "/inventory/invoices");
+      const rest = items.filter((i) => i.href !== "/inventory/invoices");
+      out.push({
+        href: "/inventory/invoices",
+        label: "Invoices",
+        blurb: "Supplier invoices as they arrive, filed and kept; the suppliers that send them; the documents behind them.",
+        items: [...(invoices ? [{ ...invoices, hidden: false }] : []), ...rest, { href: "/documents", gated: false, label: "Documents", blurb: "Every document the site holds, by kind, and what it was read as" }],
+      });
+      continue;
+    }
+    if (g.href === "/money") {
+      const books = items.findIndex((i) => i.href === "/money");
+      items.splice(books + 1, 0, { href: "/money/bank-review", gated: false, label: "The bank", blurb: "Every line of the statement, what it was tied to, and what still needs you — the reconciliation" });
+    }
+    out.push({ ...g, items });
+  }
+  return out;
+}
+
+export const NAV: NavGroup[] = retireNav(NAV_RAW);
+
 export function groupFor(pathname: string): NavGroup | undefined {
   for (const tabs of Object.values(FAMILIES)) {
     if (tabs.some((t) => t.href === pathname || pathname.startsWith(`${t.href}/`))) {

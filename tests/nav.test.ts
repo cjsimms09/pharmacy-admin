@@ -68,15 +68,12 @@ describe("navigation", () => {
     assert.equal(groupFor("/compliance/training/records")?.label, "Compliance");
     assert.equal(groupFor("/compliance")?.label, "Compliance");
     assert.equal(groupFor("/compliance/attestations")?.label, "Compliance");
-    // Supplier invoices and returns are buying pages even though they live under /inventory.
-    assert.equal(groupFor("/inventory/invoices")?.label, "Buying");
-    assert.equal(groupFor("/inventory/returns")?.label, "Buying");
+    // Supplier invoices are the Invoices group even though they live under /inventory; the controlled-substance count is Compliance.
+    assert.equal(groupFor("/inventory/invoices")?.label, "Invoices");
     assert.equal(groupFor("/inventory")?.label, "Compliance");
-    assert.equal(groupFor("/payers/performance")?.label, "Getting paid");
     assert.equal(groupFor("/remits/mtf")?.label, "Getting paid");
-    assert.equal(groupFor("/purchasing/minimums")?.label, "Buying");
-    assert.equal(groupFor("/plans")?.label, "Getting paid");
-    assert.equal(groupFor("/payers/contracts/abc")?.label, "Getting paid");
+    assert.equal(groupFor("/payers/owed")?.label, "Getting paid");
+    assert.equal(groupFor("/money/bank-review")?.label, "Money");
   });
 
   test("a page reached from a list still opens its section", () => {
@@ -85,11 +82,9 @@ describe("navigation", () => {
     assert.equal(groupFor("/cqi/incidents/xyz")?.label, "Compliance");
     assert.equal(groupFor("/manual/print")?.label, "Compliance");
     assert.equal(groupFor("/settings/backups")?.label, "Settings");
-    assert.equal(groupFor("/money/found")?.label, "Money");
     assert.equal(groupFor("/money/monthly")?.label, "Money");
-    assert.equal(groupFor("/purchasing/shelf")?.label, "Buying");
-    assert.equal(groupFor("/purchasing/return-soon")?.label, "Buying");
-    assert.equal(groupFor("/purchasing/over-nadac")?.label, "Buying");
+    assert.equal(groupFor("/documents")?.label, "Invoices");
+    assert.equal(groupFor("/temps/abc/2026-09")?.label, "Compliance");
     /* Moved with /inbox: they are one family, and a family split across two groups is not one. */
     assert.equal(groupFor("/intake")?.label, "Today");
     assert.equal(groupFor("/inspection/walk")?.label, "Compliance");
@@ -104,11 +99,11 @@ describe("navigation", () => {
      */
     assert.equal(groupFor("/inbox")?.label, "Today");
     assert.equal(groupFor("/expected")?.label, "Today");
-    assert.equal(groupFor("/nadac")?.label, "Settings");
+    assert.equal(groupFor("/tools/pioneer-sql")?.label, "Settings");
   });
 
-  test("the sections are the three questions, with Today in front and the books and settings beside", () => {
-    assert.deepEqual(NAV.map((g) => g.label), ["Today", "Buying", "Getting paid", "Money", "Compliance", "Settings"]);
+  test("the sections are the owner's six things, with Today in front and settings beside (2 October 2026)", () => {
+    assert.deepEqual(NAV.map((g) => g.label), ["Today", "Invoices", "Getting paid", "Money", "Compliance", "Settings"]);
   });
 
   test("a hidden page is still placed, so its highlight and breadcrumb are right", () => {
@@ -126,17 +121,13 @@ describe("navigation", () => {
 
 describe("a page listed only through its family", () => {
   test("still has a sidebar item and a breadcrumb", () => {
-    assert.equal(itemFor("/plans")?.item.href, "/claims/floor");
-    assert.equal(itemFor("/plans")?.tab?.label, "Which plans it reaches");
-    assert.equal(itemFor("/purchasing/minimums")?.item.href, "/purchasing");
     // /intake was family-only; the owner asked where the upload tool had gone, so it is listed.
     assert.equal(itemFor("/intake")?.item.href, "/intake");
-    assert.equal(itemFor("/payers/sort")?.item.href, "/payers");
+    assert.equal(itemFor("/payers/owed")?.item.href, "/payers");
     assert.equal(itemFor("/settings/feeds")?.item.href, "/settings/connections");
-    assert.equal(itemFor("/claims/floor")?.tab, undefined);
     assert.equal(itemFor("/money/monthly")?.item.href, "/money");
     assert.equal(itemFor("/money/monthly")?.tab?.label, "Statement");
-    assert.equal(itemFor("/money/found")?.item.href, "/money/found");
+    assert.equal(itemFor("/money/bank-review")?.item.href, "/money/bank-review");
     assert.equal(itemFor("/money"), undefined, "a group landing is the group, not an item under it");
   });
 });

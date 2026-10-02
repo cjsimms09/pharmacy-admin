@@ -117,6 +117,12 @@ they are coming"; the By-payer tab shows ESI's plan groups and when it last paid
 
 ## Decisions he made today, so nobody reopens them
 
+- **The site is six things, and the rest is retired (2 October, late morning).** "I want compliance, I want invoice
+  organization and storing, temp logs, delivery invoices, accounting, and remits reconciliation and tracking (MTF,
+  Aytu, SFTP). Everything else can go.." Kept on his word after: the PioneerRx SQL tool; the claims list and payers
+  ("we will still need claims info for remits and other things"). The list is `src/lib/retired.ts`; the method is in
+  `docs/BACKLOG.md`. Nothing is deleted from the database; code goes after a month without need.
+
 - **The cash account is the bank statement, categorised.** His words, 2 October 2026: "cash accounting should match
   the bank, this is how cash accounting works.." Every bank line is revenue, an offset, cost of goods, an operating
   cost, a flow that is neither (loan principal, sales tax remitted, a transfer to the practice's account), or not yet

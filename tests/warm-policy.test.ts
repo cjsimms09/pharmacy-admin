@@ -79,17 +79,15 @@ describe("what warms first, and what waits for a lull", () => {
     assert.equal(new Set(WARM_STEPS.map((s) => s.key)).size, WARM_STEPS.length, "no step warmed twice");
   });
 
-  test("the dashboard and the buy list are what the morning starts on", () => {
+  test("the dashboard and the books are what the morning starts on; the buying pages are retired (2 October 2026)", () => {
     const firsts = WARM_STEPS.filter((s) => s.tier === "first").map((s) => s.key);
-    // Read off `/` and `/purchasing`, plus the two readings underneath most of the rest.
-    assert.deepEqual(firsts, ["allFills", "productLedger", "booksFor", "moneyPosition", "moneyFound", "buyListNow", "minimumsNow", "drugProfitNow", "overNadac28"]);
+    // Read off `/` and `/money`, plus the reading underneath most of the rest. The money list is stored by the engine now.
+    assert.deepEqual(firsts, ["allFills", "booksFor", "moneyPosition"]);
   });
 
-  test("the six that serve one page each, and none of them the morning's, wait", () => {
+  test("the three that serve one page each, and none of them the morning's, wait", () => {
     const laters = WARM_STEPS.filter((s) => s.tier === "later").map((s) => s.key);
-    for (const k of ["floorReview", "leanShelfNow", "productsExtrasNow", "payerMap", "planRegister", "nadacCoverage"]) {
-      assert.ok(laters.includes(k), `${k} should wait for a lull`);
-    }
+    assert.deepEqual(laters, ["recentMonths", "monthlyTrend", "payerMap"]);
   });
 
   test("in a short gap the plan is the morning's readings and the reason for each of the rest", () => {

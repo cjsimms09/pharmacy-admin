@@ -1149,7 +1149,7 @@ place, and an arithmetic check before anything is stored.
   The cut (about 33 pages): all of buying (what to buy, shelf, minimums, catalogue, products, replay, return soon,
   supplies, over NADAC, NADAC, supplier terms and rebate ladders, pack-size fixes as a page), money found and "worth
   the most", claims analysis (appeals, Kansas floor, who pays best, plan classification, networks to contracts,
-  contract reading), tools (PioneerRx SQL, morning check, data health, report check, sort the folder, extra
+  contract reading), tools (morning check, data health, report check, sort the folder, extra
   sections), the v2 screens; on Today: money waiting, supplies, the Claude ceiling line, the credential nags.
   Method: out of navigation and Today first, computations stopped, nothing deleted from the database for a month.
   To confirm with him: the rebate ladder as one figure; pack-size fixes kept hidden.

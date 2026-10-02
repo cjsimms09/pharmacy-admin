@@ -50,23 +50,11 @@ export type WarmStep = {
  */
 export const WARM_STEPS: WarmStep[] = [
   { key: "allFills", opens: "underneath almost every page", tier: "first" },
-  { key: "productLedger", opens: "underneath the buy list and the drug pages", tier: "first" },
   { key: "booksFor", opens: "the dashboard, and /money", tier: "first" },
   { key: "moneyPosition", opens: "the dashboard", tier: "first" },
-  { key: "moneyFound", opens: "the dashboard, and /money/found", tier: "first" },
-  { key: "buyListNow", opens: "/purchasing", tier: "first" },
-  { key: "minimumsNow", opens: "/purchasing", tier: "first" },
-  { key: "drugProfitNow", opens: "/purchasing", tier: "first" },
-  { key: "overNadac28", opens: "/purchasing", tier: "first" },
-  { key: "overNadac7", opens: "/purchasing/over-nadac", tier: "later" },
-  { key: "floorReview", opens: "/claims/floor", tier: "later" },
-  { key: "leanShelfNow", opens: "/purchasing/shelf", tier: "later" },
   { key: "recentMonths", opens: "/money", tier: "later" },
   { key: "monthlyTrend", opens: "/money/report", tier: "later" },
-  { key: "productsExtrasNow", opens: "/purchasing/products", tier: "later" },
-  { key: "payerMap", opens: "/payers/performance", tier: "later" },
-  { key: "planRegister", opens: "/plans", tier: "later" },
-  { key: "nadacCoverage", opens: "/nadac", tier: "later" },
+  { key: "payerMap", opens: "/payers", tier: "later" },
 ];
 
 /**

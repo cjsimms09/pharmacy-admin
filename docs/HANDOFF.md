@@ -8,6 +8,20 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, late morning: the scope is six things, and the rest is retired.** His words (`docs/BACKLOG.md`):
+  "I want compliance, I want invoice organization and storing, temp logs, delivery invoices, accounting, and remits
+  reconciliation and tracking (MTF, Aytu, SFTP). Everything else can go.." Then "dont drop pioneer sql" and "we
+  will still need claims info for remits and other things". `src/lib/retired.ts` is the one list (regexes, with the
+  area each page belonged to); `src/middleware.ts` redirects a retired address to `/retired`, one sentence and the
+  way back; `src/lib/nav.ts` builds the menu from the untouched literal through `retireNav` — Buying becomes
+  Invoices (supplier invoices, suppliers, documents, pack sizes hidden), the bank joins Money, temperatures come out
+  from behind "more", nothing is gated; `familyTabs` drops retired tabs; the warmer keeps five steps; `alerts()`
+  drops the supplies count, the Claude ceiling and the five pharmacy-credential nags (they stay on /licenses and the
+  register); the dashboard loses money found and money waiting; `src/app/(site)` (the v2 screens) is deleted and
+  the "New Today" link with it. Retired, not deleted: the pages' code stays a month, the data for good. Tests:
+  `tests/retired.test.ts`; the nav and warm-policy tests now pin the new scope. Not yet rendered: deploys at 18:36.
+  Two to confirm with him: one rebate-ladder figure, if he wants it; pack-size fixes stay as a hidden data tool.
+
 - **2 October, late afternoon: the cash account is the bank statement, categorised** (his rule; decision recorded in
   `docs/OPEN-ITEMS.md`). `src/lib/cash-from-bank-rules.ts` decides each bank line — by its receipt, invoice or expense
   link, by the placement engine's own sentence ("Out to Rx Systems.", "IPC: $1,171.46 is exactly these 2 invoices"),

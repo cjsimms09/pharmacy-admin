@@ -11,6 +11,8 @@
  * A page is in at most one family. The sidebar highlight follows the group, the tabs follow the
  * family, and neither guesses at the other.
  */
+import { isRetired } from "./retired";
+
 export type FamilyTab = { href: string; label: string };
 
 export const FAMILIES = {
@@ -101,5 +103,6 @@ export type FamilyName = keyof typeof FAMILIES;
 
 /** The tabs for a page: the family it belongs to, with this page marked. */
 export function familyTabs(name: FamilyName, here: string): { active: string; items: FamilyTab[] } {
-  return { active: here, items: [...FAMILIES[name]] };
+  /* Retired pages (src/lib/retired.ts, the owner's scope of 2 October 2026) leave the tabs; the literal above is left whole. */
+  return { active: here, items: FAMILIES[name].filter((t) => !isRetired(t.href)) };
 }

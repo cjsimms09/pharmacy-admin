@@ -100,7 +100,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, clocks, returns, claimsProof, health] =
     await Promise.all([
     complianceSummary(),
-    dueList({ horizonDays: 60 }),
+    dueList({ horizonDays: 60 }).then((d) => d.filter((x) => !String((x as { id?: string }).id ?? "").startsWith("cred-missing-pharmacy-"))),
     staffMatrix(),
     cqiSnapshot(),
     csInventoryStatus(),
@@ -459,18 +459,13 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         whole list, because the whole list is a page of its own and the point here is that a
         pharmacist who reads nothing else knows the one action worth the most this morning.
       */}
-      <Suspense fallback={<Pending title="Worth the most this morning" note="Weighing what is worth the most…" />}>
-        <WorthTheMost />
-      </Suspense>
+      {/* Retired 2 October 2026 (src/lib/retired.ts): money found and money waiting are outside the six things the site is for. */}
 
       {/*
         Money already earned and waiting on somebody, which is a different question from the list above.
         "Worth the most" is money to go and make; this is money the pharmacy has made and not been paid.
         Three lines and the total, because the whole list is a page of its own.
       */}
-      <Suspense fallback={<Pending title="Money waiting" note="Adding up what is owed…" />}>
-        <MoneyWaiting />
-      </Suspense>
 
       {/*
         Two levels, and nothing else on the screen shouts.

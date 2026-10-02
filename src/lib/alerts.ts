@@ -975,7 +975,13 @@ export async function alerts(): Promise<Alert[]> {
   }
   out.length = 0;
   out.push(...folded);
-  return out.sort((a, b) => rank[a.level] - rank[b.level]);
+  /*
+   * Retired 2 October 2026 (src/lib/retired.ts, the owner's scope): the supplies count and the Claude ceiling belong
+   * to pages that are gone, and the five pharmacy credentials with nothing filed are the register's to show, not
+   * Today's to nag — "I get a headache looking at this site". They stay on /licenses and the compliance register.
+   */
+  const retired = /^(ai-cap|supplies-count|supplies-|undated-cred-missing-pharmacy-)/;
+  return out.filter((a) => !retired.test(a.key)).sort((a, b) => rank[a.level] - rank[b.level]);
 }
 
 /** Just the counts, for anywhere that needs to say how bad things are without listing them. */
