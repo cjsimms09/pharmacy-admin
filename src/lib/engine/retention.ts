@@ -9,9 +9,13 @@
  * anything; the clock only says what may go and what must stay.
  *
  * The periods, as of 1 October 2026:
- * - Prescription and dispensing records, and the pharmacy's purchase invoices: five years in Kansas
- *   (K.A.R. 68-7-11; K.S.A. 65-1642). Federal DEA records are two years (21 CFR 1304.04), so the Kansas five applies
- *   to controlled-substance invoices, 222 forms, inventories and counts too.
+ * - Prescription and dispensing records: five years in Kansas (K.A.R. 68-7-11; K.S.A. 65-1642). Federal DEA records
+ *   are two years (21 CFR 1304.04), so the Kansas five applies to controlled-substance invoices, 222 forms,
+ *   inventories and counts too.
+ * - Purchase invoices: six years, because the DSCSA transaction information and statement ride on the invoice and
+ *   must be kept six years (21 U.S.C. 360eee-1(d)(1)(A)(iv)); Kansas's five is the shorter.
+ * - CQI records — the summaries, the incident reports, the reviews: five years (K.A.R. 68-19-1(e)), which is what
+ *   the register's own annual retention duty already attests to.
  * - HIPAA policies, training, business-associate agreements, notice-of-privacy acknowledgements, risk analyses:
  *   six years from creation or from when last in effect (45 CFR 164.316(b)(2)(i)).
  * - Training records: HIPAA's six years applies to any training record (45 CFR 164.316(b)(2)(i)); OSHA's three for
@@ -26,8 +30,7 @@
  * - Delivery invoices, driver records, supplier statements and credit memos: seven years with the books.
  * - PioneerRx's own exports (the claims, sales, on-hand and purchase reports the site reads): the pharmacy's record
  *   of what it dispensed, bought and billed; the longest rule that touches them is Part D's ten years.
- * Not written, because the rule is not sure: CQI records and incident reports under Kansas's program (two or three
- * years by state; Kansas not confirmed), self-inspection reports, immunisation administration records (Kansas
+ * Not written, because the rule is not sure: self-inspection reports, immunisation administration records (Kansas
  * reports to WebIZ; the pharmacy's own copy's period not confirmed), staff files after employment, and insurance
  * policies. Each of those is a question, asked once.
  */
@@ -36,7 +39,8 @@ export type RetentionRule = { kind: string; years: number | "never"; because: st
 export const RETENTION: RetentionRule[] = [
   { kind: "controlled_substance", years: 5, because: "Kansas keeps every controlled-substance record five years; the federal two is shorter", cite: "K.A.R. 68-7-11; 21 CFR 1304.04" },
   { kind: "prescription", years: 5, because: "Kansas prescription and dispensing records", cite: "K.A.R. 68-7-11; K.S.A. 65-1642" },
-  { kind: "purchase_invoice", years: 5, because: "the pharmacy's purchase records are pharmacy records in Kansas", cite: "K.A.R. 68-7-11" },
+  { kind: "purchase_invoice", years: 6, because: "the DSCSA transaction record rides on the invoice and is kept six years; Kansas's five is the shorter", cite: "21 U.S.C. 360eee-1(d)(1)(A)(iv); K.A.R. 68-7-11" },
+  { kind: "cqi", years: 5, because: "CQI summaries, incident reports and reviews, as the register's own retention duty attests", cite: "K.A.R. 68-19-1(e)" },
   { kind: "medicare_part_d", years: 10, because: "Part D claims, remittances and the contracts behind them", cite: "42 CFR 423.505(d), (i)(2)" },
   { kind: "hipaa", years: 6, because: "HIPAA policies, training, agreements and acknowledgements, from creation or last effect", cite: "45 CFR 164.316(b)(2)(i)" },
   { kind: "training", years: 6, because: "any training record: HIPAA's six years is the longer of the two that apply", cite: "45 CFR 164.316(b)(2)(i); 29 CFR 1910.1030(h)(2)" },
@@ -46,7 +50,7 @@ export const RETENTION: RetentionRule[] = [
   { kind: "supplier_paper", years: 7, because: "supplier statements, credit memos, delivery invoices: with the books", cite: "26 CFR 1.6001-1" },
 ];
 
-export const UNDECIDED_KINDS = ["cqi", "self_inspection", "immunisation_record", "staff_file", "insurance"] as const;
+export const UNDECIDED_KINDS = ["self_inspection", "immunisation_record", "staff_file", "insurance"] as const;
 
 /** The kind of record a document category is, or null where the table has no view. Categories are the documents table's own words. */
 export function kindOfCategory(category: string | null | undefined): string | null {

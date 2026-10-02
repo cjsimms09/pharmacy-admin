@@ -58,7 +58,7 @@ export async function decideClaim(fd: FormData): Promise<void> {
     });
   await audit({ action: "claim.decision", userId: user.id, userName: user.name, entity: "claim_leg", entityId: legKey, details: `${decision}${revisitOn ? ` until ${revisitOn}` : ""}${note ? `: ${note}` : ""}${existing ? ` (was ${existing.decision})` : ""}` });
   const payer = str(fd, "payer");
-  if (payer) await resolveByAnswer(`claims_due|${payer}`, now);
+  if (payer) await resolveByAnswer(`claims_due|${payer}|${now.slice(0, 7)}`, now);
   return finish(fd, "answer: claim decision");
 }
 

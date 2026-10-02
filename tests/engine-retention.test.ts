@@ -33,11 +33,22 @@ describe("the retention clock", () => {
   test("an exposure record is never destroyed", () => {
     assert.equal(retentionOf("osha_exposure_report", "1999-01-01", TODAY).state, "never");
   });
+  test("a CQI record is five years, as the register's own duty cites; an invoice six, for the DSCSA record on it", () => {
+    const c = retentionOf("cqi_summary", "2026-09-30", TODAY);
+    assert.equal(c.state, "keep");
+    if (c.state === "keep") assert.equal(c.until, "2031-09-30");
+    const i = retentionOf("invoice", "2026-09-04", TODAY);
+    assert.equal(i.state, "keep");
+    if (i.state === "keep") {
+      assert.equal(i.until, "2032-09-04");
+      assert.match(i.rule.cite, /360eee/);
+    }
+  });
   test("a kind the rule is not sure of is a question, never a period", () => {
-    const v = retentionOf("cqi_summary", "2026-09-30", TODAY);
+    const v = retentionOf("self_inspection_report", "2026-09-30", TODAY);
     assert.equal(v.state, "awaiting_decision");
     if (v.state === "awaiting_decision") {
-      assert.equal(v.kind, "cqi");
+      assert.equal(v.kind, "self_inspection");
       assert.match(v.question, /not sure/);
     }
     const u = retentionOf("something_new", "2026-09-30", TODAY);

@@ -101,6 +101,14 @@ export const CLOSURES: Record<string, Closure> = {
       "On {date} I checked the emergency kit for {period}. Epinephrine was present and in date, and the equipment " +
       "required to manage an adverse reaction was present and usable.",
   },
+  waste_contracts: {
+    kind: "attest",
+    minutes: 15,
+    statement:
+      "On {date} I confirmed for {period} that the pharmacy's contracts for pharmaceutical and hazardous waste and for " +
+      "the reverse distribution of controlled substances are in force, that the manifests and DEA Form 41s on file " +
+      "match the pick-ups made, and that no controlled substance was destroyed on the premises without one.",
+  },
   records_retention_review: {
     kind: "attest",
     minutes: 30,
@@ -484,6 +492,14 @@ export const OBLIGATION_SEEDS: ObligationSeed[] = [
     citation: "45 CFR 164.308(a)(7) contingency plan",
     cadence: "quarterly",
     firstDueInDays: 30,
+  },
+  {
+    key: "waste_contracts",
+    title: "Confirm the waste and reverse-distributor contracts and their manifests",
+    detail: "Expired and returned controlled substances leave only through a DEA-registered reverse distributor, with a Form 41 or the distributor's record for each; pharmaceutical and hazardous waste leaves under a contract and a manifest. Once a year, confirm the contracts are in force and the paper matches the pick-ups.",
+    citation: "21 CFR 1317.05 · 21 CFR 1317.15 · K.A.R. 28-31 (KDHE hazardous waste)",
+    cadence: "annual",
+    firstDueInDays: 90,
   },
   {
     key: "records_retention_review",

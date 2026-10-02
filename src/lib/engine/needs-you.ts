@@ -155,11 +155,13 @@ async function claimPots(today: string): Promise<Line[]> {
     const routeDays = route && typeof route.value.cycleDays === "number" ? (route.value.cycleDays as number) : null;
     const oldestAge = (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${e.oldest}T00:00:00Z`)) / 864e5;
     const href = `/v2/claims?payer=${encodeURIComponent(payer)}`;
+    /* The month in the id: a line a person answers never returns, and a payer's pot must — next month, with next month's claims. */
+    const month = today.slice(0, 7);
     /* A programme whose route and cycle are known is a pot inside its cycle: nothing to ask until the cycle has passed. */
     if (route && routeDays !== null && oldestAge <= routeDays) continue;
     if (!e.measured && e.cents >= 20_000_00 && oldestAge > 21) {
       out.push({
-        id: `claims_unmeasured|${payer}`,
+        id: `claims_unmeasured|${payer}|${month}`,
         kind: "claims_unmeasured",
         rank: 3,
         title: e.programme ? `${payer}, a manufacturer programme: ${money(e.cents)} on ${e.n} claims since ${e.oldest}` : `${payer}: ${money(e.cents)} billed since ${e.oldest}, no cycle measured yet`,
@@ -177,14 +179,14 @@ async function claimPots(today: string): Promise<Line[]> {
       });
     } else if (e.dueCents >= 500_00) {
       out.push({
-        id: `claims_due|${payer}`,
+        id: `claims_due|${payer}|${month}`,
         kind: "claims_due",
         rank: 3,
         title: e.cycleMin === e.cycleMax ? `${payer}: ${e.dueN} claims past its ${e.cycleMax}-day cycle, ${money(e.dueCents)}` : `${payer}: ${e.dueN} claims past their plans' cycles (${e.cycleMin}–${e.cycleMax} days), ${money(e.dueCents)}`,
         detail: `Nine in ten of their payments arrive within ${e.cycleMin === e.cycleMax ? `${e.cycleMax} days` : `${e.cycleMin} to ${e.cycleMax} days, by plan`} of the fill; these are older. ${e.n - e.dueN} more claims (${money(e.cents - e.dueCents)}) are still inside their cycle.`,
         amountCents: e.dueCents,
         href,
-        answers: [{ label: "Chase", action: "chase", params: { payer } }, { label: "Looked, they are coming", action: "wait", params: { payer } }],
+        answers: [{ label: "Chase", action: "chase", params: { payer } }, { label: "They pay later; ask again in a fortnight", action: "wait", params: { payer } }],
         rows: { payer, due: e.dueN, cycle: e.cycleMax },
       });
     }

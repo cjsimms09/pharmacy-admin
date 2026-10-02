@@ -76,6 +76,42 @@ export async function rereadDocument(fd: FormData): Promise<void> {
 }
 
 /** A line answered with "looked, leave it": settled for good, and said so in the log. */
+/**
+ * A payer's pot answered. "Wait" writes a wait on every open leg of that payer (claim_decisions, a fortnight for a
+ * measured payer, a month for one never measured) so the standing itself goes quiet and the pot comes back on the day
+ * named if nothing has arrived. "Chase" is the person's act; the line stays until the money does.
+ */
+export async function answerClaimPot(fd: FormData): Promise<void> {
+  const user = await requireManager();
+  const lineId = str(fd, "lineId");
+  const payer = str(fd, "payer");
+  const action = str(fd, "action");
+  if (!lineId || !payer || action !== "wait") {
+    revalidatePath("/v2/today");
+    return;
+  }
+  const { db, schema } = await import("@/db");
+  const { sql, eq } = await import("drizzle-orm");
+  const { newId } = await import("@/lib/crypto");
+  const { todayIso } = await import("@/lib/dates");
+  const today = todayIso();
+  const legs = (await db.all(sql`select leg_key, rx_number, fill_number, date_filled, bin, state from claim_standing where payer = ${payer} and state in ('due', 'unmeasured', 'programme', 'unpaid')`)) as { leg_key: string; rx_number: string; fill_number: number | null; date_filled: string; bin: string | null; state: string }[];
+  const days = legs.some((l) => l.state === "due") ? 14 : 30;
+  const revisitOn = new Date(Date.parse(`${today}T00:00:00Z`) + days * 864e5).toISOString().slice(0, 10);
+  const now = new Date().toISOString();
+  let written = 0;
+  for (const l of legs) {
+    if (l.state !== "due" && l.state !== "unmeasured") continue;
+    const existing = await db.query.claimDecisions.findFirst({ where: eq(schema.claimDecisions.legKey, l.leg_key) });
+    const values = { decision: "wait" as const, note: `From Today: they pay later. ${user.name}`, decidedBy: user.name, decidedAt: now, revisitOn, resolvedAt: null };
+    if (existing) await db.update(schema.claimDecisions).set(values).where(eq(schema.claimDecisions.id, existing.id));
+    else await db.insert(schema.claimDecisions).values({ id: newId(), legKey: l.leg_key, rxNumber: l.rx_number, fillNumber: l.fill_number, dateFilled: l.date_filled, bin: l.bin, ...values });
+    written++;
+  }
+  await audit({ action: "claim.wait_from_today", userId: user.id, userName: user.name, entity: "payer", entityId: payer, details: `${written} legs wait until ${revisitOn}` });
+  await settle(lineId, "answer: payer pot waits");
+}
+
 export async function acknowledgeLine(fd: FormData): Promise<void> {
   const user = await requireManager();
   const lineId = str(fd, "lineId");

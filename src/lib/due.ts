@@ -371,6 +371,36 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
     });
   }
 
+  // ── Pharmacy-level credentials the pharmacy must hold, with nothing on file at all ──
+  //
+  // The register's completeness (docs/REBUILD.md: "the complete duty register") turns on these being said as
+  // "nothing on file", not left silent: a renewal the site cannot see coming is the one that lapses. Each carries
+  // the rule that makes it required for a Kansas community pharmacy billing Part D and KMAP.
+  const PHARMACY_REQUIRED: [CredentialType, string][] = [
+    ["pharmacy_registration", "K.S.A. 65-1643: the Board's pharmacy registration, renewed every June"],
+    ["dea_registration", "21 CFR 1301.11: DEA registration, renewed every three years; the CSOS certificate expires with it"],
+    ["npi", "45 CFR 162.410: the NPI every claim carries"],
+    ["ncpdp", "the NCPDP provider number the switch and every PBM contract key on"],
+    ["kmap_enrollment", "K.A.R. 30-5-59: Kansas Medicaid enrollment, revalidated on the state's cycle"],
+    ["sales_tax_permit", "K.S.A. 79-3608: the retailer's sales tax registration for the tax remitted each month"],
+    ["workers_comp_insurance", "K.S.A. 44-505: workers' compensation cover for an employer above the payroll threshold"],
+    ["liability_insurance", "every PSAO and PBM agreement on file requires professional and general liability cover"],
+  ];
+  for (const [type, why] of PHARMACY_REQUIRED) {
+    if (creds.some((c) => !c.personId && c.type === type)) continue;
+    push({
+      id: `cred-missing-pharmacy-${type}`,
+      kind: "credential",
+      title: `${CREDENTIAL_LABEL[type]} — nothing on file for the pharmacy`,
+      personName: null,
+      personId: null,
+      citation: why,
+      dueOn: null,
+      action: "File the certificate, registration or policy with its expiry, or say it does not apply.",
+      href: "/licenses",
+    });
+  }
+
   // ── Pharmacy-level credentials (no person attached) ──
   for (const c of creds.filter((c) => !c.personId && c.expiresOn)) {
     push({

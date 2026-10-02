@@ -3,7 +3,7 @@ import { todayView, type TodayLine } from "@/lib/engine/read";
 import { RANK_WORDS, type Rank } from "@/lib/engine/rank";
 import { SEED_CATEGORIES } from "@/lib/expense-categories";
 import { todayIso } from "@/lib/dates";
-import { answerBankLine, rereadDocument, acknowledgeLine, closeMonthAction } from "./actions";
+import { answerBankLine, rereadDocument, acknowledgeLine, closeMonthAction, answerClaimPot } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +79,8 @@ function Line({ line }: { line: TodayLine }) {
   const rank = line.rank as Rank;
   const rows = (line.rows ?? {}) as { inboxItemId?: string; month?: string };
   /* "Looked, leave it" is offered where leaving it is a legitimate answer: never on a patient or board matter. */
-  const ack = line.kind === "feed_overdue" || line.kind === "claims_unmeasured" || line.kind === "claims_due" || line.kind === "proof_failed" || (line.kind === "alert" && rank >= 3);
+  const pot = line.kind === "claims_unmeasured" || line.kind === "claims_due";
+  const ack = line.kind === "feed_overdue" || line.kind === "proof_failed" || (line.kind === "alert" && rank >= 3);
   return (
     <li className="border-b border-line py-3 last:border-b-0">
       <div className="flex items-start gap-3">
@@ -107,6 +108,18 @@ function Line({ line }: { line: TodayLine }) {
               <input type="hidden" name="month" value={rows.month ?? ""} />
               <button type="submit" className="rounded-md bg-accent px-3 py-1 text-[13px] font-medium text-white hover:bg-accent-strong">
                 Close {rows.month}
+              </button>
+            </form>
+          ) : null}
+          {pot ? (
+            <form action={answerClaimPot} className="mt-2 flex flex-wrap items-center gap-2 text-[13px]">
+              <input type="hidden" name="lineId" value={line.id} />
+              <input type="hidden" name="payer" value={String((line.rows as { payer?: string } | null)?.payer ?? "")} />
+              <Link href={line.href ?? "/v2/claims"} className="rounded-md bg-accent px-3 py-1 font-medium text-white hover:bg-accent-strong">
+                {line.answers[0]?.label ?? "Open"}
+              </Link>
+              <button type="submit" name="action" value="wait" className="rounded-md border border-line bg-surface px-3 py-1 text-ink-2 hover:bg-ground">
+                {line.answers[1]?.label ?? "They pay later; ask again later"}
               </button>
             </form>
           ) : null}

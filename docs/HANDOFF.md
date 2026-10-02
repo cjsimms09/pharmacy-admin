@@ -90,6 +90,17 @@ Three things are new computation:
 - Actions: attest a duty (signed with a typed name), answer whether a duty applies, explain a reading, sign off a
   sensor's month (refused while any excursion is unexplained), log and resolve a discrepancy; re-read, teach, undo
   and sweep on Documents, and add a document by hand through the old door.
+- **Found after stage 4 shipped, fixed the same night.** A payer's pot on Today was keyed by the payer's name, and a
+  line a person answers never returns — so one "wait" on OptumRx would have silenced OptumRx for good. The id now
+  carries the month (`claims_due|OptumRx|2026-10`), and the pot's own answers exist: "Chase" opens the payer's due
+  scripts on Claims; "They pay later" writes a wait on every open leg of that payer (a fortnight where the payer is
+  measured, a month where never), so the standing itself goes quiet and comes back on the day named.
+- The duty register is complete to the spec's list: `waste_contracts` (annual attestation on the reverse-distributor
+  and waste contracts and their manifests) joins the seeds, and `dueList` names each of the pharmacy's own required
+  credentials that has nothing on file at all — registration, DEA, NPI, NCPDP, KMAP, sales tax permit, workers'
+  compensation, liability — with the rule that requires it. Live, five of the eight are not on file.
+- Retention corrected from the register's own text: CQI records five years (K.A.R. 68-19-1(e)); purchase invoices six,
+  because the DSCSA transaction record rides on the invoice (21 U.S.C. 360eee-1(d)(1)(A)(iv)).
 - Stage 5 (retire the old pages) has begun with its instrument: the gate is "a month with no visit to a retired
   page", and nothing had ever counted a visit. Migration 0137 adds `page_visits` (day, route, count); the old layout
   mounts `VisitBeacon`, which posts the path to `/api/visit`; the new nav carries the old pages behind "More". The
