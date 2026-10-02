@@ -964,7 +964,20 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
              * page: the solver proves every figure against the daily balances there and asks the owner
              * for the ones it cannot, which is a decision and not a thing the sweep makes for him.
              */
-            if (pdfWords !== null && !pdfWords.trim() && /bank\s*statement/i.test(subject) && docId) {
+            if (/adjustment[_\s-]*report/i.test(fileName) && /\.csv$/i.test(fileName) && docId) {
+              /*
+               * The reconciliation service's monthly adjustment report: the fees and adjustments payers took on
+               * remittances (adjustment-report.ts). The owner, 2 October 2026: "going to have this emailed to site once
+               * monthly, make sure it gets received and read correctly.." Read on arrival, refused in words if its
+               * lines do not add to its own total, and taken off revenue in each remittance's month.
+               */
+              const { fileAdjustmentReport } = await import("./adjustment-report");
+              const read = await fileAdjustmentReport(docId, buf.toString("utf8"), fileName, ctx.userName ?? "the mailbox");
+              routedAs = "adjustment_report";
+              routeResult = read.says;
+              counted = read.ok;
+              if (read.ok) result.imported++;
+            } else if (pdfWords !== null && !pdfWords.trim() && /bank\s*statement/i.test(subject) && docId) {
               try {
                 const { scanItemsForDocument } = await import("./ocr");
                 const { readRaw } = await import("./scanned-bank-statement");

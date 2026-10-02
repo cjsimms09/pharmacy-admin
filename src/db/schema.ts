@@ -252,6 +252,7 @@ export const DOCUMENT_CATEGORIES = [
   "remittance",
   /** The bank's statement, kept until it can be read in. */
   "bank_statement",
+  "adjustment_report",
   "insurance",
   "agreement",
   /**

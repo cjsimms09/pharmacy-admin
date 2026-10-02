@@ -175,7 +175,9 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
       i.basis === "cash"
         ? "Neither is on the cash account: a September sale is October's money, so cash revenue comes from what was banked."
         : tillRx > 0 && claimsRx > 0
-          ? `The summary's ${dollars(tillRx)} is counted; the claims' ${dollars(claimsRx)} is not added to it.`
+          ? claimsRx > tillRx
+            ? `The summary's ${dollars(tillRx)} is counted; the record's ${dollars(claimsRx)} is ${dollars(claimsRx - tillRx)} above it and not added — unexplained, being reconciled day by day.`
+            : `The summary's ${dollars(tillRx)} is counted; the claims' ${dollars(claimsRx)} is not added to it.`
           : tillRx > 0
             ? "Only the summary has a figure, and it is counted."
             : claimsRx > 0

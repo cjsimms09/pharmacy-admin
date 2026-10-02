@@ -123,6 +123,7 @@ export const DOCUMENT_CATEGORY_LABEL: Record<DocumentCategory, string> = {
   bill: "Vendor bill",
   remittance: "Remittance advice (835)",
   bank_statement: "Bank statement",
+  adjustment_report: "Adjustment report (payer fees on remittances)",
   license: "License / registration",
   cpr_card: "CPR card",
   immunization_training: "Immunization training certificate",

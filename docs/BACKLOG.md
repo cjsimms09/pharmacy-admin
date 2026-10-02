@@ -1165,3 +1165,9 @@ place, and an arithmetic check before anything is stored.
   what to do with statements, invoices, etc" · on the billed-against-booked card: "fix! these are the things that are
   annoying, dont know why its happening, have to read a novel to figure it out". What was done the same afternoon is in
   OPEN-ITEMS ("his three complaints"); what is still open is in HANDOFF.
+
+- **2 October, evening, his words:** "now way accural broke even?" · "are we sure we are calculating accural correctly??" ·
+  "did we include est rebates?" · "OTC Protis" · "also you say there have been no DIR fees, but that cant be true. DIR
+  fees are mostly proactive and at POS now. but there are 'adjustments' made.." · "No I am not having the adjustment
+  report emailed, just the OTC profit. we should already hjave all the info we need for adjustments on 835s..." What
+  each led to is in OPEN-ITEMS ("are we sure we are calculating accrual correctly??").

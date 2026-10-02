@@ -197,6 +197,20 @@ export const CATEGORIES: Category[] = [
     subjectHints: /inventory|on hand/i,
   },
   {
+    key: "otc_profit",
+    label: "The OTC profit report",
+    handling: "Filed for the front-of-shop margin. The owner is having it emailed monthly (2 October 2026); its reader is built on the first one that arrives.",
+    fileNameHints: /otc[_s-]*profit/i,
+    subjectHints: /otcs*profit/i,
+  },
+  {
+    key: "adjustment_report",
+    label: "An adjustment report from the reconciliation service",
+    handling: "Read line by line: the fees and adjustments payers took on remittances, taken off revenue in the remittance's month.",
+    fileNameHints: /adjustment[_\s-]*report/i,
+    subjectHints: /adjustment report/i,
+  },
+  {
     key: "bank_statement",
     label: "A bank statement",
     handling: "Read line by line: deposits banked, bills and invoices marked paid, every line remembered.",

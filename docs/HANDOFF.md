@@ -8,6 +8,15 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, 18:30: accrual is not settled, and he knows it.** The record of what was collected in September is $14,646.88
+  above the till; the account printed the till's revenue and the record's cost and kept its "NOT OK" check out of sight.
+  The month now says it in a sentence and the Checks card says it (profit-and-loss.ts, books-check.ts); the reconciliation
+  is day by day against sales_by_payment and is the first job tomorrow. Payer fees: the reconciliation service's
+  adjustment report is read (adjustment-report.ts) and filed for September ($363.40); the mailbox files one on arrival
+  (he says he will not email it; harmless) and the month checklist expects it; the real source is the 835s in ProviderPay,
+  which need his login — the monthly pull. The "OTC profit" report he will email monthly is recognised by name and
+  filed; build its reader on the first sample. Deploy at 19:07 by the session timer.
+
 - **2 October, 16:10: "do it", and the pull is the record.** On his word the morning pull reads the PioneerRx copy from
   15 August and keeps a fill filled in the books or collected in them (343 late-August fills collected in September,
   $56,137.63, written); a pull is judged a test by the later of fill and sale date (claims-backfill.ts). The pull now

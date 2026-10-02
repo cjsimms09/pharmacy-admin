@@ -448,6 +448,21 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
       const tillRx = remitCents + patientCents;
       const held = i.claimsRevenueCents + (i.costUnknownRevenueCents ?? 0);
       const beyond = tillRx - held;
+      /*
+       * The other direction, found 2 October 2026 once the record was complete: the fills collected in the month came
+       * to $14,646.88 more than the till, almost all on the patient side. The till's figure stays on the lines above
+       * and the record's cost stays below, so gross profit is understated by up to the gap until the two are
+       * reconciled day by day. Said here, because a check nobody sees is not a check.
+       */
+      if (beyond < 0) {
+        const patientGap = (i.claimsPatientCents ?? 0) - patientCents;
+        const remitGap = (i.claimsRemitCents ?? 0) - remitCents;
+        const side = (c: number, what: string) => `${what} ${formatCents(Math.abs(c))} ${c >= 0 ? "above" : "below"} the till's`;
+        caveats.push(
+          `The dispensing record says ${formatCents(held)} was collected for prescriptions this month; the till says ${formatCents(tillRx)}, ${formatCents(-beyond)} less — the record's ${side(patientGap, "patient money is")}, its ${side(remitGap, "plan money")}. ` +
+            `Revenue here is the till's and the cost is the record's, so gross profit is understated by up to ${formatCents(-beyond)} until the two are reconciled, day by day.`,
+        );
+      }
       if (beyond > 0) {
         revenue.push({
           label: "— less prescriptions the till sold that the dispensing record does not account for",
@@ -514,7 +529,7 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
   const offsets = byCategory(i.expenses, "revenue_offset");
   /* What the payers took at provider level on the remittances, measured from the 835s, in the month they took it. */
   if (i.remitFeesCents) {
-    offsets.push({ label: "Payer fees and recoupments taken on remittances", amountCents: i.remitFeesCents, note: "From the 835s' provider-level adjustments, in the month the payer took them." });
+    offsets.push({ label: "Payer fees and recoupments taken on remittances", amountCents: i.remitFeesCents, note: "From the 835s' provider-level adjustments and the reconciliation service's adjustment report, by the remittance's month, in the month the payer took them." });
   }
   const netRevenueCents = revenueCents - sum(offsets);
 
@@ -794,7 +809,9 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * site reads (remitFeesCents). So a month with none says so, as a measured fact, and asks nobody to type anything.
    */
   if (!i.remitFeesCents && !i.expenses.some((e) => e.kind === "revenue_offset")) {
-    caveats.push("No payer fees, concessions or recoupments appeared on this month's remittances, so none are taken out of revenue. Part D price concessions have been taken at the point of sale since 2024 and are already inside the paid amounts.");
+    caveats.push(
+      "Part D price concessions are taken at the point of sale, inside the paid amounts above. No fee or adjustment taken after the sale is on file for this month: none on an 835 the site holds, and no adjustment report from the reconciliation service covers it. File the month's adjustment report and the account takes them.",
+    );
   }
 
   const stockMovementCents = i.purchasesCents !== null && i.dispensedCostCents !== null ? i.purchasesCents - i.dispensedCostCents : null;
@@ -1143,10 +1160,16 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
    * file. Positive here means money the payer took.
    */
   const holdbackRows = (await db.all(sql`select substr(received_on, 1, 7) month, coalesce(sum(amount_cents), 0) cents from remittance_holdbacks where out_of_books = 0 group by 1`)) as { month: string; cents: number }[];
+  /* And the reconciliation service's adjustment report, where one is on file: the fees taken on remittances the site holds no 835 for (adjustment-report.ts). */
+  const holdbacks = new Map(holdbackRows.map((r) => [r.month, Number(r.cents)]));
+  const { adjustmentsByMonth } = await import("./adjustment-report");
+  const traced = (await db.all(sql`select distinct coalesce(trace_number, '') t, coalesce(reference, '') r from remittance_holdbacks`)) as { t: string; r: string }[];
+  const remittancesWith835 = new Set(traced.flatMap((x) => [x.t, x.r]).filter(Boolean));
+  for (const [month, cents] of await adjustmentsByMonth(remittancesWith835)) holdbacks.set(month, (holdbacks.get(month) ?? 0) + cents);
   return {
     basis,
     beforeBooksPaid: new Map(beforeBooksRows.map((r) => [r.month, Number(r.cents)])),
-    holdbacks: new Map(holdbackRows.map((r) => [r.month, Number(r.cents)])),
+    holdbacks,
     sales,
     cats,
     fills,
