@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { SuppliersView, RemitsView, SpendingView, DeliveriesView } from "@/lib/engine/read";
+import type { SuppliersView, RemitsView, SpendingView, DeliveriesView, PackView } from "@/lib/engine/read";
 import type { OrderFrom } from "@/lib/engine/order-from";
 import { atLocal } from "@/lib/dates";
 
@@ -282,6 +282,117 @@ export function DeliveriesTab({ v }: { v: DeliveriesView }) {
           <Link href="/deliveries" className="hover:underline">Enter today&apos;s deliveries</Link> · {v.trips} trips at {money(v.rateCents)}.
         </p>
       </div>
+    </section>
+  );
+}
+
+function PL({ title, pl }: { title: string; pl: PackView["accrual"] }) {
+  if (!pl) return <div className="rounded-lg border border-line bg-surface px-4 py-3 text-[13px] text-ink-2">{title}: not computed.</div>;
+  const row = (label: string, cents: number, strong = false) => (
+    <tr key={label}>
+      <td className={`${td} ${strong ? "font-medium" : ""}`}>{label}</td>
+      <td className={`${tdr} ${strong ? "font-medium" : ""}`}>{money(cents, true)}</td>
+    </tr>
+  );
+  return (
+    <div className="rounded-lg border border-line bg-surface px-4 py-2">
+      <h3 className="py-2 text-[11px] font-medium uppercase tracking-wide text-ink-3">{title}</h3>
+      <table className="w-full">
+        <tbody>
+          {row("Revenue", pl.revenueCents)}
+          {pl.offsets.map((l) => row(`  less ${l.label}`, -l.amountCents))}
+          {row("Net revenue", pl.netRevenueCents, true)}
+          {pl.costOfGoods.map((l) => row(`  ${l.label}`, -l.amountCents))}
+          {row(`Gross profit${pl.grossMarginPercent !== null ? ` (${pl.grossMarginPercent.toFixed(1)}%)` : ""}`, pl.grossProfitCents, true)}
+          {pl.operating.map((l) => row(`  ${l.label}`, -l.amountCents))}
+          {row("Net profit", pl.netProfitCents, true)}
+          {pl.otherCashOut.length ? pl.otherCashOut.map((l) => row(`  ${l.label} (not a cost)`, -l.amountCents)) : null}
+          {pl.cashChangeCents !== null ? row("Cash change", pl.cashChangeCents, true) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function PackTab({ v, monthWord }: { v: PackView; monthWord: string }) {
+  const f = v.figures;
+  const tone = (s: string) => (s === "agrees" || s === "received" ? "bg-accent-soft text-accent-strong" : s === "not_yet_due" || s === "estimated" || s === "stated" ? "bg-ground text-ink-2" : s === "not_measured" || s === "no_rate" ? "bg-ground text-ink-3" : "bg-warn-soft text-warn");
+  return (
+    <section className="space-y-3 print:space-y-2">
+      <div className="flex flex-wrap items-baseline gap-3">
+        <h2 className="text-[16px] font-semibold text-ink">Month-end pack · {monthWord}</h2>
+        <span className="text-[12px] text-ink-3">{v.closedAt ? `closed ${v.closedAt.slice(0, 10)}` : "not closed"} · for printing; it goes nowhere else</span>
+      </div>
+      <div className="rounded-lg border border-line bg-surface px-4 py-3 text-[13px]">
+        <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-3">The bank</h3>
+        {f && f.bankLines > 0 ? (
+          <p className="mt-1 text-ink">
+            Opening {money(f.bankOpeningCents)} + {money(f.bankInCents)} in − {money(f.bankOutCents)} out = closing {money(f.bankClosingCents)}, {f.bankLines} lines, {f.bankOpenLines} open. Receipts {money(f.receiptsCents)} against the bank: {f.receiptsGapSays ?? "gap unexplained"}.
+          </p>
+        ) : (
+          <p className="mt-1 text-ink-2">No bank statement on file for the month.</p>
+        )}
+        <ul className="mt-2 space-y-0.5 text-[12.5px]">
+          {v.proofs.map((p) => (
+            <li key={p.proof} className="flex items-start gap-2">
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${p.passed ? "bg-accent-soft text-accent-strong" : "bg-crit-soft text-crit"}`}>{p.passed ? "proven" : "not yet"}</span>
+              <span className="text-ink-2">{p.says}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <PL title="The accrual account" pl={v.accrual} />
+        <PL title="The cash account" pl={v.cash} />
+      </div>
+      {v.bridge.bankChangeCents !== null && v.bridge.cashChangeCents !== null ? (
+        <div className="rounded-lg border border-line bg-surface px-4 py-3 text-[13px]">
+          <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-3">The bank is not the cash account</h3>
+          <p className="mt-1 text-ink">
+            The bank moved {money(v.bridge.bankChangeCents, true)} over the month; the cash account says {money(v.bridge.cashChangeCents, true)}. By your rule, what the bank paid for purchases made before the books began is counted on neither basis: {money(v.bridge.beforeBooksCents, true)} this month.
+            {v.bridge.unplacedCents ? ` ${money(v.bridge.unplacedCents, true)} is on lines not yet placed.` : ""}
+            {v.bridge.notedCents ? ` ${money(v.bridge.notedCents, true)} is noted and not booked.` : ""}
+            {v.bridge.receiptsGapCents ? ` Receipts the bank has not seen yet: ${money(v.bridge.receiptsGapCents, true)}, named above.` : ""}
+            {(() => {
+              const named = v.bridge.cashChangeCents! + v.bridge.beforeBooksCents + v.bridge.unplacedCents + v.bridge.notedCents - (v.bridge.receiptsGapCents ?? 0);
+              const rest = v.bridge.bankChangeCents! - named;
+              return Math.abs(rest) >= 100 ? ` ${money(rest, true)} between the two is not named by any of those.` : " Those name the whole difference.";
+            })()}
+          </p>
+        </div>
+      ) : null}
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg border border-line bg-surface px-4 py-3 text-[13px]">
+          <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-3">The payers, on the month&apos;s fills</h3>
+          <p className="mt-1 text-ink">
+            {v.claims.legs} claim legs; {v.claims.paidLegs} paid; {money(v.claims.owedCents)} still owed, of which {money(v.claims.dueCents)} past its plan&apos;s cycle; {v.claims.shortLegs} paid short, {money(v.claims.shortCents)}.
+          </p>
+        </div>
+        <div className="rounded-lg border border-line bg-surface px-4 py-3 text-[13px]">
+          <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-3">Compliance at month end</h3>
+          <p className="mt-1 text-ink">
+            {v.compliance.missed} duties missed, {v.compliance.partial} partly done. CQI {v.compliance.cqi}. Controlled substances: {v.compliance.cs}.
+          </p>
+        </div>
+      </div>
+      <div className="rounded-lg border border-line bg-surface px-4 py-3 text-[13px]">
+        <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-3">Sales tax</h3>
+        <p className="mt-1 flex items-start gap-2 text-ink">
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${tone(v.salesTax.state)}`}>{v.salesTax.state.replace(/_/g, " ")}</span>
+          <span>{v.salesTax.says}</span>
+        </p>
+      </div>
+      <div className="rounded-lg border border-line bg-surface px-4 py-3 text-[13px]">
+        <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-3">Wholesaler rebates</h3>
+        {v.rebates.length === 0 ? <p className="mt-1 text-ink-2">No purchases on file for the month.</p> : null}
+        {v.rebates.map((r) => (
+          <p key={r.supplierId} className="mt-1 flex items-start gap-2 text-ink">
+            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${tone(r.state)}`}>{r.state.replace(/_/g, " ")}</span>
+            <span>{r.says}</span>
+          </p>
+        ))}
+      </div>
+      <p className="text-[12.5px] text-ink-3">Still open across the site: {v.open.bankLines} bank lines this month, {v.open.questions} questions on Today. Everything above is what the engine already proved; nothing is computed on this page.</p>
     </section>
   );
 }

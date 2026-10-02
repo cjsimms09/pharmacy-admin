@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { moneyView, suppliersView, remitsView, spendingView, deliveriesView } from "@/lib/engine/read";
+import { moneyView, suppliersView, remitsView, spendingView, deliveriesView, packView } from "@/lib/engine/read";
 import { readOrderFrom } from "@/lib/engine/order-from";
-import { SuppliersTab, OrderFromTab, RemitsTab, SpendingTab, DeliveriesTab } from "./tabs";
+import { SuppliersTab, OrderFromTab, RemitsTab, SpendingTab, DeliveriesTab, PackTab } from "./tabs";
 import { SEED_CATEGORIES } from "@/lib/expense-categories";
 import { todayIso } from "@/lib/dates";
 import { answerMoneyLine, closeMonthFromMoney } from "./actions";
@@ -29,6 +29,7 @@ const TABS = [
   ["remits", "Remits"],
   ["spending", "Spending"],
   ["deliveries", "Deliveries"],
+  ["pack", "Month-end"],
   ["close", "Close"],
 ] as const;
 
@@ -119,6 +120,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const remits = tab === "remits" ? await remitsView(month) : null;
   const spending = tab === "spending" ? await spendingView(month) : null;
   const deliveries = tab === "deliveries" ? await deliveriesView(month) : null;
+  const pack = tab === "pack" ? await packView(month, today) : null;
 
   return (
     <div className="space-y-5">
@@ -231,6 +233,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
       {tab === "remits" && remits ? <RemitsTab v={remits} /> : null}
       {tab === "spending" && spending ? <SpendingTab v={spending} /> : null}
       {tab === "deliveries" && deliveries ? <DeliveriesTab v={deliveries} /> : null}
+      {tab === "pack" && pack ? <PackTab v={pack} monthWord={monthWord(month)} /> : null}
 
       {tab === "close" ? (
         <section className="space-y-3">

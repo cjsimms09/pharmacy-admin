@@ -101,6 +101,16 @@ Three things are new computation:
   compensation, liability — with the rule that requires it. Live, five of the eight are not on file.
 - Retention corrected from the register's own text: CQI records five years (K.A.R. 68-19-1(e)); purchase invoices six,
   because the DSCSA transaction record rides on the invoice (21 U.S.C. 360eee-1(d)(1)(A)(iv)).
+- **The three items the spec listed as "the data already supports" are built, under Money · Month-end:**
+  `engine/sales-tax.ts` (collected from the monthly System Sales Summary, else the days read; drafted under
+  "Sales tax remitted" in the month after; four states, and a draft far from the tax collected is called another
+  tax on the same account, not an over-payment — on 1 September two Department of Revenue drafts totalled $1,166.67
+  against roughly $435 of retail tax a month); `engine/rebates.ts` (the site's estimate at the contract rates, the
+  wholesaler's statement posted to the books, the credit on the bank, each a state; McKesson's September estimate is
+  $15,625.86 and the statement is expected by 20 October); and `packView` in `engine/read.ts` — the month-end pack,
+  one printable page of what the engine already proved, with a bridge from the cash account to the bank: in
+  September the bank fell $30,300.06 while the cash account says +$122,833.00, and $139,144.24 of that is bank
+  debits for purchases made before the books, counted on neither basis by his rule.
 - Stage 5 (retire the old pages) has begun with its instrument: the gate is "a month with no visit to a retired
   page", and nothing had ever counted a visit. Migration 0137 adds `page_visits` (day, route, count); the old layout
   mounts `VisitBeacon`, which posts the path to `/api/visit`; the new nav carries the old pages behind "More". The

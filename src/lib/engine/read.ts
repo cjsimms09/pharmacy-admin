@@ -630,3 +630,89 @@ export async function documentsView(today: string): Promise<DocumentsView> {
     counts: { documents: docs.length, categories: new Set(docs.map((d) => d.category ?? "")).size, last30: docs.filter((d) => (d.uploadedAt ?? "") >= monthAgo).length },
   };
 }
+
+/* ───────────────────────────── Month-end pack ───────────────────────────── */
+
+export type PackView = {
+  month: string;
+  figures: Awaited<ReturnType<typeof moneyView>>["month"];
+  proofs: { proof: string; passed: boolean; says: string }[];
+  accrual: import("../profit-and-loss").MonthlyPL | null;
+  cash: import("../profit-and-loss").MonthlyPL | null;
+  salesTax: import("./sales-tax").TaxMonth;
+  rebates: import("./rebates").RebateMonth[];
+  claims: { legs: number; owedCents: number; dueCents: number; paidLegs: number; shortLegs: number; shortCents: number };
+  compliance: { missed: number; partial: number; cqi: string; cs: string };
+  open: { bankLines: number; questions: number };
+  closedAt: string | null;
+  /** Why the cash account and the bank are not the same figure: what the bank paid that the books, by his rule, count nowhere. */
+  bridge: { bankChangeCents: number | null; cashChangeCents: number | null; beforeBooksCents: number; unplacedCents: number; notedCents: number; receiptsGapCents: number | null };
+};
+
+/**
+ * The month-end pack: one page he can print, never sent anywhere. The month's bank to the cent and the receipts gap
+ * named; the two accounts, accrual and cash; what the payers still owe on the month's fills; sales tax collected
+ * against remitted; the wholesaler rebates expected, stated and received; where compliance stood; and what is still
+ * open. Everything on it is a lookup of what the engine already proved; nothing is computed here.
+ */
+export async function packView(month: string, today: string): Promise<PackView> {
+  const [m, pl, tax, reb, cs, compliance, standing, openLines, held] = await Promise.all([
+    moneyView(month),
+    import("../profit-and-loss"),
+    import("./sales-tax").then((x) => x.salesTaxMonths(today, [month])),
+    import("./rebates").then((x) => x.rebateMonths(today, [month])),
+    import("../compliance-status").then((x) => x.complianceSummary()).catch(() => null),
+    import("../compliance"),
+    db.all(sql`select state, short_cents cents, decision from claim_standing where date_filled >= ${month + "-01"} and date_filled <= ${new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10)}`) as Promise<{ state: string; cents: number; decision: string | null }[]>,
+    db.all(sql`select count(*) n from needs_you where resolved_at is null`) as Promise<{ n: number }[]>,
+    db.query.monthStatus.findFirst({ where: (t, { eq }) => eq(t.month, month) }),
+  ]);
+  const kinds = (await db.all(sql`select placed_as kind, coalesce(sum(amount_cents), 0) cents from bank_lines where "on" >= ${month + "-01"} and "on" <= ${new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10)} and placed_as in ('before_books', 'unplaced', 'noted') group by 1`)) as { kind: string; cents: number }[];
+  const kind = (k: string) => kinds.find((x) => x.kind === k)?.cents ?? 0;
+  const quiet = async <T,>(f: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await f();
+    } catch {
+      return null;
+    }
+  };
+  const [accrual, cash, cqi, csInv] = await Promise.all([quiet(() => pl.monthlyAccount(month, "accrual")), quiet(() => pl.monthlyAccount(month, "cash")), quiet(() => compliance.cqiSnapshot()), quiet(() => compliance.csInventoryStatus())]);
+  const { OPEN_STATES, TERMINAL_DECISIONS } = await import("./claims");
+  const claims = { legs: standing.length, owedCents: 0, dueCents: 0, paidLegs: 0, shortLegs: 0, shortCents: 0 };
+  for (const r of standing) {
+    const terminal = TERMINAL_DECISIONS.has(r.decision ?? "");
+    if (OPEN_STATES.has(r.state as never) && !terminal) claims.owedCents += r.cents;
+    if (r.state === "due" && !terminal) claims.dueCents += r.cents;
+    if (r.state === "paid" || r.state === "short" || r.state === "over") claims.paidLegs++;
+    if (r.state === "short" && !terminal) {
+      claims.shortLegs++;
+      claims.shortCents += r.cents;
+    }
+  }
+  return {
+    month,
+    figures: m.month,
+    proofs: m.proofs.map((p) => ({ proof: p.proof, passed: p.passed, says: p.says })),
+    accrual,
+    cash,
+    salesTax: tax[0],
+    rebates: reb,
+    claims,
+    compliance: {
+      missed: cs?.missed.length ?? 0,
+      partial: cs?.partial.length ?? 0,
+      cqi: cqi ? `${cqi.label}: ${cqi.status ?? "not started"}, due ${cqi.dueOn ?? "—"}` : "not read",
+      cs: csInv ? (csInv.last ? `last inventory ${csInv.last}, next due ${csInv.dueOn}` : "no inventory on file") : "not read",
+    },
+    open: { bankLines: m.month?.bankOpenLines ?? 0, questions: openLines[0]?.n ?? 0 },
+    closedAt: held?.closedAt ?? null,
+    bridge: {
+      bankChangeCents: m.month && m.month.bankOpeningCents !== null && m.month.bankClosingCents !== null ? m.month.bankClosingCents - m.month.bankOpeningCents : null,
+      cashChangeCents: cash?.cashChangeCents ?? null,
+      beforeBooksCents: kind("before_books"),
+      unplacedCents: kind("unplaced"),
+      notedCents: kind("noted"),
+      receiptsGapCents: m.month?.receiptsGapCents ?? null,
+    },
+  };
+}
