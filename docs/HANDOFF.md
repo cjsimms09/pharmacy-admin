@@ -90,8 +90,12 @@ Three things are new computation:
 - Actions: attest a duty (signed with a typed name), answer whether a duty applies, explain a reading, sign off a
   sensor's month (refused while any excursion is unexplained), log and resolve a discrepancy; re-read, teach, undo
   and sweep on Documents, and add a document by hand through the old door.
-- Stage 5 (retire the old pages) is next. The old pages still carry: the inventory page's hard-copy warning, the
-  POA's capacity recitals and the daily pharmacist log statement, none of which has a library behind it yet.
+- Stage 5 (retire the old pages) has begun with its instrument: the gate is "a month with no visit to a retired
+  page", and nothing had ever counted a visit. Migration 0137 adds `page_visits` (day, route, count); the old layout
+  mounts `VisitBeacon`, which posts the path to `/api/visit`; the new nav carries the old pages behind "More". The
+  month runs from 1 October 2026. The old pages still carry three things with no library behind them: the inventory
+  page's hard-copy warning, the POA's capacity recitals and the daily pharmacist log statement — extract before
+  deleting those pages.
 - **A migration file needs `--> statement-breakpoint` between statements** or the migrator runs only the first;
   0133 and 0134 were written without and had to be finished by hand. Every file from here carries the markers.
 - Files the next stages will touch: `src/app/(site)/*` (new screens), `src/lib/engine/*`. The old pages are

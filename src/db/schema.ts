@@ -3957,3 +3957,18 @@ export const claimStanding = sqliteTable(
   },
   (t) => [index("claim_standing_payer_idx").on(t.payer), index("claim_standing_state_idx").on(t.state), index("claim_standing_filled_idx").on(t.dateFilled), index("claim_standing_leg_idx").on(t.legKey)],
 );
+
+/**
+ * A visit to an old page, counted by day, so stage 5 of the rebuild can retire a page only after a month nobody
+ * needed it (docs/REBUILD.md). The new screens are not counted.
+ */
+export const pageVisits = sqliteTable(
+  "page_visits",
+  {
+    day: text("day").notNull(),
+    path: text("path").notNull(),
+    count: integer("count").notNull().default(0),
+    lastAt: text("last_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.path] })],
+);

@@ -10,6 +10,7 @@ import { Crumbs } from "@/components/crumbs";
 import { logo } from "@/lib/branding";
 import { getSettings } from "@/lib/settings";
 import { PublicAccessBanner } from "@/components/public-access-banner";
+import { VisitBeacon } from "@/components/visit-beacon";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   noteRequest();
@@ -27,6 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen">
       {/* Above everything, including the pharmacy's own name: nothing on this page matters more. */}
       <PublicAccessBanner />
+      <VisitBeacon />
       {/*
         The head of the site: the pharmacy's own mark, six words, the search, and the person.
 
