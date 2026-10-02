@@ -128,21 +128,28 @@ async function alertLines(): Promise<Line[]> {
  */
 async function claimPots(today: string): Promise<Line[]> {
   const cycles = await payerCycles();
-  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.remit_cents cents, julianday(${today}) - julianday(c.date_filled) age, c.date_filled filled from claims c where c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; pcn: string | null; cents: number; age: number; filled: string }[];
+  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.bin bin, c.remit_cents cents, julianday(${today}) - julianday(c.date_filled) age, c.date_filled filled from claims c where c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; pcn: string | null; bin: string | null; cents: number; age: number; filled: string }[];
   /*
    * A manufacturer programme is not a plan. The owner, 1 October 2026, of DST / ConnectiveRx (PCN CNRX, every claim
    * Wegovy): "dst IS a copay card!!!" It pays on its own terms and by its own route, which the site learns from the
    * first payment; until then the pot is said as a programme's, never as a plan's late money.
    */
   const programme = (payer: string, pcn: string | null) => /cnrx|connectiverx|copay|voucher|redsail|veridikal|dst pharmacy/i.test(`${payer} ${pcn ?? ""}`);
-  const pots = new Map<string, { n: number; cents: number; dueN: number; dueCents: number; oldest: string; cycle: number | null; sample: number; programme: boolean; pcn: string | null }>();
+  /* The pot is the payer's; each claim is judged by its own plan group's cycle (cycles.ts), and the pot remembers the range it used. */
+  const pots = new Map<string, { n: number; cents: number; dueN: number; dueCents: number; oldest: string; cycle: number | null; cycleMin: number | null; cycleMax: number | null; sample: number; programme: boolean; pcn: string | null }>();
   for (const u of unpaid) {
     const cycle = cycleDays(cycles, u.payer);
-    const e = pots.get(u.payer) ?? { n: 0, cents: 0, dueN: 0, dueCents: 0, oldest: u.filled, cycle, sample: cycles.get(u.payer)?.n ?? 0, programme: programme(u.payer, u.pcn), pcn: u.pcn };
+    const own = cycleDays(cycles, u.payer, u.pcn, u.bin);
+    const e = pots.get(u.payer) ?? { n: 0, cents: 0, dueN: 0, dueCents: 0, oldest: u.filled, cycle, cycleMin: null, cycleMax: null, sample: cycles.get(u.payer)?.n ?? 0, programme: programme(u.payer, u.pcn), pcn: u.pcn };
     e.n++;
     e.cents += u.cents;
     if (u.filled < e.oldest) e.oldest = u.filled;
-    if (cycle !== null && u.age > cycle) { e.dueN++; e.dueCents += u.cents; }
+    if (own !== null && u.age > own) {
+      e.dueN++;
+      e.dueCents += u.cents;
+      e.cycleMin = e.cycleMin === null ? own : Math.min(e.cycleMin, own);
+      e.cycleMax = e.cycleMax === null ? own : Math.max(e.cycleMax, own);
+    }
     pots.set(u.payer, e);
   }
   const { rules } = await import("./rules");
@@ -180,12 +187,12 @@ async function claimPots(today: string): Promise<Line[]> {
         id: `claims_due|${payer}`,
         kind: "claims_due",
         rank: 3,
-        title: `${payer}: ${e.dueN} claims past its ${e.cycle}-day cycle, ${money(e.dueCents)}`,
-        detail: `Nine in ten of their payments arrive within ${e.cycle} days of the fill; these are older. ${e.n - e.dueN} more claims (${money(e.cents - e.dueCents)}) are still inside the cycle.`,
+        title: e.cycleMin === e.cycleMax ? `${payer}: ${e.dueN} claims past its ${e.cycleMax}-day cycle, ${money(e.dueCents)}` : `${payer}: ${e.dueN} claims past their plans' cycles (${e.cycleMin}–${e.cycleMax} days), ${money(e.dueCents)}`,
+        detail: `Nine in ten of their payments arrive within ${e.cycleMin === e.cycleMax ? `${e.cycleMax} days` : `${e.cycleMin} to ${e.cycleMax} days, by plan`} of the fill; these are older. ${e.n - e.dueN} more claims (${money(e.cents - e.dueCents)}) are still inside their cycle.`,
         amountCents: e.dueCents,
         href: "/payers/waiting",
         answers: [{ label: "Chase", action: "chase", params: { payer } }, { label: "Looked, they are coming", action: "wait", params: { payer } }],
-        rows: { payer, due: e.dueN, cycle: e.cycle },
+        rows: { payer, due: e.dueN, cycle: e.cycleMax },
       });
     }
   }

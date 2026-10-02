@@ -110,12 +110,12 @@ export async function computeMonth(month: string, today: string): Promise<MonthF
 
   /* What the payers owe on the month's fills, and how much of it is past the payer's own measured cycle. */
   const cycles = await payerCycles();
-  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.remit_cents cents, julianday(${today}) - julianday(c.date_filled) age from claims c where c.date_filled >= ${from} and c.date_filled <= ${to} and c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; cents: number; age: number }[];
+  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.bin bin, c.remit_cents cents, julianday(${today}) - julianday(c.date_filled) age from claims c where c.date_filled >= ${from} and c.date_filled <= ${to} and c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; pcn: string | null; bin: string | null; cents: number; age: number }[];
   let arUnpaid = 0;
   let arDue = 0;
   for (const u of unpaid) {
     arUnpaid += u.cents;
-    const days = cycleDays(cycles, u.payer);
+    const days = cycleDays(cycles, u.payer, u.pcn, u.bin);
     if (days !== null && u.age > days) arDue += u.cents;
   }
 

@@ -2,7 +2,7 @@ import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { readBankDescriptor } from "../bank-descriptors";
 import { SITE_STARTS_ON } from "../books-start";
-import { payerCycles, cycleDays, type Cycle } from "./cycles";
+import { payerCycles, cycleDays, typicalDays, type CycleSource } from "./cycles";
 import { openStatementDebits } from "./statement-debits";
 import { rules } from "./rules";
 
@@ -123,15 +123,17 @@ export function projectSuppliers(history: { on: string; amountCents: number; cou
   return out;
 }
 
-export function projectClaims(unpaid: { payer: string; cents: number; filled: string; programmeCycleDays?: number | null }[], cycles: Map<string, Cycle>, from: string, to: string): Flow[] {
+export function projectClaims(unpaid: { payer: string; pcn?: string | null; bin?: string | null; cents: number; filled: string; programmeCycleDays?: number | null }[], cycles: CycleSource, from: string, to: string): Flow[] {
   const byDay = new Map<string, Map<string, number>>();
   for (const u of unpaid) {
-    const c = cycles.get(u.payer);
-    const wait = u.programmeCycleDays ?? (c && c.n >= 5 ? c.p50 : null);
+    const wait = u.programmeCycleDays ?? typicalDays(cycles, u.payer, u.pcn, u.bin);
     if (wait === null) continue;
     let day = addDays(u.filled, wait);
-    /* Past its typical day: expected by the slowest one in ten; past that too: counted tomorrow, once. */
-    if (day < from && !u.programmeCycleDays && c) day = addDays(u.filled, c.p90);
+    /* Past its typical day: expected by the slowest one in ten of its plan group; past that too: counted tomorrow, once. */
+    if (day < from && !u.programmeCycleDays) {
+      const slow = cycleDays(cycles, u.payer, u.pcn, u.bin);
+      if (slow !== null) day = addDays(u.filled, slow);
+    }
     if (day < from) day = from;
     if (day > to) continue;
     const m = byDay.get(day) ?? new Map<string, number>();
@@ -244,10 +246,10 @@ export async function computeCashAhead(today: string): Promise<{ days: Day[]; fr
   /* Payers: every unpaid claim on the day its payer typically pays; programmes on their known cycle. */
   const cycles = await payerCycles();
   const routes = await rules("programme_route");
-  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.remit_cents cents, c.date_filled filled from claims c where c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; pcn: string | null; cents: number; filled: string }[];
+  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.bin bin, c.remit_cents cents, c.date_filled filled from claims c where c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; pcn: string | null; bin: string | null; cents: number; filled: string }[];
   const withRoutes = unpaid.map((u) => {
     const r = routes.find((x) => new RegExp(x.key, "i").test(`${u.payer} ${u.pcn ?? ""}`));
-    return { payer: u.payer, cents: u.cents, filled: u.filled, programmeCycleDays: r && typeof r.value.cycleDays === "number" ? (r.value.cycleDays as number) : null };
+    return { payer: u.payer, pcn: u.pcn, bin: u.bin, cents: u.cents, filled: u.filled, programmeCycleDays: r && typeof r.value.cycleDays === "number" ? (r.value.cycleDays as number) : null };
   });
   flows.push(...projectClaims(withRoutes, cycles, from, to));
   const measured = [...cycles].filter(([, c]) => c.n >= 5).length;
