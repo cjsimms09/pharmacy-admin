@@ -42,7 +42,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-3 text-[13px] text-ink-3">
-            <Link href="/" className="rounded-md px-2 py-1 hover:bg-ground hover:text-ink" title="The old pages, until each one's job is on a new screen">
+            <Link href="/dashboard" className="rounded-md px-2 py-1 hover:bg-ground hover:text-ink" title="The old pages, until each one's job is on a new screen">
               More
             </Link>
             <Link href="/settings" aria-label="Settings" className="rounded-md px-2 py-1 hover:bg-ground hover:text-ink">
