@@ -1,7 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { isRetired, RETIRED } from "../src/lib/retired";
+import { isRetired, RETIRED, RETIRED_SOURCES, redirectsForRetired } from "../src/lib/retired";
 import { NAV } from "../src/lib/nav";
 import { familyTabs } from "../src/lib/families";
 import { WARM_STEPS } from "../src/lib/warm-policy";
@@ -36,15 +35,18 @@ describe("the pages retired on 2 October 2026", () => {
     for (const key of ["buyListNow", "minimumsNow", "drugProfitNow", "overNadac28", "overNadac7", "floorReview", "leanShelfNow", "productsExtrasNow", "planRegister", "nadacCoverage", "productLedger"]) assert.equal(WARM_STEPS.some((s) => s.key === key), false, key);
   });
 
-  test("the redirect's matcher catches one address under every retired rule, and nothing kept", () => {
-    const src = readFileSync("src/middleware.ts", "utf8");
-    const matchers = [...src.matchAll(/"(\/[^"]+)"/g)].map((m) => new RegExp("^" + m[1].replace(/\/:path\*$/, "(/.*)?").replace(/:id/g, "[^/]+") + "$"));
+  test("the config redirects catch one address under every retired rule, and nothing kept", () => {
+    const matchers = RETIRED_SOURCES.map((m) => new RegExp("^" + m.replace(/\/:path\*$/, "(/.*)?").replace(/:id/g, "[^/]+") + "$"));
+    for (const r of redirectsForRetired()) {
+      assert.equal(r.permanent, false);
+      assert.match(r.destination, /^\/retired\?from=/);
+    }
     const samples = ["/purchasing/shelf", "/nadac", "/inventory/returns", "/money/found", "/claims/appeals", "/claims/floor", "/plans", "/payers/plans", "/payers/performance", "/payers/networks", "/payers/contracts/abc", "/payers/sort", "/tools/check", "/tools/data-health", "/reports", "/settings/features", "/v2/today"];
     assert.equal(samples.length, RETIRED.length + 6, "one sample per rule, and one per branch of the rules that fork");
     for (const s of samples) {
       assert.ok(isRetired(s), `${s} should be retired`);
-      assert.ok(matchers.some((m) => m.test(s)), `middleware does not redirect ${s}`);
+      assert.ok(matchers.some((m) => m.test(s)), `no redirect for ${s}`);
     }
-    for (const s of ["/money", "/money/bank-review", "/suppliers/x", "/tools/pioneer-sql", "/claims", "/payers", "/inventory/invoices"]) assert.ok(!matchers.some((m) => m.test(s)), `middleware wrongly redirects ${s}`);
+    for (const s of ["/money", "/money/bank-review", "/suppliers/x", "/tools/pioneer-sql", "/claims", "/payers", "/inventory/invoices"]) assert.ok(!matchers.some((m) => m.test(s)), `wrongly redirects ${s}`);
   });
 });

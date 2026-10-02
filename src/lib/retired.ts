@@ -24,6 +24,37 @@ export const RETIRED: { test: RegExp; area: string }[] = [
   { test: /^\/v2(\/|$)/, area: "the new site's screens" },
 ];
 
+/**
+ * The same list as Next.js path patterns, for next.config.ts `redirects()`: a retired address lands on /retired.
+ *
+ * Plain config redirects, not middleware. A middleware file made the build compile the instrumentation file for the
+ * edge runtime as well, and the mailbox's IMAP library has no 'stream' there: "Module not found: Can't resolve
+ * 'stream'", and the pharmacy had no site for twenty minutes on 2 October 2026. Config redirects need no runtime.
+ */
+export const RETIRED_SOURCES: string[] = [
+  "/purchasing/:path*",
+  "/nadac/:path*",
+  "/inventory/returns/:path*",
+  "/money/found/:path*",
+  "/claims/appeals/:path*",
+  "/claims/floor/:path*",
+  "/plans/:path*",
+  "/payers/plans/:path*",
+  "/payers/performance/:path*",
+  "/payers/networks/:path*",
+  "/payers/contracts/:path*",
+  "/payers/sort/:path*",
+  "/tools/check/:path*",
+  "/tools/data-health/:path*",
+  "/reports/:path*",
+  "/settings/features/:path*",
+  "/v2/:path*",
+];
+
+export function redirectsForRetired(): { source: string; destination: string; permanent: false }[] {
+  return RETIRED_SOURCES.map((source) => ({ source, destination: `/retired?from=${encodeURIComponent(source.replace(/\/:path\*$/, ""))}`, permanent: false }));
+}
+
 export function isRetired(pathname: string): boolean {
   return RETIRED.some((r) => r.test.test(pathname));
 }

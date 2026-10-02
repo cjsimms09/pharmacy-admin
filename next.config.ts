@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { redirectsForRetired } from "./src/lib/retired";
 
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
@@ -82,6 +83,10 @@ const nextConfig: NextConfig = {
     webpackBuildWorker: false,
   },
 
+  /* The pages retired on 2 October 2026 land on one sentence (src/lib/retired.ts). */
+  async redirects() {
+    return redirectsForRetired();
+  },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },
