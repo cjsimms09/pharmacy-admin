@@ -5,10 +5,10 @@ import { type MatchContext } from "./bank-statement";
 import { unpaid, vendors } from "./expenses";
 import { allSuppliers } from "./suppliers-registry";
 import { CARD_STATEMENT_BILL } from "./card-statement";
-import { withinWindow } from "./deposit-gate";
 import { cadences } from "./draw-cadence-store";
 import { chequeExpectations } from "./cheque-expectations";
 import { openStatementDebits } from "./engine/statement-debits";
+import { remitStanding } from "./engine/remit-standing";
 import { SITE_STARTS_ON } from "./books-start";
 
 /**
@@ -81,25 +81,10 @@ export async function matchContext(months: string[] = []): Promise<MatchContext>
   /* PioneerRx receiving, as payables: the pool that actually covers the deliveries. */
   const receiving = await db.query.pioneerPurchases.findMany({ columns: { id: true, invoiceNumber: true, supplier: true, totalCents: true, invoiceDate: true } });
 
-  /*
-   * Remittances in the register no receipt stands for. A receipt stands for one where it carries the remittance's
-   * payment number (the payment report and the 835 share it: 25 of September's 25), its remittance number in its
-   * key, or the same amount within the deposit window — the gate's own test, applied here so the matcher never
-   * offers a remittance the books already have.
-   */
-  const allReceipts = await db.query.cashReceipts.findMany({ columns: { amountCents: true, receivedOn: true, reference: true, sourceKey: true } });
-  const digits = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
-  const byReference = new Set(allReceipts.map((r) => digits(r.reference)).filter((x) => x.length >= 6));
-  const keyText = allReceipts.map((r) => r.sourceKey ?? "").join("\n");
-  const banked = (r: { amountCents: number; remitOn: string | null; paymentNumber: string | null; remitNumber: string }) => {
-    if (byReference.has(digits(r.paymentNumber)) && digits(r.paymentNumber).length >= 6) return true;
-    if (r.remitNumber && keyText.includes(`|${r.remitNumber}|`)) return true;
-    return allReceipts.some((x) => x.amountCents === r.amountCents && withinWindow(x.receivedOn, r.remitOn));
-  };
-  const register = await db.query.remittanceRegister.findMany({ columns: { id: true, payerName: true, remitOn: true, amountCents: true, paymentNumber: true, remitNumber: true } });
-  const remits = register
-    .filter((r) => r.remitOn && r.amountCents > 0 && !banked(r))
-    .map((r) => ({ id: r.id, payer: r.payerName ?? "payer", remitOn: r.remitOn!, amountCents: r.amountCents, paymentNumber: r.paymentNumber && /\d{6}/.test(r.paymentNumber) ? r.paymentNumber : null, remitNumber: r.remitNumber }));
+  /* Remittances in the register no receipt stands for — the gate's own test, applied in engine/remit-standing.ts. */
+  const remits = (await remitStanding())
+    .filter(({ row, banked }) => row.remitOn && row.amountCents > 0 && !banked)
+    .map(({ row: r }) => ({ id: r.id, payer: r.payerName ?? "payer", remitOn: r.remitOn!, amountCents: r.amountCents, paymentNumber: r.paymentNumber && /\d{6}/.test(r.paymentNumber) ? r.paymentNumber : null, remitNumber: r.remitNumber }));
   /* The rebate statement's receipts no bank line has confirmed: what a day's HEW credits add up to. */
   /* Every receipt a line confirmed: the column holds the first, bank_line_receipts the whole set (0133). */
   const confirmedReceipts = new Set([

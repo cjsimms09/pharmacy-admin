@@ -53,6 +53,12 @@ export async function engineRefresh(reason: string, opts: { proofs?: boolean; to
           await p.expectedArrived(),
         ];
         wrote.proofs = await p.writeProofs(results, now);
+        try {
+          const { writeOrderFrom } = await import("./order-from");
+          wrote.orderFrom = await writeOrderFrom(now);
+        } catch (e) {
+          wrote.orderFrom = `not computed: ${String(e).slice(0, 160)}`;
+        }
         wrote.failed = results.filter((r) => !r.passed).map((r) => `${r.proof}${r.scope ? ` ${r.scope}` : ""}`);
         /* A failed proof is a line on Today; the list is rebuilt once more so it carries them. */
         if ((wrote.failed as string[]).length) wrote.needsYouAfterProofs = await writeNeedsYou(await computeNeedsYou(today), now);

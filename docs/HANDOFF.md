@@ -8,12 +8,25 @@ file is how they talk.
 
 ## Open items
 
-### From the pharmacy session — 1 October: the rebuild has begun. Spec in `docs/REBUILD.md`; stage 1 is live
+### From the pharmacy session — 1 October: the rebuild has begun. Spec in `docs/REBUILD.md`; stages 1 and 2 are live
 
 **Stage 1 of the rebuild is on `feature/compliance`** (commit 1d925fa): the engine (`src/lib/engine`) and Today
 (`/v2/today`, route group `src/app/(site)`). Migration 0134 adds `needs_you`, `feed_state`, `proof_run`,
 `month_status`, `engine_run`. The engine runs last on the half-hourly beat (`src/instrumentation.ts`), after a
 bank placement or a Today answer (`engineAfter`), and proves the books nightly after two.
+
+**Stage 2 (Money, `/v2/money`) is live in two slices.** The first (4fa33b8): the month's six figures, the bank's lines
+with their answers, Cash ahead (0135, `engine/cash-ahead.ts`), Close. The second: Suppliers, Order from, Remits,
+Spending and Deliveries as lookups over `engine/read.ts` (`suppliersView`, `remitsView`, `spendingView`,
+`deliveriesView`), rendered by `src/app/(site)/v2/money/tabs.tsx`. Three things the second slice settled:
+- **What stands for a remittance at the bank is computed in one place**, `engine/remit-standing.ts` (payment number,
+  then remittance number inside a receipt's key, then same amount inside the deposit window), read by both the bank
+  matcher and the Remits tab. The matcher used to carry its own copy of the test.
+- **Order from is computed on the nightly pass** (`engine/order-from.ts`, settings key `engine_order_from`) from the
+  old minimum filler, and the screen reads the stored answer. It is too heavy to run on a page load.
+- A supplier's statements are counted from `supplier_statement_lines` (distinct `statement_date`), not from document
+  titles. A C-II count reads `supplier_invoices.schedule = 'schedule_2'`; `controlled_items` is an empty string, not
+  null, on most rows, so `is not null` counts every invoice.
 - **A migration file needs `--> statement-breakpoint` between statements** or the migrator runs only the first;
   0133 and 0134 were written without and had to be finished by hand. Every file from here carries the markers.
 - Files the next stages will touch: `src/app/(site)/*` (new screens), `src/lib/engine/*`. The old pages are

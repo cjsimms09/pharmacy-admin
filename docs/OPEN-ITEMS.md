@@ -25,8 +25,9 @@ so the answer can be checked rather than taken on trust.
 | **8 claims where PioneerRx's cost disagrees with an invoice dated the same day** | **$419.53 overstated, all of it inside accrual COGS** | Where the pharmacy holds an invoice for the same NDC on the same day, should the site prefer the invoice over PioneerRx's `acquisition_cents` and show the difference — or leave PioneerRx's figure alone and only flag it? Nothing has been overwritten either way. **The measurement says PioneerRx is normally right**, which is what makes these eight worth asking about: across 758 solid-dose September claims with a pack size the catalogue corroborates, the median claim-to-invoice ratio is exactly 1.0000 and 487 are within 5% of it. So this is not two different cost bases — it is a few drug records whose cost was never updated when the price changed. Worst three: rx 900003 mirabegron ER 50mg, claim $297.98 against ParMed 7491190346 of the same day at $175.67 (1.70x, $122.31); rx 900004 ivermectin 3mg (1.63x, $186.57); rx 900005 doxepin 3mg (6.48x, $83.57) — and that last one carries two paid rows under two different NDCs, so it may be one of the stale rebills rather than a cost fault. Measured 12 September. |
 | **19 plans still unclassified** | the residual after 459 were adopted and 15 he decided himself | Almost all of it is the one question no document on file answers: is this employer insured, or does it fund its own plan. Needs a Form 5500 or the plan document, one plan at a time. Each row now shows what the plan pays for and whether it ever pays alone, which is what settles a card. |
 | **Parmed's September ACH pays for twelve August purchases** | **$2,825.92, all of it cash out in September** | Parmed's EFT debit notice of 26 September names twelve invoices, every one dated 17–31 August, and the Parmed invoice feed here begins on 9 September — so this site holds none of them. The payment is recorded and the bank debit will place itself against it, but no cost reaches any month, because nothing was ever counted for those purchases. That is right on the accrual side: August is out of books. **The question is the cash side.** The money genuinely leaves the operating account in September and will be on the Emprise statement. Does September's cash cost of goods carry $2,825.92 for goods bought before the books begin, or does the cash account treat it the way the accrual account does and count nothing? Measured 28 September 2026. |
+| **ANDA's invoices never reach the site** | **$1,077.10 of September deliveries on PioneerRx receipts only; $11,913.62 paid to ANDA on 11 Sept for purchases before the books** | PioneerRx booked in 8 ANDA deliveries in September ($1,077.10) and not one ANDA invoice or document is on file for any date; the mailbox has nothing from ANDA but PioneerRx's weekly catalogue export for them. The bank paid ANDA $11,913.62 on 11 September, placed as predating the books. Cardinal Health, RRC and TopRx use the PioneerRx receipt as the invoice because no document comes. **Does ANDA join them, or do ANDA's invoices arrive somewhere the mailbox does not read?** Until answered, ANDA's next debit has nothing to settle against. Measured 1 October 2026. |
 
-## September's bank statement — placed 1 October, 3 lines open
+## September's bank statement — placed 1 October, 2 lines open
 
 Read from the scan, proved against its own daily balances to the cent (opening $341,931.59, closing $311,631.53,
 162 lines). First placement left 89 lines "unmatched"; the matcher was then allowed to see what was already on
@@ -48,20 +49,30 @@ statement of account (two PDFs he dropped in) settles the 29 Sept ACH to the cen
 $13,385.96 of credits dated the 25th = $121,997.41; the site had a statement reader since September and nothing stored
 or matched what it read. Now stored (supplier-statement-store.ts) and matched (statement grouping, credits applied at
 the next draw). The AP Transaction History he emailed is read as statement lines (ap-history.ts); it carries no ACH
-numbers, so the weekly Open & Closed report stays the one that ties bank debits. 89 → 3. The 3 still open:
+numbers, so the weekly Open & Closed report stays the one that ties bank debits. 89 → 3. The 28 Sept Access Health
+deposit of $28,933.18 is Health Mart Atlas's Friday-the-25th remittance landed on the Monday, which is how every other
+Atlas remittance of the month behaved (18th→21st, 21st→22nd, and so on) — 89 → 2. The 2 still open:
 
 | Class | Lines | Money | What settles it |
 |---|---|---|---|
-| Access Health 28 Sept | 1 | +$28,933.18 | not in ProviderPay's Payments export for 24–30 Sept (he pulled it; every other Health Mart Atlas payment in it was already on file), so it did not come through ProviderPay. Needs Access Health's own EFT notice or portal entry for that date. |
+| ~~Access Health 28 Sept~~ **settled 1 October** | — | ~~+$28,933.18~~ | Health Mart Atlas's remittance of Friday 25 September, paid by Access Health's own EFT rather than through ProviderPay, which is why the Payments export did not carry it. Placed as that deposit. |
 | Cheques 2453 ($58.79, 15 Sept) and 2456 ($5,800.00, 22 Sept) | 2 | −$5,858.79 | him: the payee of each |
 | HMA $110 "12 payments" | — | — | already on the register above |
 
-Pre-flight: no physical act; the 37 are "no document pairs with the line", not "the money is wrong" — the balances
+Pre-flight: no physical act; the open lines are "no document pairs with the line", not "the money is wrong" — the balances
 are proven. What else reads these figures: the month-close check counts unplaced lines; the P&L cash column reads
 receipts, not lines, so the 14 deposits banked from remittances ($185,806.89) are now in September's cash — and the
 Payments export for 19–30 Sept, when pulled, is refused by the gate (same payment number, 25 of 25 measured).
 Not checked: the Heartland 21 Sept deposit of $3,521.71 confirms the register's $3,521.71 while the sales-by-payment
 report for 17 Sept says $3,491.71 — two PioneerRx reports $30.00 apart on one day, unexplained.
+
+**Found 1 October on the Remits tab's first run, fixed the same day.** It said two SS&C remittances had nothing at the
+bank. One had: the $1,304.00 advised on 3 September arrived on the 15th under the name of SS&C's platform, DomaniRx,
+twelve days later — past the seven-day window the standing test had borrowed from the deposit gate, and under a name
+it could not tie. The test (engine/remit-standing.ts) now uses the bank matcher's fortnight and spends each receipt
+once, strongest evidence first; so the other — $2,008.00 advised on the 15th, a different payment from the $2,008.00
+of the 23rd that an 835 names — stays waiting, which is the true state: nothing on file stands for it. Read cold by
+the author, as him; no second session read it.
 
 ## Being corrected in another session
 

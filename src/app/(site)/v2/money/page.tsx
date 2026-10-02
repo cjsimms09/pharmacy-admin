@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { moneyView } from "@/lib/engine/read";
+import { moneyView, suppliersView, remitsView, spendingView, deliveriesView } from "@/lib/engine/read";
+import { readOrderFrom } from "@/lib/engine/order-from";
+import { SuppliersTab, OrderFromTab, RemitsTab, SpendingTab, DeliveriesTab } from "./tabs";
 import { SEED_CATEGORIES } from "@/lib/expense-categories";
 import { todayIso } from "@/lib/dates";
 import { answerMoneyLine, closeMonthFromMoney } from "./actions";
@@ -10,8 +12,9 @@ export const dynamic = "force-dynamic";
  * Money: the month, as the engine left it.
  *
  * Six numbers from month_status; the bank's lines as the matcher placed them, each with why and, where nothing
- * could place it, the answers; the month's proofs and the close; the four weeks ahead. Lookups only
- * (engine/read.ts): the computing happened when the data arrived.
+ * could place it, the answers; the five weeks ahead; the month's suppliers, what to add to a secondary's order,
+ * its remittances, its spending and its deliveries; the proofs and the close. Lookups only (engine/read.ts): the
+ * computing happened when the data arrived, or on the nightly pass.
  */
 
 const money = (c: number | null | undefined, signed = false) => (c === null || c === undefined ? "—" : `${signed && c < 0 ? "−" : ""}$${(Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
@@ -21,6 +24,11 @@ const dayWord = (d: string) => new Date(Date.parse(`${d}T00:00:00Z`)).toLocaleDa
 const TABS = [
   ["bank", "Bank"],
   ["cash", "Cash ahead"],
+  ["suppliers", "Suppliers"],
+  ["order", "Order from"],
+  ["remits", "Remits"],
+  ["spending", "Spending"],
+  ["deliveries", "Deliveries"],
   ["close", "Close"],
 ] as const;
 
@@ -93,7 +101,7 @@ function Answer({ line, month, tab, standing }: { line: { id: string; descriptio
 export default async function MoneyPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const sp = await searchParams;
   const today = todayIso();
-  const tab = (typeof sp.tab === "string" ? sp.tab : "bank") as (typeof TABS)[number][0];
+  const tab = (TABS.some(([k]) => k === sp.tab) ? sp.tab : "bank") as (typeof TABS)[number][0];
   const error = typeof sp.error === "string" ? sp.error : null;
   const requested = typeof sp.month === "string" ? sp.month : null;
   const v0 = await moneyView(requested ?? today.slice(0, 7));
@@ -105,6 +113,12 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const next7 = v.cashAhead.filter((d) => d.day > today && d.day <= new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 864e5).toISOString().slice(0, 10));
   const due7 = next7.reduce((n, d) => n + d.outflowCents, 0);
   const lowest = v.cashAhead.length ? v.cashAhead.reduce((a, b) => (b.balanceCents < a.balanceCents ? b : a)) : null;
+  /* The lookups the other tabs read, run only for the tab that is open. */
+  const suppliers = tab === "suppliers" ? await suppliersView(month) : null;
+  const order = tab === "order" ? await readOrderFrom() : null;
+  const remits = tab === "remits" ? await remitsView(month) : null;
+  const spending = tab === "spending" ? await spendingView(month) : null;
+  const deliveries = tab === "deliveries" ? await deliveriesView(month) : null;
 
   return (
     <div className="space-y-5">
@@ -135,9 +149,6 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             {label}
           </Link>
         ))}
-        <span className="ml-auto flex items-center gap-2 text-[13px] text-ink-3">
-          <Link href="/inventory/invoices" className="hover:text-ink">Suppliers</Link>·<Link href="/remits" className="hover:text-ink">Remits</Link>·<Link href="/expenses" className="hover:text-ink">Spending</Link>·<Link href="/deliveries" className="hover:text-ink">Deliveries</Link>
-        </span>
       </nav>
 
       {error ? <p className="rounded-md bg-crit-soft px-3 py-2 text-[13px] text-crit">{error}</p> : null}
@@ -214,6 +225,12 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           ) : null}
         </section>
       ) : null}
+
+      {tab === "suppliers" && suppliers ? <SuppliersTab v={suppliers} month={month} /> : null}
+      {tab === "order" ? <OrderFromTab v={order} /> : null}
+      {tab === "remits" && remits ? <RemitsTab v={remits} /> : null}
+      {tab === "spending" && spending ? <SpendingTab v={spending} /> : null}
+      {tab === "deliveries" && deliveries ? <DeliveriesTab v={deliveries} /> : null}
 
       {tab === "close" ? (
         <section className="space-y-3">
