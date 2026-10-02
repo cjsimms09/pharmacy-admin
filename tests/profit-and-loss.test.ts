@@ -28,6 +28,20 @@ const base: PLInputs = {
   ],
 };
 
+describe("the cash account carries what the bank paid", () => {
+  test("goods bought before the books and paid this month are the cash month's cost of goods, and nothing on accrual", () => {
+    const cash = monthlyPL({ ...base, basis: "cash", billedPurchasesCents: 50_000_000, beforeBooksPaidCents: 14_346_700 });
+    const line = cash.costOfGoods.find((l) => /before the books/.test(l.label));
+    assert.ok(line, "the line is there, named for what it is");
+    assert.equal(line.amountCents, 14_346_700);
+    assert.ok(cash.costOfGoodsCents >= 50_000_000 + 14_346_700 - 1_200_000, "and it is in the total");
+    const accrual = monthlyPL({ ...base, beforeBooksPaidCents: 14_346_700 });
+    assert.equal(accrual.costOfGoods.find((l) => /before the books/.test(l.label)), undefined, "the accrual account never counted the goods, so it counts no payment for them");
+    const nothing = monthlyPL({ ...base, basis: "cash", billedPurchasesCents: 50_000_000, beforeBooksPaidCents: 0 });
+    assert.equal(nothing.costOfGoods.find((l) => /before the books/.test(l.label)), undefined, "no such payment, no such line");
+  });
+});
+
 describe("what the month made", () => {
   test("revenue is the whole till, retail included", () => {
     const pl = monthlyPL(base);

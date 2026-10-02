@@ -111,6 +111,10 @@ Three things are new computation:
   one printable page of what the engine already proved, with a bridge from the cash account to the bank: in
   September the bank fell $30,300.06 while the cash account says +$122,833.00, and $139,144.24 of that is bank
   debits for purchases made before the books, counted on neither basis by his rule.
+- **His decision of 1 October on the cash account**: it carries what the bank paid, including September's debits for
+  goods bought before the books ($143,467.00) — a line of their own in the cash account's cost of goods
+  (`profit-and-loss.ts`, `beforeBooksPaidCents`, from bank lines placed `before_books` with a debit). Receipts for
+  pre-books days stay out. The pack's bridge now reads accordingly.
 - Stage 5 (retire the old pages) has begun with its instrument: the gate is "a month with no visit to a retired
   page", and nothing had ever counted a visit. Migration 0137 adds `page_visits` (day, route, count); the old layout
   mounts `VisitBeacon`, which posts the path to `/api/visit`; the new nav carries the old pages behind "More". The

@@ -213,6 +213,14 @@ export type PLInputs = {
   uninvoicedPurchases?: number;
   /** What the cash figure is actually made of, in the words the account prints. From cash-cogs.ts. */
   cashCogsSays?: string | null;
+  /**
+   * What the bank paid this month for goods bought before the books began — the opening fortnight's wholesaler
+   * draws and a cheque for a pre-September drug invoice, placed as "predates the books" and backed by no invoice
+   * here. The owner, 1 October 2026, asked whether the cash account carries what the bank paid or stays as it was:
+   * "Yes cash account carries what bank paid." So on the cash basis it is cost of goods in the month it left the
+   * bank; on the accrual basis it is nothing, because the goods were never counted there. Null on accrual.
+   */
+  beforeBooksPaidCents?: number | null;
   /** Billed by a supplier whose payments the site can see, and not taken yet. Owed, not spent. */
   notYetTakenCents?: number;
   /**
@@ -285,6 +293,7 @@ export function beforeBooksInputs(month: string, basis: "accrual" | "cash"): PLI
     uninvoicedPurchasesCents: null,
     uninvoicedPurchases: 0,
     cashCogsSays: null,
+    beforeBooksPaidCents: null,
     notYetTakenCents: 0,
     cashCountedTwice: [],
     standing: [],
@@ -542,6 +551,15 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
       "What the wholesalers billed this month. No wholesaler invoice is dated in this month, so a cash account has no cost of goods — " +
         "the dispensed cost is deliberately not substituted, because that is the accrual answer and would make the two accounts agree when they should not.",
     );
+  }
+  if (i.basis === "cash" && i.beforeBooksPaidCents) {
+    costOfGoods.push({
+      label: "Goods bought before the books, paid this month",
+      amountCents: i.beforeBooksPaidCents,
+      note:
+        "What the bank paid this month for wholesaler purchases made before the books began, backed by no invoice here. " +
+        "The owner, 1 October 2026: the cash account carries what the bank paid. The accrual account counts nothing for these goods, because they were never counted there.",
+    });
   }
   /*
    * Rebates follow the basis, like everything else.
@@ -881,6 +899,8 @@ export type SharedInputs = {
    * month and finished in the next is in both for what it really was.
    */
   paymentAllocations: { invoiceId: string; paidOn: string; amountCents: number }[];
+  /** By month: the bank's debits placed as "predates the books", in cents, positive. See PLInputs.beforeBooksPaidCents. */
+  beforeBooksPaid: Map<string, number>;
 };
 
 export async function loadShared(months: string[], basis: "accrual" | "cash"): Promise<SharedInputs> {
@@ -1012,8 +1032,10 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
   const shas = new Map(
     (await db.query.documents.findMany({ columns: { id: true, sha256: true } })).map((d) => [d.id, d.sha256]),
   );
+  const beforeBooksRows = (await db.all(sql`select substr("on", 1, 7) month, coalesce(sum(-amount_cents), 0) cents from bank_lines where placed_as = 'before_books' and amount_cents < 0 group by 1`)) as { month: string; cents: number }[];
   return {
     basis,
+    beforeBooksPaid: new Map(beforeBooksRows.map((r) => [r.month, Number(r.cents)])),
     sales,
     cats,
     fills,
@@ -1248,6 +1270,7 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     invoicesInMonth: billedThisMonth.map((v) => ({ invoiceNumber: v.invoiceNumber, totalCents: v.totalCents, invoiceDate: v.invoiceDate, fingerprint: v.fingerprint })),
     uninvoicedPurchasesCents,
     cashCogsSays: cash.says,
+    beforeBooksPaidCents: basis === "cash" ? (shared.beforeBooksPaid.get(month) ?? 0) : null,
     cashCountedTwice,
     notYetTakenCents: cash.notYetTakenCents,
     uninvoicedPurchases: uninvoiced.length,

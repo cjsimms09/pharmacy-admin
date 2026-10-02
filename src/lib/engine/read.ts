@@ -646,7 +646,7 @@ export type PackView = {
   open: { bankLines: number; questions: number };
   closedAt: string | null;
   /** Why the cash account and the bank are not the same figure: what the bank paid that the books, by his rule, count nowhere. */
-  bridge: { bankChangeCents: number | null; cashChangeCents: number | null; beforeBooksCents: number; unplacedCents: number; notedCents: number; receiptsGapCents: number | null };
+  bridge: { bankChangeCents: number | null; cashChangeCents: number | null; beforeBooksPaidCents: number; beforeBooksReceivedCents: number; unplacedCents: number; notedCents: number; receiptsGapCents: number | null };
 };
 
 /**
@@ -667,8 +667,8 @@ export async function packView(month: string, today: string): Promise<PackView> 
     db.all(sql`select count(*) n from needs_you where resolved_at is null`) as Promise<{ n: number }[]>,
     db.query.monthStatus.findFirst({ where: (t, { eq }) => eq(t.month, month) }),
   ]);
-  const kinds = (await db.all(sql`select placed_as kind, coalesce(sum(amount_cents), 0) cents from bank_lines where "on" >= ${month + "-01"} and "on" <= ${new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10)} and placed_as in ('before_books', 'unplaced', 'noted') group by 1`)) as { kind: string; cents: number }[];
-  const kind = (k: string) => kinds.find((x) => x.kind === k)?.cents ?? 0;
+  const kinds = (await db.all(sql`select placed_as || case when amount_cents < 0 then ':out' else ':in' end kind, coalesce(sum(amount_cents), 0) cents from bank_lines where "on" >= ${month + "-01"} and "on" <= ${new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10)} and placed_as in ('before_books', 'unplaced', 'noted') group by 1`)) as { kind: string; cents: number }[];
+  const kind = (k: string) => kinds.filter((x) => x.kind.startsWith(k)).reduce((n, x) => n + x.cents, 0);
   const quiet = async <T,>(f: () => Promise<T>): Promise<T | null> => {
     try {
       return await f();
@@ -709,7 +709,8 @@ export async function packView(month: string, today: string): Promise<PackView> 
     bridge: {
       bankChangeCents: m.month && m.month.bankOpeningCents !== null && m.month.bankClosingCents !== null ? m.month.bankClosingCents - m.month.bankOpeningCents : null,
       cashChangeCents: cash?.cashChangeCents ?? null,
-      beforeBooksCents: kind("before_books"),
+      beforeBooksPaidCents: kind("before_books:out"),
+      beforeBooksReceivedCents: kind("before_books:in"),
       unplacedCents: kind("unplaced"),
       notedCents: kind("noted"),
       receiptsGapCents: m.month?.receiptsGapCents ?? null,

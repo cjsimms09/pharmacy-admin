@@ -349,12 +349,14 @@ export function PackTab({ v, monthWord }: { v: PackView; monthWord: string }) {
         <div className="rounded-lg border border-line bg-surface px-4 py-3 text-[13px]">
           <h3 className="text-[11px] font-medium uppercase tracking-wide text-ink-3">The bank is not the cash account</h3>
           <p className="mt-1 text-ink">
-            The bank moved {money(v.bridge.bankChangeCents, true)} over the month; the cash account says {money(v.bridge.cashChangeCents, true)}. By your rule, what the bank paid for purchases made before the books began is counted on neither basis: {money(v.bridge.beforeBooksCents, true)} this month.
+            The bank moved {money(v.bridge.bankChangeCents, true)} over the month; the cash account says {money(v.bridge.cashChangeCents, true)}.
+            {v.bridge.beforeBooksPaidCents ? ` What the bank paid for purchases made before the books (${money(v.bridge.beforeBooksPaidCents, true)}) is in the cash account, by your word of 1 October.` : ""}
+            {v.bridge.beforeBooksReceivedCents ? ` ${money(v.bridge.beforeBooksReceivedCents, true)} received for days before the books is not, by the rule on receipts.` : ""}
             {v.bridge.unplacedCents ? ` ${money(v.bridge.unplacedCents, true)} is on lines not yet placed.` : ""}
             {v.bridge.notedCents ? ` ${money(v.bridge.notedCents, true)} is noted and not booked.` : ""}
             {v.bridge.receiptsGapCents ? ` Receipts the bank has not seen yet: ${money(v.bridge.receiptsGapCents, true)}, named above.` : ""}
             {(() => {
-              const named = v.bridge.cashChangeCents! + v.bridge.beforeBooksCents + v.bridge.unplacedCents + v.bridge.notedCents - (v.bridge.receiptsGapCents ?? 0);
+              const named = v.bridge.cashChangeCents! + v.bridge.beforeBooksReceivedCents + v.bridge.unplacedCents + v.bridge.notedCents - (v.bridge.receiptsGapCents ?? 0);
               const rest = v.bridge.bankChangeCents! - named;
               return Math.abs(rest) >= 100 ? ` ${money(rest, true)} between the two is not named by any of those.` : " Those name the whole difference.";
             })()}
