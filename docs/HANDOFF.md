@@ -8,6 +8,12 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, midday: the month accounts are stored by the engine** (src/lib/engine/accounts.ts, month_accounts). One shared
+  read was 5.4 s and the books asked for four; now the books open from the store in 176 ms, the six-month strip in 19 ms,
+  the twelve-month trend in 69 ms. The month in progress is recomputed on every pass when anything moved or the day did;
+  closed months overnight. accountsFor reads the store unless the engine passes fresh. The pass in the child took 47 s
+  (accounts 23 s, money found 19 s) and left the app at 15 MB. The books page is next for design, as he asked, loudly.
+
 - **2 October, late morning: the scope is six things, and the rest is retired.** His words (`docs/BACKLOG.md`):
   "I want compliance, I want invoice organization and storing, temp logs, delivery invoices, accounting, and remits
   reconciliation and tracking (MTF, Aytu, SFTP). Everything else can go.." Then "dont drop pioneer sql" and "we

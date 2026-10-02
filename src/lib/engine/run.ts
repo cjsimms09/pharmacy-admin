@@ -142,6 +142,13 @@ async function passInProcess(reason: string, opts: { proofs?: boolean; today?: s
       } catch (e) {
         wrote.returnSoon = `not computed: ${String(e).slice(0, 160)}`;
       }
+      /* The month accounts, stored: the month in progress when anything moved or the day did; closed months overnight. */
+      try {
+        const { writeMonthAccounts } = await import("./accounts");
+        wrote.accounts = await writeMonthAccounts(today, now, { force: !!opts.proofs });
+      } catch (e) {
+        wrote.accounts = `not computed: ${String(e).slice(0, 160)}`;
+      }
       /* The money list, stored: recomputed when anything it reads moved (the held readings' fingerprint), or the day did. */
       try {
         const { writeMoneyFound } = await import("./money-found");

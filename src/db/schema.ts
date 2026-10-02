@@ -3954,6 +3954,27 @@ export const moneyFoundRun = sqliteTable("money_found_run", {
   ms: integer("ms").notNull(),
 });
 
+/**
+ * A month's account on each basis as the engine last computed it (src/lib/engine/accounts.ts): the account, the
+ * inputs it was built from, and the fills behind the scripts count, as JSON. The books, the statement, Over time and
+ * the dashboard read these; before, each recomputed a 5.4-second shared read, four times a page (2 October 2026).
+ */
+export const monthAccounts = sqliteTable(
+  "month_accounts",
+  {
+    month: text("month").notNull(),
+    basis: text("basis").notNull(),
+    account: text("account").notNull(),
+    inputs: text("inputs").notNull(),
+    fills: text("fills").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    computedOn: text("computed_on").notNull(),
+    computedAt: text("computed_at").notNull(),
+    ms: integer("ms").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.month, t.basis] })],
+);
+
 /** The decisions a person can take on a claim leg. */
 export const CLAIM_DECISIONS = ["chase", "wait", "paid_elsewhere", "write_off", "rebill", "settled", "not_ours"] as const;
 export type ClaimDecision = (typeof CLAIM_DECISIONS)[number];

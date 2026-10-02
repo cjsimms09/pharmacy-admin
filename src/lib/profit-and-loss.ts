@@ -882,9 +882,20 @@ export type FillForScripts = { dateFilled: string; cashPlan: boolean; revenueCen
 export async function accountsFor(
   months: string[],
   basis: "accrual" | "cash",
-): Promise<{ months: MonthlyPL[]; inputs: PLInputs[]; fills: FillForScripts[] }> {
+  opts: { fresh?: boolean } = {},
+): Promise<{ months: MonthlyPL[]; inputs: PLInputs[]; fills: FillForScripts[]; stored?: { computedAt: string } }> {
   const wanted = [...new Set(months)].sort();
   if (wanted.length === 0) throw new Error("accountsFor needs at least one month; an empty period is answered without a read.");
+  /*
+   * Stored by the engine, read here (engine/accounts.ts). The engine passes "fresh" to compute; everything else reads
+   * what it stored and falls through to computing only where a month is not stored yet. Measured 2 October 2026: one
+   * shared read was 5.4 s and the books asked for four, so the page he named as hard to follow was also the slowest.
+   */
+  if (!opts.fresh) {
+    const { readStoredAccounts } = await import("./engine/accounts");
+    const stored = await readStoredAccounts(wanted, basis);
+    if (stored) return stored;
+  }
   const { held } = await import("./held");
   /*
    * The day is part of the key only where a month in the run is still open.
