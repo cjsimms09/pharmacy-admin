@@ -89,6 +89,7 @@ const KIND_WORDS: Record<string, string> = {
   ipd_statement: "IPD statement of account",
   /* The invoices inside one Parmed ACH, the day before it leaves the bank. See parmed-eft-notice-store.ts. */
   parmed_eft_notice: "Parmed EFT debit notice",
+  parmed_statement: "Parmed statement of account",
   /* Stock loaned or sold to another location, and what is still out. See loan-report.ts. */
   loan_report: "Loan Search Results",
   /* The operating account's statement, read by recognition where it is a scan. Placed from the Money page. See ocr.ts. */

@@ -1243,6 +1243,26 @@ export async function importRecognised(
         }
       }
       imported = Boolean(read);
+    } else if (cls.kind === "parmed_statement") {
+      /*
+       * Parmed's statement of account: the open invoices and their due dates, kept as statement lines so the draws can
+       * be placed by statement group and Cash ahead can see them coming. Its rows must add up to the total it prints or
+       * none of it is kept (parmed-statement.ts). Nothing is booked: the invoices are the cost, the statement the diary.
+       */
+      const { readParmedStatement, describeParmedStatement, statementReadOf } = await import("./parmed-statement");
+      const { storeSupplierStatement } = await import("./supplier-statement-store");
+      const { pdfText } = await import("./pdf-text");
+      const s = readParmedStatement(pdfText(buf));
+      if (!s) {
+        routeResult = "Held, nothing stored: Parmed's statement was recognised, but its rows do not add up to the total it prints, so none of it was kept.";
+        imported = false;
+      } else {
+        const onFile = new Set((await db.query.supplierInvoices.findMany({ columns: { invoiceNumber: true }, where: (t, { like }) => like(t.supplier, "Parmed%") })).map((v) => v.invoiceNumber));
+        const notOnFile = s.rows.filter((r) => !onFile.has(r.invoiceNumber)).map((r) => r.invoiceNumber);
+        const kept = await storeSupplierStatement(statementReadOf(s), filed?.documentId ?? null);
+        routeResult = `${describeParmedStatement(s, notOnFile)} ${kept.says}`;
+        imported = kept.written + kept.updated > 0;
+      }
     } else if (cls.kind === "parmed_eft_notice") {
       /*
        * Parmed's EFT debit notice: the invoices inside one ACH, the day before it leaves the bank.

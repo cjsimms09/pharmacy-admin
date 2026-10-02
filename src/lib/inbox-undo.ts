@@ -167,6 +167,13 @@ const EFFECTS: Record<string, KindEffect> = {
     reversal: "kept",
     leaves: "the document, filed under its own date, and the inbox line saying what is on it. No money moved, so there is nothing to take back out.",
   },
+  parmed_statement: {
+    short: "keeps the due dates, books nothing",
+    writes: "one statement line per open invoice — what is owed and the day it falls due — so Parmed's draws can be placed by statement group and Cash ahead can see them coming; no payment, no deposit, no cost",
+    reversal: "kept",
+    leaves: "the statement lines, which the next statement replaces; an invoice the statement names that this site does not hold is counted and named, never created from it.",
+    at: { href: "/v2/money?tab=suppliers", label: "Suppliers" },
+  },
   parmed_eft_notice: {
     short: "records the ACH, banks nothing",
     writes:

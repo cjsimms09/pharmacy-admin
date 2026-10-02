@@ -115,6 +115,16 @@ Three things are new computation:
   goods bought before the books ($143,467.00) — a line of their own in the cash account's cost of goods
   (`profit-and-loss.ts`, `beforeBooksPaidCents`, from bank lines placed `before_books` with a debit). Receipts for
   pre-books days stay out. The pack's bridge now reads accordingly.
+- **2 October: the front door is Today.** He opened the site after four stages had shipped and saw the old dashboard:
+  every new screen lived only under `/v2`. The root now sends to `/v2/today`; the old dashboard is `/dashboard`,
+  behind "More".
+- **Parmed's statement of account is read** (`parmed-statement.ts`, route `parmed_statement`): every open invoice
+  and the day it falls due, kept as statement lines under "Parmed" so its draws place by statement group and Cash
+  ahead sees them; the rows must add up to the printed total or nothing is kept. The reader had been written on
+  1 October against the first arrival and left untracked and unproved; the row's head carries the transaction type
+  between the identifiers and the first date, which the first regex did not allow for. Proved on the real statement:
+  30 invoices, $5,877.21 to the cent, due 10 and 25 October; nine of them ($2,097.51, dated 1–8 September) are not on
+  file, because Parmed's invoice feed here began on 9 September.
 - Stage 5 (retire the old pages) has begun with its instrument: the gate is "a month with no visit to a retired
   page", and nothing had ever counted a visit. Migration 0137 adds `page_visits` (day, route, count); the old layout
   mounts `VisitBeacon`, which posts the path to `/api/visit`; the new nav carries the old pages behind "More". The

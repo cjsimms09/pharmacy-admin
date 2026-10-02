@@ -7,6 +7,7 @@ import { readSheet, readSheets } from "./xlsx";
 import { looksLikeVeridikalReport } from "./veridikal-report";
 import { looksLikeIpdStatement } from "./ipd-statement";
 import { looksLikeParmedEftNotice } from "./parmed-eft-notice";
+import { looksLikeParmedStatement } from "./parmed-statement";
 import { looksLikeLoanReport } from "./loan-report";
 import { mapColumns } from "./claims";
 import { mapSupplierColumns } from "./suppliers";
@@ -42,7 +43,7 @@ import { ALLOWED_MIME, EXCEL_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "ap_history" | "claims" | "rx_transactions" | "payer_payments" | "providerpay_account" | "mck_remit_summary" | "mck_remit_detail" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "parmed_eft_notice" | "loan_report" | "sales_by_payment" | "empty_report" | "unrecognised";
+export type RouteKind = "ap_history" | "claims" | "rx_transactions" | "payer_payments" | "providerpay_account" | "mck_remit_summary" | "mck_remit_detail" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "parmed_statement" | "parmed_eft_notice" | "loan_report" | "sales_by_payment" | "empty_report" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -237,6 +238,14 @@ export function classify(fileName: string, buf: Buffer): Classification {
        * document that says what a Parmed debit is for, and without it the debit matches no single invoice on the bank
        * statement. See parmed-eft-notice.ts.
        */
+      /*
+       * Parmed's "Statement & Remittance": every invoice still open and the day each falls due — the fact nothing else
+       * on file carries. Recognised by its own heading, so the fourth sender address Parmed invents costs nothing.
+       * See parmed-statement.ts.
+       */
+      if (looksLikeParmedStatement(text)) {
+        return { kind: "parmed_statement", why: "Parmed's statement of account: every invoice still open, what is owed on each, and when it falls due.", headers: [] };
+      }
       if (looksLikeParmedEftNotice(text)) {
         return { kind: "parmed_eft_notice", why: "Parmed's EFT debit notice: the invoices one ACH is about to take, and what they come to.", headers: [] };
       }
