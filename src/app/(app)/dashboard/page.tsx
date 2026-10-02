@@ -212,6 +212,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const lateCount = lateTraining.length + lateCredentials.length + latePharmacy.length;
   /* What the needs-you list already names is not drawn a second time in the late queue below it. */
   const nowTitles = new Set(alertList.filter((a) => a.level === "now").map((a) => a.title));
+  const above = [...lateTraining, ...lateCredentials, ...latePharmacy.filter((r) => !r.attest)].filter((r) => nowTitles.has(r.title)).length;
 
   // ── One-click closures, pulled out of the pile ──
   // A duty whose entire content is one sentence and one button does not belong in a list of
@@ -331,8 +332,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     attention.push({
       what: stalled.length === 1 ? "Something the site does for you has stopped" : `${stalled.length} things the site does for you have stopped`,
       detail: `${stalled.map((j) => j.label).join(", ")} — a job that quietly stops looks exactly like one with nothing to do`,
-      href: "/tools/check",
-      action: "The morning check",
+      href: "/settings/feeds",
+      action: "Is everything arriving?",
       kind: "crit",
     });
   }
@@ -349,8 +350,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     attention.push({
       what: health.failing === 1 ? "The morning check found something" : `The morning check found ${health.failing} things`,
       detail: health.checks.filter((c) => !c.ok).map((c) => `${c.what.toLowerCase()} — ${c.observed}`).join("; "),
-      href: "/tools/check",
-      action: "What each one means",
+      /* The morning check page is retired (2 October 2026); its finding is said here and the page it concerns is one press away. */
+      href: /remit|payment|banked/i.test(health.checks.filter((c) => !c.ok).map((c) => c.what).join(" ")) ? "/remits" : "/money",
+      action: "See it",
       kind: "warn",
     });
   }
@@ -672,6 +674,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             The same rows, the same counts, the same links out — one object to read instead of three.
           */
           <LateQueue
+            title={above > 0 ? "Late, not already in the list above" : "Late"}
             bands={[
               { title: "Pharmacy duties", rows: latePharmacy.filter((r) => !r.attest && !nowTitles.has(r.title)), href: "/compliance", label: "Compliance" },
               { title: "Licences and credentials", rows: lateCredentials.filter((r) => !nowTitles.has(r.title)), href: "/staff", label: "Staff" },
@@ -761,12 +764,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
  * changed is that they are now bands inside one object rather than three objects, worst first, and
  * an empty band is dropped rather than drawn.
  */
-function LateQueue({ bands }: { bands: { title: string; rows: Row[]; href: string; label: string }[] }) {
+function LateQueue({ title = "Late", bands }: { title?: string; bands: { title: string; rows: Row[]; href: string; label: string }[] }) {
   const live = bands.filter((b) => b.rows.length > 0);
   if (live.length === 0) return null;
   const total = live.reduce((n, b) => n + b.rows.length, 0);
   return (
-    <Card title="Late" count={total}>
+    <Card title={title} count={total}>
       <div className="divide-y divide-line">
         {live.map((b) => (
           <div key={b.title} className="py-2.5 first:pt-0 last:pb-0">
@@ -925,8 +928,8 @@ function Pending({ title, note, tall = false }: { title: string; note: string; t
         <h2 className="text-sm font-semibold">{title}</h2>
         <span className="text-xs text-ink-3">{note}</span>
       </div>
-      <div className={`grid gap-3 sm:grid-cols-2 ${tall ? "lg:grid-cols-5" : "lg:grid-cols-3"}`}>
-        {Array.from({ length: tall ? 5 : 3 }, (_, i) => (
+      <div className={`grid gap-3 sm:grid-cols-2 ${tall ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
+        {Array.from({ length: tall ? 4 : 3 }, (_, i) => (
           <div key={i} className={`card animate-pulse motion-reduce:animate-none ${tall ? "h-28" : "h-32"}`} />
         ))}
       </div>

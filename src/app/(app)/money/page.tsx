@@ -172,6 +172,8 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
    * period's and the line is still the months, because the months are what moved.
    */
   const previous = period.kind === "month" ? recent[recent.findIndex((r) => r.month === period.key) - 1] ?? null : null;
+  /* No comparison against a month before the books: "up $659,594.64 vs last" on the first month is not a change, it is the books starting. */
+  const previousInBooks = previous && previous.pl.revenue.length > 0 ? previous : null;
   const hist = (pick: (r: (typeof recent)[number]) => number | null) => recent.map((r) => (r.pl.revenue.length ? pick(r) : null));
   const d = (now: number, before: number | null | undefined) => deltaOf(now, before, formatCents);
 
@@ -181,15 +183,14 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   /* The engine's "as of" sentence goes in the footer, not in the list of things still to come. */
   const asOf = [...accrual.caveats, ...cash.caveats].find((c) => /as the engine computed them/.test(c)) ?? null;
   const toCome = [...accrual.missing, ...accrual.caveats.filter((c) => !/as the engine computed them/.test(c))];
-  const bankedCents = banked.reduce((n, r) => n + r.amountCents, 0);
   const checksByMonth = accrual.months.map((m) => {
     const checks = [...m.reconciliation.cogs.checks, ...m.reconciliation.revenue];
     return { month: m.month, checks, findings: checks.filter((c) => !c.expected && c.agrees === false).length, ties: checks.filter((c) => c.agrees === true).length };
   });
   const findings = checksByMonth.reduce((n, m) => n + m.findings, 0);
   const pairsDecided = countedOnce.filter((r) => r.bothPresent);
-  const keptOutCents = pairsDecided.reduce((n, r) => n + Math.abs(r.keptOutCents ?? 0), 0);
-  const feedsOff = feeds.filter((f) => f.reaches === "none" || f.gap);
+  const feedsOff = feeds.filter((f) => f.reaches === "none");
+  const feedsGap = feeds.filter((f) => f.reaches !== "none" && f.gap);
 
   return (
     <>
@@ -270,10 +271,10 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
 
       {/* Six figures. For a month in progress nothing is compared to the month before: two days against thirty is noise. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        <Stat size="sm" value={formatCents(accrual.netRevenueCents)} label="Net revenue" sub={isCurrent && pace?.netRevenueCents ? `${formatCents(pace.netRevenueCents)} at this pace` : "earned at pickup"} tone="muted" href={sources.revenue} delta={isCurrent ? null : d(accrual.netRevenueCents, previous?.pl.netRevenueCents)} history={hist((r) => r.pl.netRevenueCents)} />
-        <Stat size="sm" value={formatCents(accrual.grossProfitCents)} label="Gross profit" sub={accrual.grossMarginPercent !== null ? `${accrual.grossMarginPercent}% of net revenue` : "cost of goods not known"} tone={tone(accrual.grossProfitCents)} href={sources.costOfGoods} delta={isCurrent ? null : d(accrual.grossProfitCents, previous?.pl.grossProfitCents)} history={hist((r) => r.pl.grossProfitCents)} />
-        <Stat size="sm" value={formatCents(accrual.operatingCents)} label="Running costs" sub={pct(accrual.operatingCents) ?? "operating costs"} tone="muted" href={sources.expenses} delta={isCurrent ? null : d(accrual.operatingCents, previous?.pl.operatingCents)} upIsGood={false} history={hist((r) => r.pl.operatingCents)} />
-        <Stat size="sm" value={formatCents(accrual.netProfitCents)} label={accrual.netProfitCents < 0 ? "Net loss" : "Net profit"} sub={isCurrent ? "so far" : "before tax"} tone={tone(accrual.netProfitCents)} delta={isCurrent ? null : d(accrual.netProfitCents, previous?.pl.netProfitCents)} history={hist((r) => r.pl.netProfitCents)} />
+        <Stat size="sm" value={formatCents(accrual.netRevenueCents)} label="Net revenue" sub={isCurrent && pace?.netRevenueCents ? `${formatCents(pace.netRevenueCents)} at this pace` : "earned at pickup"} tone="muted" href={sources.revenue} delta={isCurrent ? null : d(accrual.netRevenueCents, previousInBooks?.pl.netRevenueCents)} history={hist((r) => r.pl.netRevenueCents)} />
+        <Stat size="sm" value={formatCents(accrual.grossProfitCents)} label="Gross profit" sub={accrual.grossMarginPercent !== null ? `${accrual.grossMarginPercent}% of net revenue` : "cost of goods not known"} tone={tone(accrual.grossProfitCents)} href={sources.costOfGoods} delta={isCurrent ? null : d(accrual.grossProfitCents, previousInBooks?.pl.grossProfitCents)} history={hist((r) => r.pl.grossProfitCents)} />
+        <Stat size="sm" value={formatCents(accrual.operatingCents)} label="Running costs" sub={pct(accrual.operatingCents) ?? "operating costs"} tone="muted" href={sources.expenses} delta={isCurrent ? null : d(accrual.operatingCents, previousInBooks?.pl.operatingCents)} upIsGood={false} history={hist((r) => r.pl.operatingCents)} />
+        <Stat size="sm" value={formatCents(accrual.netProfitCents)} label={accrual.netProfitCents < 0 ? "Net loss" : "Net profit"} sub={isCurrent ? "so far" : "before tax"} tone={tone(accrual.netProfitCents)} delta={isCurrent ? null : d(accrual.netProfitCents, previousInBooks?.pl.netProfitCents)} history={hist((r) => r.pl.netProfitCents)} />
         <Stat size="sm" value={formatCents(cash.cashChangeCents ?? cash.netProfitCents)} label="Cash change" sub={onBank ? "the bank, to the cent" : "from the feeds; no statement yet"} tone={onBank ? "muted" : "warn"} href={`/money/bank-review?month=${lastMonth}`} />
         <Stat size="sm" value={scripts.scripts.toLocaleString()} label="Scripts" sub={scripts.perDay !== null ? `${scripts.perDay} a day` : "none in the period"} tone="muted" href={sources.scripts} />
       </div>
@@ -375,10 +376,10 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           </p>
         ) : (
           <p className="text-sm">
-            No statement for {period.label} yet; Emprise sends it after month end. Until then the cash column is what the feeds have seen reach the bank: {banked.length} receipt{banked.length === 1 ? "" : "s"}, {formatCents(bankedCents)}.
+            No statement for {period.label} yet; Emprise sends it after month end. Until then the cash column is what the feeds have seen: {formatCents(cash.revenueCents)} in and {formatCents(cash.costOfGoodsCents + cash.operatingCents + cash.otherCashOutCents)} out so far.
           </p>
         )}
-        {bankLines.unplaced.length > 0 && (
+        {!onBank && bankLines.unplaced.length > 0 && (
           <p className="mt-1 text-xs text-ink-2">
             {bankLines.unplaced.length} line{bankLines.unplaced.length === 1 ? "" : "s"} from the statement not placed:{" "}
             {bankLines.unplaced.slice(0, 4).map((l) => `${fmt(l.on)} ${formatCents(l.amountCents)}`).join("; ")}
@@ -589,7 +590,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
               <p className="row-why">
                 {countedOnce.length === 0
                   ? "Nothing recorded in this period in two places."
-                  : `${pairsDecided.length} on file in two places, each counted once${keptOutCents ? `, ${formatCents(keptOutCents)} kept out` : ""}; ${countedOnce.length - pairsDecided.length} with one record only.`}
+                  : `${pairsDecided.length} on file in two places, each counted once; ${countedOnce.length - pairsDecided.length} with one record only.`}
               </p>
               {pairsDecided.length > 0 && (
                 <details className="mt-1 text-xs text-ink-2">
@@ -660,7 +661,8 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
               </div>
               <p className="row-why">
                 {feeds.length} feeds carry money.{" "}
-                {feedsOff.length > 0 ? `${feedsOff.map((f) => f.name).join(", ")} ${feedsOff.length === 1 ? "reaches" : "reach"} neither account.` : ""}
+                {feedsOff.length > 0 ? `${feedsOff.map((f) => f.name).join(", ")} ${feedsOff.length === 1 ? "reaches" : "reach"} neither account.` : "Every one lands on an account."}
+                {feedsGap.length > 0 ? ` ${feedsGap.length} land${feedsGap.length === 1 ? "s" : ""} with a gap noted.` : ""}
               </p>
               <details className="mt-1 text-xs text-ink-2">
                 <summary className="cursor-pointer text-ink-3">each feed, and where it lands</summary>
