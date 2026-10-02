@@ -42,7 +42,19 @@ export type ClaimsCompleteness = {
   notAddingUp: number;
   notAddingUpList: { rxNumber: string; fillNumber: number; addsToCents: number; fillSaysCents: number }[];
   /** What the morning pull wrote in by itself from PioneerRx on its last run, and how many of those the report had only as reversed. */
-  takenFromPioneer: { fills: number; cents: number; overReversed: number; overReversedCents: number; payerRows: number; payerRowsCostCents: number };
+  takenFromPioneer: {
+    fills: number;
+    cents: number;
+    overReversed: number;
+    overReversedCents: number;
+    payerRows: number;
+    payerRowsCostCents: number;
+    /** Paid rows the pull reversed because PioneerRx's last valid claim is a reversal; and rows whose payer PioneerRx no longer lists, left alone. */
+    reversed: number;
+    reversedCents: number;
+    payerGone: number;
+    payerGoneCents: number;
+  };
 };
 
 export async function claimsCompleteness(): Promise<ClaimsCompleteness | null> {
@@ -61,6 +73,7 @@ export async function claimsCompleteness(): Promise<ClaimsCompleteness | null> {
   const missing = (v.missingTotal ?? {}) as { fills?: number; cents?: number };
   const ahead = (v.aheadOfTheCopy ?? {}) as { fills?: number; cents?: number };
   const filled = (v.filledIn ?? {}) as { written?: number; cents?: number; overReversed?: number; overReversedCents?: number; payerRows?: number; payerRowsCostCents?: number };
+  const reversed = (v.reversedFromPioneer ?? {}) as { fills?: number; cents?: number; payerGone?: number; payerGoneCents?: number };
   /*
    * A pull from before this was measured has no `coverTo`, and its figures were computed the old
    * way — against unequal windows. Showing them would put the very number this replaced back on a
@@ -90,6 +103,10 @@ export async function claimsCompleteness(): Promise<ClaimsCompleteness | null> {
       overReversedCents: n(filled.overReversedCents),
       payerRows: n(filled.payerRows),
       payerRowsCostCents: n(filled.payerRowsCostCents),
+      reversed: n(reversed.fills),
+      reversedCents: n(reversed.cents),
+      payerGone: n(reversed.payerGone),
+      payerGoneCents: n(reversed.payerGoneCents),
     },
   };
 }

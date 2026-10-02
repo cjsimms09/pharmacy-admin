@@ -298,6 +298,18 @@ export function classifySupplierDocument(text: string | null | undefined, fileNa
   if (itemLines >= 2) {
     return { kind: "invoice", why: `It lists ${itemLines} item lines with NDCs and prices, which is what an invoice is.` };
   }
+  /*
+   * One item line, and the document calls itself an invoice with a total payable.
+   *
+   * Six McKesson invoices of 28 September to 2 October 2026 — a single Mounjaro drop, a single bottle of
+   * ciprofloxacin — were "unknown" to this and sat on the invoices page as "cannot tell", because two item lines
+   * were the floor. McKesson's own form says "Invoice", "Billing No." and "NET PAYABLE"; one line under that
+   * heading is an invoice for one thing.
+   */
+  const invoiceWords = /\binvoice\b/i.test(words.slice(0, 2000)) && /\b(?:net payable|amount due|total due|invoice total|total rx purchases)\b/i.test(words);
+  if (itemLines === 1 && invoiceWords) {
+    return { kind: "invoice", why: "It lists one item line with an NDC and a price, under its own invoice heading and total payable: an invoice for one thing." };
+  }
   if (statementWords) {
     return { kind: "statement", why: "It reads as a statement of account." };
   }

@@ -192,7 +192,12 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
    * run up to today but returned nothing after August is still a test, and a range straddling the
    * boundary is not one — it holds real claims, and dropping them would lose real revenue.
    */
-  const newestFill = wanted.reduce((m, f) => (f.filledOn && f.filledOn > m ? f.filledOn : m), "");
+  /*
+   * By the later of the fill date and the sale date: a script filled on 31 August and collected on 1 September is the
+   * books' (his word, 2 October 2026), and judging the pull by fill dates alone marked 343 such fills a test pull and
+   * kept $56,137.63 of September out of the account for an hour.
+   */
+  const newestFill = wanted.reduce((m, f) => [f.filledOn ?? "", f.soldOn ?? ""].reduce((x, d) => (d > x ? d : x), m), "");
   const isTestPull = newestFill !== "" && isOutOfBooks(newestFill);
 
   const stamp = isTestPull

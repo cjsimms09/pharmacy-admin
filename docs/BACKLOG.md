@@ -1159,3 +1159,9 @@ place, and an arithmetic check before anything is stored.
   had been found by script and given in chat. The standard from here: whatever a script had to find for him is a thing
   the page shows, with its source and a press. Done the same afternoon: every cash row opens to its bank lines; the
   Checks card says what the pull took. Not yet: the remits page on untied payments; the supplier invoices page.
+
+- **2 October, late afternoon, his words:** "do it, the 5800 check is for drugs. Fix what we can, fix the backend engine..
+  make this site efficient, accurate, and automated!!!" · "too many issues with it not recognizing emials and not knowing
+  what to do with statements, invoices, etc" · on the billed-against-booked card: "fix! these are the things that are
+  annoying, dont know why its happening, have to read a novel to figure it out". What was done the same afternoon is in
+  OPEN-ITEMS ("his three complaints"); what is still open is in HANDOFF.

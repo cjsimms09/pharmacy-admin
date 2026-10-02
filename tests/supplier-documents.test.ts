@@ -86,3 +86,37 @@ describe("what a supplier actually sent", () => {
     assert.equal(looksLikeInvoice({ fileName: "invoice_9.pdf", mimeType: "application/pdf", subject: "Invoice", supplier: "IPD", text: null }), true);
   });
 });
+
+describe("an invoice for one thing (2 October 2026)", () => {
+  /* McKesson's SAP form, one item: six such invoices sat as "cannot tell" because two item lines were the floor. Identifiers invented. */
+  const oneLine = [
+    "Billing No.:7000000001",
+    "Billing Date:09/28/2026",
+    "Invoice",
+    "PO#:QO00000000      00",
+    "NDC/UPC/UDI#ITEM#DEL DOC#QTYUM    ITEM DESCRIPTIONRETAIL XPRICEDAMOUNT   M",
+    "12345-6789-01261-7000000000001            1CT EXAMPLE 5MG/0.5MLX4PEND AM    1,334.59 R    1,078.80     1,078.80",
+    "SUMMARY",
+    "TOTAL RX PURCHASES:$1,078.80 TOTAL CONTRACT PURCHASES:$0.00",
+    "NET PAYABLE BY STATEMENT DATE 10/06/2026:$1,078.80",
+  ].join("\n");
+  test("one item line under an invoice heading with a total payable is an invoice", () => {
+    const c = classifySupplierDocument(oneLine, "7000000001.pdf", "");
+    assert.equal(c.kind, "invoice");
+    assert.match(c.why, /one item line/);
+  });
+  test("one NDC in a statement of account is still a statement", () => {
+    const statementWithOne = [
+      "STATEMENT OF ACCOUNT",
+      "Statement Date: 09/01/2026",
+      "Invoice 1004797  09/02/2026  $22.72",
+      "68180051103 LOSARTAN 100MG TAB 90    $12.40   $12.40",
+      "Current $22.72   31-60 days $0.00   61-90 days $0.00",
+      "Balance Due: $22.72",
+    ].join("\n");
+    assert.equal(classifySupplierDocument(statementWithOne, "statement.pdf", "").kind, "statement");
+  });
+  test("one NDC with no invoice heading settles nothing", () => {
+    assert.equal(classifySupplierDocument("68180051103 LOSARTAN 100MG TAB 90    $12.40   $12.40", "x.pdf", "").kind, "unknown");
+  });
+});

@@ -657,6 +657,18 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                       It also wrote {completeness.takenFromPioneer.payerRows} payer row{completeness.takenFromPioneer.payerRows === 1 ? "" : "s"} the nightly report never sent onto fills already here, carrying {formatCents(completeness.takenFromPioneer.payerRowsCostCents)} of cost.
                     </>
                   )}
+                  {completeness.takenFromPioneer.reversed > 0 && (
+                    <>
+                      {" "}
+                      It reversed {completeness.takenFromPioneer.reversed} paid row{completeness.takenFromPioneer.reversed === 1 ? "" : "s"} that PioneerRx holds reversed, {formatCents(completeness.takenFromPioneer.reversedCents)}.
+                    </>
+                  )}
+                  {completeness.takenFromPioneer.payerGone > 0 && (
+                    <>
+                      {" "}
+                      {completeness.takenFromPioneer.payerGone} paid row{completeness.takenFromPioneer.payerGone === 1 ? "" : "s"}, {formatCents(completeness.takenFromPioneer.payerGoneCents)}, {completeness.takenFromPioneer.payerGone === 1 ? "has" : "have"} a payer PioneerRx no longer lists: left alone until read.
+                    </>
+                  )}
                 </p>
                 {(completeness.missingFills > 0 || completeness.notAddingUp > 0) && (
                   <details className="mt-1 text-xs text-ink-2">

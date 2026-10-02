@@ -355,6 +355,13 @@ async function pullClaims(): Promise<string> {
    * `TotalPricePaid` comes along so every fill can be checked: the payers plus the patient are the
    * price of the fill, or the fill is named.
    */
+  /*
+   * The books begin on 1 September; a script filled in late August and collected in September is September's — the
+   * owner, 2 October 2026, asked whether to bring those in from PioneerRx or keep everything before 1 September out:
+   * "do it". So the copy is read from mid-August and a fill is kept when it was filled in the books or collected in them.
+   */
+  const BOOKS_FROM = "2026-09-01";
+  const PULL_FROM = "2026-08-15";
   const r = await query(
     `select c.RxNumber as rx_number,
             rx.RefillNumber as fill_number,
@@ -393,7 +400,7 @@ async function pullClaims(): Promise<string> {
        join Prescription.RxTransaction rx on rx.RxTransactionID = p.RxTransactionID
        join Item.Item i on i.ItemID = rx.DispensedItemID
        left join Prescription.RxTransactionFinancial f on f.RxTransactionID = p.RxTransactionID
-      where rx.DateFilled >= '2026-09-01'
+      where rx.DateFilled >= '${PULL_FROM}'
         and isnull(p.IsDuplicateClaim, 0) = 0
         and p.IsLastValidClaimForPayMethod = 1
         and p.TransactionResponseStatus = 'P'`,
@@ -451,6 +458,21 @@ async function pullClaims(): Promise<string> {
     })),
   );
 
+  built.fills = built.fills.filter((f) => (f.filledOn ?? "") >= BOOKS_FROM || (f.soldOn ?? "") >= BOOKS_FROM);
+  /* PioneerRx's last word on the claims it reversed, for rows the site still holds paid (src/lib/pioneer-reversals.ts). */
+  const reversedRows = await query(
+    `select c.RxNumber as rx_number, rx.RefillNumber as fill_number, convert(varchar(10), rx.DateFilled, 23) as date_filled, t.Bin as bin
+       from ThirdParty.ClaimRemittancePricingByRxTransactionID p
+       join Prescription.Claim c on c.ClaimID = p.ClaimID
+       join Prescription.Transmission t on t.TransmissionID = c.TransmissionID
+       join Prescription.RxTransaction rx on rx.RxTransactionID = p.RxTransactionID
+      where rx.DateFilled >= '${PULL_FROM}'
+        and isnull(p.IsDuplicateClaim, 0) = 0
+        and p.IsLastValidClaimForPayMethod = 1
+        and p.TransactionResponseStatus = 'A'`,
+    {},
+    50_000,
+  );
   const { enrichClaimsFrom } = await import("../src/lib/dispensed-export");
   const stamp = `PioneerRx SQL @ ${new Date().toISOString().slice(0, 10)}`;
   const e = await enrichClaimsFrom(
@@ -502,10 +524,12 @@ async function pullClaims(): Promise<string> {
   const { db, schema } = await import("../src/db");
   const { and, gte, eq } = await import("drizzle-orm");
   const readOnFile = () => db
-    .select({ rxNumber: schema.claims.rxNumber, fillNumber: schema.claims.fillNumber, dateFilled: schema.claims.dateFilled, remitCents: schema.claims.remitCents, copayCents: schema.claims.copayCents, bin: schema.claims.bin })
+    .select({ rxNumber: schema.claims.rxNumber, fillNumber: schema.claims.fillNumber, dateFilled: schema.claims.dateFilled, remitCents: schema.claims.remitCents, copayCents: schema.claims.copayCents, bin: schema.claims.bin, completedAt: schema.claims.completedAt })
     .from(schema.claims)
-    .where(and(gte(schema.claims.dateFilled, "2026-09-01"), eq(schema.claims.status, "paid")));
-  const onFile = await readOnFile();
+    .where(and(gte(schema.claims.dateFilled, PULL_FROM), eq(schema.claims.status, "paid")));
+  /* The same rule as the copy's side: filled in the books, or collected in them. */
+  const inBooks = (c: { dateFilled: string; completedAt: string | null }) => c.dateFilled >= BOOKS_FROM || (c.completedAt ?? "") >= BOOKS_FROM;
+  const onFile = (await readOnFile()).filter(inBooks);
   /* The payers held for each paid fill, so a fill here with a payer absent reaches the backfill (claims-backfill.ts, "A payer the report never delivered"). */
   const heldBins = new Map<string, Set<string>>();
   for (const c of onFile) {
@@ -575,10 +599,24 @@ async function pullClaims(): Promise<string> {
           dirFeeCents: p.dirFeeCents ?? null,
         })),
       })),
-    "2026-09-01",
+    PULL_FROM,
   );
-  /* Measured again after the write, so what is stored says what is true now, not what was true a moment before the pull filled it in. */
-  if (filledIn.written > 0) recon = reconcileClaims(pioneerSide, siteSide(await readOnFile()));
+  const { reverseFromPioneer } = await import("../src/lib/pioneer-reversals");
+  const reversedFromPioneer = await reverseFromPioneer({
+    reversals: (reversedRows.rows as Record<string, unknown>[]).map((row) => ({
+      rxNumber: text(row.rx_number) ?? "",
+      fillNumber: Number(row.fill_number ?? 0),
+      bin: text(row.bin),
+      reversedOn: text(row.date_filled),
+    })),
+    pioneerPaidKeys: new Set(
+      built.fills.flatMap((f) => [f.primary, ...(f.secondary ? [f.secondary] : []), ...f.furtherPayers].map((p) => `${f.rxNumber}|${f.fillNumber}|${p.bin ?? ""}`)),
+    ),
+    coverTo: recon.coverTo,
+    from: PULL_FROM,
+  });
+  /* Measured again after the writes, so what is stored says what is true now, not what was true a moment before the pull wrote. */
+  if (filledIn.written > 0 || filledIn.payerRowsAdded > 0 || reversedFromPioneer.fills > 0) recon = reconcileClaims(pioneerSide, siteSide((await readOnFile()).filter(inBooks)));
 
   const { setSetting } = await import("../src/lib/settings");
   await setSetting(
@@ -609,6 +647,12 @@ async function pullClaims(): Promise<string> {
         payerRows: filledIn.payerRowsAdded,
         payerRowsCostCents: filledIn.payerRowsCostCents,
       },
+      reversedFromPioneer: {
+        fills: reversedFromPioneer.fills,
+        cents: reversedFromPioneer.cents,
+        payerGone: reversedFromPioneer.payerGone,
+        payerGoneCents: reversedFromPioneer.payerGoneCents,
+      },
       problems: built.problems.slice(0, 20),
     }),
   );
@@ -618,6 +662,7 @@ async function pullClaims(): Promise<string> {
     `${built.payerCounts.more ? `, ${built.payerCounts.more} with more` : ""}); ` +
     `${recon.says}` +
     `${filledIn.written || filledIn.heldReversed.length || filledIn.payerRowsAdded ? ` ${filledIn.says}.` : ""}` +
+    `${reversedFromPioneer.says ? ` ${reversedFromPioneer.says}.` : ""}` +
     `${built.disagree.length ? ` ${built.disagree.length} fills where the payers and the patient do not add to the fill's price.` : ""}`
   );
 }

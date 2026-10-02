@@ -8,6 +8,19 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, 16:10: "do it", and the pull is the record.** On his word the morning pull reads the PioneerRx copy from
+  15 August and keeps a fill filled in the books or collected in them (343 late-August fills collected in September,
+  $56,137.63, written); a pull is judged a test by the later of fill and sale date (claims-backfill.ts). The pull now
+  also reverses a paid row whose last valid claim in PioneerRx is a reversal with no paid claim left (pioneer-reversals.ts,
+  9 rows), writes a payer row the report never sent (2 more), and the enrich step writes the quantity where the report
+  printed none. September is a complete account: revenue $708,897.95, gross profit $69,658.18 (9.8%), net $1,470.31; the
+  till line is gone and no fill lacks a cost. 258 payments tied after the pull. The $5,800 cheque is for drugs, by his
+  word, noted on the line. Six one-item McKesson invoices now classify as invoices. The billed-against-booked card is one
+  line with decision buttons recorded as audit events ("invoice.price_decided"). His words, verbatim, in BACKLOG. **Still
+  his, and open:** the remits page on untied payments (cloud session: the pharmacy session cannot read that path); the
+  untied payments split by books date and tied by PioneerRx claim id; the invoice issues and money position stored by the
+  engine; the supplier invoices page beyond this card.
+
 - **2 October, 14:40: the two paragraphs he pasted back ("still see this, still no way to close a month").** September was
   already closed (12:18, on his "can we close sept?"); the badge and the Close control are in the evening deploy. The
   paragraphs were restated: the bin sentence on a closed month says what was not collected by the day it was computed,

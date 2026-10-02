@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
+import { eq } from "drizzle-orm";
+import { db, schema } from "@/db";
 import { fmt } from "@/lib/dates";
 import {
   invoices,
@@ -249,6 +251,15 @@ export default async function InvoicesPage({
    * document that never came; this one finds a document that came and does not agree.
    */
   const prices = await checkInvoicePrices();
+  /*
+   * What he has already decided about a price that does not agree, as audit events (invoice.price_decided), so a
+   * decision survives every import and every re-read of the invoice. The latest word on a line stands.
+   */
+  const priceKey = (d: { invoiceId: string | null; invoiceNumber: string; ndc11: string | null; kind: string }) => `${d.invoiceId ?? d.invoiceNumber}|${d.ndc11 ?? "total"}|${d.kind}`;
+  const decided = new Map<string, { details: string | null; at: string }>();
+  for (const e of await db.query.auditEvents.findMany({ where: eq(schema.auditEvents.action, "invoice.price_decided"), columns: { entityId: true, details: true, at: true } })) {
+    if (e.entityId && (!decided.has(e.entityId) || decided.get(e.entityId)!.at < e.at)) decided.set(e.entityId, { details: e.details ?? null, at: e.at });
+  }
   const owedRows = owed.filter((l) => l.waiting > 0);
   const settledSuppliers = owed.filter((l) => l.receiptIsTheInvoice);
   const unreceipted = await awaitingReceipt();
@@ -552,6 +563,27 @@ export default async function InvoicesPage({
    * decisions, so two different buttons: this one answers for the deliveries on the list now, and
    * the one beside it answers for the supplier from here on.
    */
+  /*
+   * A price that does not agree is decided on its own line — the invoice is right, the counter is right, or leave it.
+   * The owner, 2 October 2026, on a $1.23 Dotti patch: "fix! these are the things that are annoying, dont know why its
+   * happening, have to read a novel to figure it out". Recorded as an audit event: it survives the next import.
+   */
+  async function decidePrice(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const key = String(fd.get("key") ?? "").slice(0, 200);
+    const decision = String(fd.get("decision") ?? "");
+    const what = String(fd.get("what") ?? "").slice(0, 300);
+    const said =
+      decision === "invoice"
+        ? "The invoice is right; the counter booked it at the wrong price."
+        : decision === "counter"
+          ? "The counter is right; the invoice overcharges — take it up with the supplier."
+          : "Left as it is, by his word.";
+    if (key) await audit({ action: "invoice.price_decided", userId: u.id, userName: u.name, entity: "invoice_price", entityId: key, details: `${said} ${what}` });
+    revalidatePath("/inventory/invoices");
+    redirect("/inventory/invoices?ok=" + encodeURIComponent(key ? said : "Nothing to decide."));
+  }
   async function settleTheseOnes(fd: FormData) {
     "use server";
     const u = await requireManager();
@@ -1296,140 +1328,118 @@ export default async function InvoicesPage({
         differed every night for a month and nobody would have seen it. That is the whole reason
         this card is here: a check nobody can see is not a check.
       */}
-      {prices.checked > 0 && (
-        <Card
-          tone={prices.disagreements.length > 0 ? "warn" : "ok"}
-          title="What you were billed, against what came in"
-          className="mt-4 mb-6"
-          subtitle="Two systems filled in separately — the wholesaler's invoice, and whoever booked the delivery in at the counter. Where they agree the price is checked. Where only one of them holds a figure, nobody has checked it."
-        >
-          <p className="text-sm">
-            {prices.disagreements.length === 0 ? (
-              <>
-                All {prices.checked} invoices with a delivery to check against agree — the total, and every one of the{" "}
-                {prices.linesCompared} drugs on them.
-              </>
-            ) : (
-              <>
-                {prices.agreeing} of {prices.checked} invoices agree throughout, across {prices.linesCompared} drugs.{" "}
+      {prices.checked > 0 &&
+        (() => {
+          const open = prices.disagreements.filter((d) => !decided.has(priceKey(d)));
+          const settled = prices.disagreements.filter((d) => decided.has(priceKey(d)));
+          const noNdc = prices.codeDifferences.filter((c) => c.why === "no-ndc");
+          const noNdcCents = noNdc.reduce((n, c) => n + c.extendedCents, 0);
+          const kindWord = (k: (typeof open)[number]["kind"]) =>
+            k === "total" ? "the total" : k === "price" ? "the price" : k === "quantity" ? "the count" : k === "misread" ? "which drug" : k === "billed-not-received" ? "billed, not booked in" : "booked in, not billed";
+          return (
+            <Card
+              tone={open.length > 0 ? "warn" : "ok"}
+              title="Billed against booked in"
+              className="mt-4 mb-6"
+              subtitle="Every invoice against the delivery booked in PioneerRx, line by line. What agrees is checked; what does not is a row with a decision."
+            >
+              <p className="text-sm">
                 <b>
-                  {prices.disagreements.length} thing{prices.disagreements.length === 1 ? "" : "s"}
+                  {prices.agreeing} of {prices.checked}
                 </b>{" "}
-                {prices.disagreements.length === 1 ? "does" : "do"} not
-                {prices.overbilledCents > 0 ? (
+                invoices agree throughout, {prices.linesCompared.toLocaleString("en-US")} drugs.
+                {open.length > 0 ? (
                   <>
-                    , and the invoices come to <b className="tabular-nums">{money(prices.overbilledCents)}</b> more than was
-                    booked in against them
+                    {" "}
+                    <b>
+                      {open.length} to decide
+                    </b>
+                    {prices.overbilledCents > 0 ? `, billed ${money(prices.overbilledCents)} more than was booked in` : ""}.
                   </>
                 ) : (
-                  <>, and no invoice comes to more than was booked in &mdash; it is which drug the money is against</>
+                  " Nothing to decide."
                 )}
-                .
-                {/*
-                  Charges are said apart and never counted as a disagreement: every good on these
-                  invoices matched, and the difference is on the total and on no line.
-                */}
                 {prices.charges.length > 0 && (
                   <>
-                    {" "}Separately, <b className="tabular-nums">{money(Math.abs(prices.chargesCents))}</b> of charges sits on{" "}
-                    {prices.charges.length} invoice total{prices.charges.length === 1 ? "" : "s"} whose every item matched &mdash;
-                    freight or a surcharge, not goods.
+                    {" "}
+                    {money(Math.abs(prices.chargesCents))} of freight or surcharges on {prices.charges.length} invoice{prices.charges.length === 1 ? "" : "s"}, not goods.
                   </>
                 )}
-              </>
-            )}
-          </p>
-          {/*
-            The lines the two systems wrote down under different codes, where nothing is in dispute.
-
-            Ten of these were on this card as "the invoice and the delivery disagree" and not one of
-            them was a wrong drug against the money — the same NDC padded in a different place, a
-            UPC against the NDC it stands for, a front-end barcode for an item that has no NDC at
-            all. They are not rows, because ten rows that are all nothing is how a screen stops
-            being read. They are not silence either: the count that was compared includes them, so
-            saying nothing would make this card's coverage a figure it had not earned.
-          */}
-          {prices.codeDifferences.length > 0 &&
-            (() => {
-              const sameItem = prices.codeDifferences.filter((c) => c.why === "same-item");
-              const noNdc = prices.codeDifferences.filter((c) => c.why === "no-ndc");
-              const noNdcCents = noNdc.reduce((n, c) => n + c.extendedCents, 0);
-              return (
+                {prices.codeDifferences.length > 0 && (
+                  <>
+                    {" "}
+                    {prices.codeDifferences.length} lines written under two codes with the same count and money
+                    {noNdc.length > 0 ? `, ${noNdc.length} of them front-end goods with no NDC (${money(noNdcCents)})` : ""}.
+                  </>
+                )}
+              </p>
+              {open.length > 0 && (
+                <ul className="rows mt-2">
+                  {open.slice(0, 12).map((d, i) => (
+                    <li key={`${priceKey(d)}-${i}`} className="py-2">
+                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        <span className="badge">{kindWord(d.kind)}</span>
+                        <span className="font-medium">{d.description ?? d.ndc11 ?? "the total"}</span>
+                        <span className="text-xs text-ink-3">
+                          {d.supplier} {d.invoiceNumber}
+                          {d.invoiceDate ? ` · ${fmt(d.invoiceDate)}` : ""}
+                        </span>
+                        <span className="tabular-nums text-xs text-ink-2">
+                          {d.billedCents !== null ? `billed ${money(d.billedCents)}` : ""}
+                          {d.billedCents !== null && d.receivedCents !== null ? " · " : ""}
+                          {d.receivedCents !== null ? `booked ${money(d.receivedCents)}` : ""}
+                        </span>
+                        {d.differenceCents !== 0 && <span className="ml-auto tabular-nums text-sm font-semibold">{money(Math.abs(d.differenceCents))}</span>}
+                      </div>
+                      {canManage && (
+                        <form action={decidePrice} className="mt-1.5 flex flex-wrap gap-2">
+                          <input type="hidden" name="key" value={priceKey(d)} />
+                          <input type="hidden" name="what" value={`${d.supplier} ${d.invoiceNumber}: ${d.say}`} />
+                          <button className="btn btn-sm" name="decision" value="invoice">
+                            The invoice is right
+                          </button>
+                          <button className="btn btn-sm" name="decision" value="counter">
+                            The counter is right
+                          </button>
+                          <button className="btn btn-sm" name="decision" value="ignore">
+                            Leave it
+                          </button>
+                        </form>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {open.length > 12 && <p className="mt-2 text-xs text-ink-3">The first 12 of {open.length}.</p>}
+              {settled.length > 0 && (
+                <details className="mt-2 text-xs">
+                  <summary className="cursor-pointer text-ink-3">
+                    {settled.length} settled
+                  </summary>
+                  <ul className="mt-1 space-y-0.5 text-ink-3">
+                    {settled.map((d, i) => (
+                      <li key={`${priceKey(d)}-s${i}`}>
+                        {d.supplier} {d.invoiceNumber} · {d.description ?? "the total"} · {money(Math.abs(d.differenceCents))} — {decided.get(priceKey(d))?.details}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {prices.unchecked.length > 0 && (
                 <p className="mt-2 text-xs text-ink-3">
-                  On {prices.codeDifferences.length} of those lines the two systems wrote the code down differently, and
-                  the count and the money agree on every one.{" "}
-                  {sameItem.length > 0 && (
-                    <>
-                      {sameItem.length} {sameItem.length === 1 ? "is" : "are"} the same item written two ways &mdash; the
-                      same ten digits of an NDC padded in a different place, a UPC with its prefix still on, or a product
-                      whose pack code the invoice did not print.{" "}
-                    </>
-                  )}
-                  {noNdc.length > 0 && (
-                    <>
-                      {noNdc.length} {noNdc.length === 1 ? "is a" : "are"} front-end or device line
-                      {noNdc.length === 1 ? "" : "s"} the wholesaler bills with a retail barcode and the counter booked
-                      under its own code; {noNdc.length === 1 ? "it is" : "they are"} not
-                      {noNdc.length === 1 ? " a drug" : " drugs"} the FDA lists, so there is no NDC for the two to agree
-                      on &mdash; and <span className="tabular-nums">{money(noNdcCents)}</span> of cost that is against no
-                      drug.
-                    </>
-                  )}
+                  {prices.unchecked.length} invoice{prices.unchecked.length === 1 ? "" : "s"} not checked: no PioneerRx delivery carries{" "}
+                  {prices.unchecked.length === 1 ? "its" : "their"} number.
                 </p>
-              );
-            })()}
-          {prices.disagreements.length > 0 && (
-            <ul className="rows mt-2">
-              {prices.disagreements.slice(0, 12).map((d, i) => (
-                <li key={`${d.invoiceNumber}-${d.ndc11 ?? "total"}-${i}`} className="py-1.5">
-                  <div className="flex flex-wrap items-baseline gap-2">
-                    <span className="badge">
-                      {d.kind === "total"
-                        ? "the total"
-                        : d.kind === "price"
-                          ? "the price"
-                          : d.kind === "quantity"
-                            ? "the count"
-                            : d.kind === "misread"
-                              ? "which drug"
-                              : d.kind === "billed-not-received"
-                                ? "billed, not booked in"
-                                : "booked in, not billed"}
-                    </span>
-                    <span className="text-xs text-ink-3">
-                      {d.supplier} {d.invoiceNumber}
-                      {d.invoiceDate ? ` · ${fmt(d.invoiceDate)}` : ""}
-                    </span>
-                    {d.differenceCents !== 0 && (
-                      <span className="tabular-nums text-sm font-medium">{money(Math.abs(d.differenceCents))}</span>
-                    )}
-                  </div>
-                  <p className="mt-0.5 text-sm">{d.say}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-          {prices.disagreements.length > 12 && (
-            <p className="mt-2 text-xs text-ink-3">
-              The first 12 of {prices.disagreements.length} are shown.
-            </p>
-          )}
-          {prices.unchecked.length > 0 && (
-            /*
-              What the check does not cover, said plainly.
-
-              An invoice with no delivery under its number has no second copy of its prices, so
-              nothing here has looked at it. Leaving that out would make the card claim a coverage
-              it does not have, which is worse than a smaller number honestly stated.
-            */
-            <p className="mt-2 text-xs text-ink-3">
-              {prices.unchecked.length} invoice{prices.unchecked.length === 1 ? " is" : "s are"} not checked at all:
-              no PioneerRx delivery carries {prices.unchecked.length === 1 ? "its" : "their"} number, so there is no
-              second copy of {prices.unchecked.length === 1 ? "its" : "their"} prices to compare against.
-            </p>
-          )}
-        </Card>
-      )}
+              )}
+              <details className="mt-2 text-xs">
+                <summary className="cursor-pointer text-ink-3">How this is checked</summary>
+                <p className="mt-1 text-ink-3">
+                  Two systems filled in separately: the wholesaler&rsquo;s invoice, and whoever booked the delivery in at the counter. Where both hold a figure the price is checked; where only one does, nobody has. A charge on a total whose every item matched is freight or a surcharge, not goods. A line the two systems wrote under different codes with the same count and money is the same item written two ways, or front-end goods with no NDC.
+                </p>
+              </details>
+            </Card>
+          );
+        })()}
 
       {/*
         Invoices the site already holds but never filed as invoices.

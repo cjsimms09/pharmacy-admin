@@ -270,7 +270,7 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
   const { inArray } = await import("drizzle-orm");
   const held = await db.query.claims.findMany({
     where: inArray(schema.claims.rxNumber, rxNumbers),
-    columns: { id: true, rxNumber: true, fillNumber: true, bin: true, status: true, remitCents: true, dateFilled: true, acquisitionCents: true },
+    columns: { id: true, rxNumber: true, fillNumber: true, bin: true, status: true, remitCents: true, dateFilled: true, acquisitionCents: true, quantityThousandths: true },
   });
   const byKey = new Map<string, typeof held>();
   for (const h of held) {
@@ -349,6 +349,8 @@ export async function enrichClaimsFrom(rows: DispensedRow[], stamp: string): Pro
           ...(r.fillTotalPriceCents !== undefined ? { fillTotalPriceCents: r.fillTotalPriceCents } : {}),
           // The bottle's cost, and only if this row does not already carry one of its own.
           ...(p.acquisitionCents === null || p.acquisitionCents === 0 ? fillCost : {}),
+          // The quantity too, where the report printed none: a $0 primary row prints 0.0000 (2 October 2026).
+          ...((p.quantityThousandths === null || p.quantityThousandths === 0) && r.quantityThousandths ? { quantityThousandths: r.quantityThousandths } : {}),
           basisOfReimbursement: r.basisOfReimbursement ?? undefined,
           basisOfCostDetermination: r.basisOfCostDetermination ?? undefined,
           planId: r.primary.planId ?? undefined,
