@@ -8,6 +8,14 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, 12:19: everything above is live (ac9d47c), printed and read.** He said "no do it now"; the first build failed
+  twice on the edge runtime (a middleware file; see the commit and the memory note), the launcher died mid-install once,
+  and the site was down ~35 minutes. Redirects are config redirects now. The printouts showed six faults, fixed and
+  redeployed (ac9d47c). Read as him afterwards: Today, the books (both months), the bank, the retired notice, remits,
+  temps are clean enough; **the supplier invoices page is the next design pass** — it opens with a link to the retired
+  buying page, four paragraphs of warnings, seven documents with four buttons each, a nine-field search form, and a
+  list that prints every NDC line inline.
+
 - **2 October, early afternoon: the books and Today, laid out for reading.** The books (/money): six figures, no comparison
   for a month in progress, the account with one sentence on the gap and the parts behind a press, "At the bank" in one
   line with the three forms behind a press, the six-month strip saying "before the books" rather than "1 missing", and one
