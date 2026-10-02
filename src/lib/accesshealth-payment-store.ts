@@ -97,6 +97,7 @@ export async function fileAccessHealthPayment(
           revenueCents: 0,
           receivedOn,
           reference: `${p.eftNumber}/${c.rxNumber}`,
+          origin: `accesshealth:${p.eftNumber}`,
           documentId: input.documentId,
           notes: `From the AccessHealth payment report for ${p.eftNumber}, ${section.plan}${c.rejection ? `, rejection code ${c.rejection}` : ""}.`,
         },

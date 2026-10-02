@@ -356,6 +356,7 @@ export async function importRemitDetail(
             revenueCents: 0,
             receivedOn: l.remitOn ?? row.remitOn ?? null,
             reference: `ProviderPay ${row.payerName} ${remitNumber}`,
+            origin: `providerpay-detail:${remitNumber}`,
             documentId: opts.documentId ?? null,
           },
           user,

@@ -235,6 +235,7 @@ export async function importCopayRemit(
         revenueCents: claim ? 0 : n.paidCents,
         receivedOn: r.paidOn,
         reference: r.reference,
+        origin: `copay:${r.reference ?? r.paidOn ?? "copay"}`,
         /*
          * The BIN these adjudicate on, told to the matcher rather than kept to ourselves.
          *

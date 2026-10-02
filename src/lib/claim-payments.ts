@@ -1,8 +1,9 @@
 import { chooseClaimForRemittance } from "./match-remittance";
 import "server-only";
+import { originClass, legacyOrigin } from "./payment-origin";
 import nodePath from "node:path";
 import { db, schema } from "@/db";
-import { eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { newId } from "./crypto";
 import type { LaterPayment } from "./fills";
 import { formatCents } from "./money";
@@ -65,6 +66,12 @@ export type RecordPayment = {
    * ageing unsettled.
    */
   bin?: string | null;
+  /**
+   * Which kind of document this was read from, "<class>:<document key>" (payment-origin.ts): "835:<trace>",
+   * "accesshealth:<EFT>", "providerpay-detail:<remit>". What the duplicate rule compares. Leave it off only for a
+   * hand-typed payment.
+   */
+  origin?: string | null;
 };
 
 /**
@@ -74,12 +81,49 @@ export type RecordPayment = {
  * loaded yet is still recorded, and picks up its claim when the claim arrives. Losing money because
  * the remittance beat the daily report would be an ordering nobody outside this code knows about.
  */
-export async function recordClaimPayment(p: RecordPayment, user: { name: string }): Promise<{ id: string; matched: boolean; settledReversed: boolean; ambiguous: { count: number; why: string } | null; outOfBooks: boolean }> {
+export async function recordClaimPayment(p: RecordPayment, user: { name: string }): Promise<{ id: string; matched: boolean; settledReversed: boolean; ambiguous: { count: number; why: string } | null; outOfBooks: boolean; duplicateOf: string | null }> {
   const rx = p.rxNumber.trim();
   if (!rx) throw new Error("A payment has to name the prescription it is for.");
   if (!Number.isFinite(p.amountCents) || p.amountCents === 0) throw new Error("Give the amount received.");
 
   const { claim, onlyReversed, ambiguous } = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null, Math.round(p.amountCents), p.bin ?? null, p.source === "copay_card" || isProgrammePayer(p.payer));
+
+  /*
+   * The same money through another kind of document is one payment.
+   *
+   * A payment reaches this site by more than one road: the payer's 835, ProviderPay's remittance detail, Health
+   * Mart Atlas's AccessHealth report. Measured 1 October 2026: 752 payments ($27,732.69) stood twice against their
+   * claims, once from the 835 and once from a report, and every one of them read as an over-payment. A row for the
+   * same claim (or, unmatched, the same prescription), amount, day and source from a different kind of document is
+   * the same money. The 835's row is the one kept, because it carries the trace and the adjustment reasons: where a
+   * report's row came first, the 835 takes it over. Two rows from the same kind of document are not a duplicate
+   * here — a claim paid, taken back and paid again inside one remittance is two lines, and each reader keeps its
+   * own count of those — so only a different origin class is one.
+   */
+  const origin = p.origin ?? null;
+  if (origin && p.receivedOn) {
+    const same = [eq(schema.claimPayments.amountCents, Math.round(p.amountCents)), eq(schema.claimPayments.receivedOn, p.receivedOn), eq(schema.claimPayments.source, p.source)];
+    const twins = await db.query.claimPayments.findMany({
+      where: claim ? and(eq(schema.claimPayments.claimId, claim.id), ...same) : and(isNull(schema.claimPayments.claimId), eq(schema.claimPayments.rxNumber, rx), ...same),
+    });
+    const classOf = (t: (typeof twins)[number]) => originClass(t.origin ?? legacyOrigin(t));
+    const twin = twins.find((t) => classOf(t) !== originClass(origin));
+    if (twin) {
+      if (originClass(origin) === "835" && classOf(twin) !== "835") {
+        await db
+          .update(schema.claimPayments)
+          .set({
+            reference: p.reference ?? twin.reference,
+            origin,
+            documentId: twin.documentId ?? p.documentId ?? null,
+            notes: [twin.notes, p.notes ? `Also ${p.notes.replace(/^From /, "in ")}` : null].filter(Boolean).join(" ") || null,
+          })
+          .where(eq(schema.claimPayments.id, twin.id));
+      }
+      return { id: twin.id, matched: twin.claimId !== null, settledReversed: false, ambiguous: null, outOfBooks: twin.outOfBooks, duplicateOf: twin.id };
+    }
+  }
+
   const id = newId();
   await db.insert(schema.claimPayments).values({
     id,
@@ -108,8 +152,38 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
     outOfBooks: isOutOfBooks(p.receivedOn),
     notes: [p.notes, onlyReversed ? "The only claim this pharmacy holds for that fill was reversed, so the payment is recorded against no claim. Worth asking the plan what it paid for." : null].filter(Boolean).join(" ") || null,
     recordedBy: user.name,
+    origin,
   });
-  return { id, matched: claim !== null, settledReversed: onlyReversed, ambiguous, outOfBooks: isOutOfBooks(p.receivedOn) };
+  return { id, matched: claim !== null, settledReversed: onlyReversed, ambiguous, outOfBooks: isOutOfBooks(p.receivedOn), duplicateOf: null };
+}
+
+/**
+ * The CAS adjustments an 835 gives for a payment, kept beside it once: what the payer took off and why, in the
+ * payer's own codes. Where a payment already has its reasons (the same 835 read twice, or the row taken over from a
+ * report) nothing is added.
+ */
+export async function keepAdjustments(paymentId: string, adjustments: import("./x12-835").Adjustment[]): Promise<number> {
+  if (adjustments.length === 0) return 0;
+  const held = await db.query.paymentAdjustments.findFirst({ where: eq(schema.paymentAdjustments.paymentId, paymentId), columns: { id: true } });
+  if (held) return 0;
+  await db.insert(schema.paymentAdjustments).values(adjustments.map((a) => ({ id: newId(), paymentId, groupCode: a.groupCode, reasonCode: a.reasonCode, amountCents: a.amountCents, quantity: a.quantity, loop: a.loop })));
+  return adjustments.length;
+}
+
+/**
+ * The PLB lines of a remittance — DIR, recoupments, fees, interest taken at remittance level rather than off any one
+ * claim — kept once each (the unique index on trace, reason, reference and amount refuses a second reading).
+ */
+export async function keepHoldbacks(r: import("./x12-835").Remittance, opts: { fileName: string; documentId?: string | null }): Promise<number> {
+  let kept = 0;
+  for (const a of r.providerAdjustments) {
+    const res = await db
+      .insert(schema.remittanceHoldbacks)
+      .values({ id: newId(), traceNumber: r.traceNumber ?? null, payer: r.payer ?? null, reasonCode: a.reasonCode, reference: a.reference, amountCents: a.amountCents, receivedOn: r.paidOn ?? null, documentId: opts.documentId ?? null, fileName: opts.fileName, outOfBooks: isOutOfBooks(r.paidOn) })
+      .onConflictDoNothing();
+    kept += res.rowsAffected ?? 0;
+  }
+  return kept;
 }
 
 /**
@@ -534,6 +608,8 @@ async function importOneRemittance(
   const out = {
     payments: 0,
     alreadyHeld: 0,
+    /** Already posted from another kind of document (ProviderPay's detail, the AccessHealth report): the same money, counted once. */
+    seenElsewhere: 0,
     matched: 0,
     unmatched: 0,
     paidAReversedFill: 0, beforeTheStart: 0, ambiguous: 0,
@@ -618,9 +694,15 @@ async function importOneRemittance(
         reference,
         documentId: opts.documentId ?? null,
         notes: `From ${fileName}${r.traceNumber ? `, trace ${r.traceNumber}` : ""}.`,
+        origin: `835:${r.traceNumber ?? fileName}`,
       },
       user,
     );
+    await keepAdjustments(rec.id, p.adjustments);
+    if (rec.duplicateOf) {
+      out.seenElsewhere++;
+      continue;
+    }
     out.payments++;
     out.amountCents += p.paidCents!;
     if (rec.matched) out.matched++;
@@ -646,8 +728,11 @@ async function importOneRemittance(
    * rebuilt on a snapshot it banked 15 of them beside the report's payment, $148,965.45 twice (Session 2, money
    * map G-835-1). Other payers' remittances still bank, and still meet the gate.
    */
+  await keepHoldbacks(r, { fileName, documentId: opts.documentId ?? null });
+
   const throughProviderPay = /provider\s*pay|health\s*mart|access\s*health/i.test(r.payer ?? "");
-  if (opts.bank && !throughProviderPay && !facilitator && r.paidOn && (r.totalPaidCents ?? out.amountCents) > 0 && out.payments > 0) {
+  /* Banked even where every line was already posted from a report: the receipt's own gate refuses the same payment number twice. */
+  if (opts.bank && !throughProviderPay && !facilitator && r.paidOn && (r.totalPaidCents ?? out.amountCents) > 0 && out.payments + out.seenElsewhere > 0) {
     const { addCashReceipt } = await import("./expenses");
     await addCashReceipt({
       month: r.paidOn.slice(0, 7),

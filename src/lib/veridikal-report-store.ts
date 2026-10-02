@@ -89,6 +89,7 @@ export async function fileVeridikalReport(
         revenueCents: amountCents,
         receivedOn: row.depositOn,
         reference,
+        origin: `veridikal:${row.depositOn}`,
         documentId: input.documentId,
         notes: `From Veridikal's ${p.program === "evoucher" ? "eVoucher" : "Denial Conversion"} summary${input.fileName ? ` (${input.fileName})` : ""}, batch ${row.depositOn}, transaction ${row.transaction}: ${money(row.paymentCents)} ${p.program === "evoucher" ? "voucher" : "from the manufacturer"} and a ${money(row.feeCents)} fee.`,
       },

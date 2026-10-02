@@ -2734,8 +2734,18 @@ export const claimPayments = sqliteTable(
     notes: text("notes"),
     recordedBy: text("recorded_by").notNull(),
     createdAt: text("created_at").notNull().default(now()),
+    /** Which kind of document it was read from, "<class>:<document key>" (payment-origin.ts). Null on rows from before 1 October 2026. */
+    origin: text("origin"),
   },
-  (t) => [index("claim_payments_claim_idx").on(t.claimId), index("claim_payments_rx_idx").on(t.rxNumber), index("claim_payments_received_idx").on(t.receivedOn), index("claim_payments_document_idx").on(t.documentId), index("claim_payments_out_of_books_idx").on(t.outOfBooks)],
+  (t) => [
+    index("claim_payments_claim_idx").on(t.claimId),
+    index("claim_payments_rx_idx").on(t.rxNumber),
+    index("claim_payments_received_idx").on(t.receivedOn),
+    index("claim_payments_document_idx").on(t.documentId),
+    index("claim_payments_out_of_books_idx").on(t.outOfBooks),
+    /** What the duplicate rule in recordClaimPayment looks a twin up by. */
+    index("claim_payments_identity_idx").on(t.claimId, t.amountCents, t.receivedOn, t.source),
+  ],
 );
 
 /**
@@ -3867,3 +3877,83 @@ export const cashAhead = sqliteTable("cash_ahead", {
   basis: text("basis"),
   computedAt: text("computed_at").notNull(),
 });
+
+/** The decisions a person can take on a claim leg. */
+export const CLAIM_DECISIONS = ["chase", "wait", "paid_elsewhere", "write_off", "rebill", "settled", "not_ours"] as const;
+export type ClaimDecision = (typeof CLAIM_DECISIONS)[number];
+
+/**
+ * What a person decided about a claim leg, keyed by the leg itself (`leg_key` = rx | fill | date filled | BIN) so
+ * the decision survives a re-import of the claims file. One decision in force per leg; a new one replaces it and the
+ * old one lives on in the audit.
+ */
+export const claimDecisions = sqliteTable(
+  "claim_decisions",
+  {
+    id: text("id").primaryKey(),
+    legKey: text("leg_key").notNull(),
+    rxNumber: text("rx_number").notNull(),
+    fillNumber: integer("fill_number"),
+    dateFilled: text("date_filled").notNull(),
+    bin: text("bin"),
+    decision: text("decision", { enum: CLAIM_DECISIONS }).notNull(),
+    note: text("note"),
+    decidedBy: text("decided_by").notNull(),
+    decidedAt: text("decided_at").notNull(),
+    /** For "wait": the day the question comes back if nothing has arrived. */
+    revisitOn: text("revisit_on"),
+    resolvedAt: text("resolved_at"),
+  },
+  (t) => [uniqueIndex("claim_decisions_leg_idx").on(t.legKey), index("claim_decisions_decision_idx").on(t.decision)],
+);
+
+/** The states a claim leg can be in, as the engine computes them (engine/claims.ts). */
+export const CLAIM_STATES = ["paid", "short", "over", "unpaid", "due", "unmeasured", "programme", "cash", "fee", "reversed", "reversed_paid"] as const;
+export type ClaimState = (typeof CLAIM_STATES)[number];
+
+/**
+ * One row per claim leg in the books, as the engine last computed it: what was expected, what has been paid (each
+ * payment once), the plan group's cycle, the state, the adjustment reasons behind a short payment, and the decision
+ * in force. Rebuilt whole on every engine pass; never a source of truth. Read by Claims, Today, the month and Cash
+ * ahead, so they cannot disagree.
+ */
+export const claimStanding = sqliteTable(
+  "claim_standing",
+  {
+    claimId: text("claim_id").primaryKey(),
+    legKey: text("leg_key").notNull(),
+    rxNumber: text("rx_number").notNull(),
+    fillNumber: integer("fill_number"),
+    dateFilled: text("date_filled").notNull(),
+    soldOn: text("sold_on"),
+    ndc11: text("ndc11"),
+    itemName: text("item_name"),
+    /** The payer's canonical name (engine/payers.ts). */
+    payer: text("payer").notNull(),
+    payerRaw: text("payer_raw"),
+    bin: text("bin"),
+    pcn: text("pcn"),
+    groupNumber: text("group_number"),
+    /** Who the money came through, as the payments name it. */
+    route: text("route"),
+    programme: integer("programme", { mode: "boolean" }).notNull().default(false),
+    expectedCents: integer("expected_cents").notNull(),
+    paidCents: integer("paid_cents").notNull().default(0),
+    payments: integer("payments").notNull().default(0),
+    firstPaidOn: text("first_paid_on"),
+    lastPaidOn: text("last_paid_on"),
+    facilitatorExpectedCents: integer("facilitator_expected_cents").notNull().default(0),
+    facilitatorPaidCents: integer("facilitator_paid_cents").notNull().default(0),
+    state: text("state", { enum: CLAIM_STATES }).notNull(),
+    ageDays: integer("age_days").notNull(),
+    cycleDays: integer("cycle_days"),
+    dueOn: text("due_on"),
+    shortCents: integer("short_cents").notNull().default(0),
+    /** JSON: the CAS adjustments behind the gap, [{group, reason, cents}], where the 835 gave them. */
+    reasons: text("reasons"),
+    decision: text("decision"),
+    decisionNote: text("decision_note"),
+    computedAt: text("computed_at").notNull(),
+  },
+  (t) => [index("claim_standing_payer_idx").on(t.payer), index("claim_standing_state_idx").on(t.state), index("claim_standing_filled_idx").on(t.dateFilled), index("claim_standing_leg_idx").on(t.legKey)],
+);
