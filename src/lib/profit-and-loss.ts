@@ -96,6 +96,12 @@ export type MonthlyPL = {
   otherCashOutCents: number;
   /** Net cash from operations less the other cash out: what the bank balance actually did. */
   cashChangeCents: number | null;
+  /**
+   * Present where the cash account was built from the bank statement (cash-from-bank.ts): the owner's rule of
+   * 2 October 2026, "cash accounting should match the bank". Absent for a month with no statement yet, whose cash
+   * account is what the feeds have seen and says so.
+   */
+  onBank?: { lines: number; inCents: number; outCents: number; changeCents: number; unnamed: PLLine[]; unnamedCents: number; unconfirmedReceipts: PLLine[] };
 
   /**
    * Bought less dispensed: stock going onto the shelf or coming off it.
@@ -851,8 +857,26 @@ export async function accountsFor(
     const inBooks = wanted.filter((m) => !monthIsOutOfBooks(m));
     const shared = inBooks.length ? await loadShared(inBooks, basis) : null;
     const inputs = wanted.map((m) => (shared && !monthIsOutOfBooks(m) ? monthInputs(m, basis, shared) : beforeBooksInputs(m, basis)));
+    const months = inputs.map((i) => (monthIsOutOfBooks(i.month) ? beforeBooksAccount(i.month, basis) : monthlyPL(i)));
+    /*
+     * The cash account is the bank statement, categorised, wherever a statement has been read.
+     *
+     * The owner, 2 October 2026: "cash accounting should match the bank, this is how cash accounting works.." The
+     * feed-built account above counted a receipt on the payer's notice date and left out what nothing had placed,
+     * and differed from the bank by $15,494.78 in September with $8,190.95 of it unnamed. Where the month's statement
+     * is on file its lines are the account (cash-from-bank.ts); where it is not, the feeds' account stands and says so.
+     */
+    if (basis === "cash") {
+      const { cashOnTheBank } = await import("./cash-from-bank");
+      for (let k = 0; k < months.length; k++) {
+        if (monthIsOutOfBooks(months[k].month)) continue;
+        const onBank = await cashOnTheBank(months[k].month, months[k]);
+        if (onBank) months[k] = onBank;
+        else months[k].caveats.unshift(`No bank statement has been read for ${months[k].month} yet, so this cash account is what the feeds have seen reach the bank; the statement replaces it, line for line, when it is read.`);
+      }
+    }
     return {
-      months: inputs.map((i) => (monthIsOutOfBooks(i.month) ? beforeBooksAccount(i.month, basis) : monthlyPL(i))),
+      months,
       inputs,
       fills: (shared?.fills ?? []).map((f) => ({ dateFilled: f.dateFilled, cashPlan: f.cashPlan, revenueCents: f.revenueCents })),
     };

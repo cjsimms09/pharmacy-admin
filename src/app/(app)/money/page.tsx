@@ -79,6 +79,31 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const { accrual, cash, scripts, gap, pace, sources, countedOnce, feeds, difference, balances } = books;
   /* Read back from the last pull, so this can never disagree with the feed that computed it. */
   const completeness = await claimsCompleteness();
+  /*
+   * The cash account is the bank statement, categorised (cash-from-bank.ts; the owner, 2 October 2026: "cash
+   * accounting should match the bank"). Where every month of the period has its statement read, the cash column
+   * is the bank's own movement to the cent, and what nobody has named yet is inside it under its own heading.
+   */
+  const bankMonths = books.cash.months.filter((m) => m.onBank);
+  const onBank =
+    bankMonths.length > 0 && bankMonths.length === books.cash.months.length
+      ? {
+          lines: bankMonths.reduce((n, m) => n + (m.onBank?.lines ?? 0), 0),
+          unnamedLines: bankMonths.reduce((n, m) => n + (m.onBank?.unnamed ?? []).reduce((k, l) => k + Number((l.note ?? "0").split(" ")[0]), 0), 0),
+          unnamedCents: bankMonths.reduce((n, m) => n + (m.onBank?.unnamedCents ?? 0), 0),
+          unconfirmedReceipts: Object.values(
+            bankMonths
+              .flatMap((m) => m.onBank?.unconfirmedReceipts ?? [])
+              .reduce<Record<string, { label: string; amountCents: number; note: string }>>((acc, u) => {
+                const e = acc[u.label] ?? { label: u.label, amountCents: 0, note: "" };
+                e.amountCents += u.amountCents;
+                e.note = u.note ?? e.note;
+                acc[u.label] = e;
+                return acc;
+              }, {}),
+          ),
+        }
+      : null;
   const KINDS: { key: "third_party" | "patient" | "retail" | "facilitator" | "rebate" | "other"; label: string }[] = [
     { key: "third_party", label: "Plan remittances" },
     { key: "patient", label: "Patient payments" },
@@ -271,12 +296,31 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
               <Line label="Gross profit" a={accrual.grossProfitCents} c={cash.grossProfitCents} strong />
               <Line label="Operating" a={accrual.operatingCents} c={cash.operatingCents} href={sources.expenses} />
               <Line label="Net" a={accrual.netProfitCents} c={cash.netProfitCents} strong note="accrual: profit before tax · cash: net cash from operations" />
-              {cash.otherCashOut.length > 0 && <Line label="Loan principal, draws, equipment, tax" a={0} c={cash.otherCashOutCents} note="not a cost; cash out all the same" />}
-              <Line label="Cash change" a={null} c={cash.cashChangeCents ?? cash.netProfitCents} strong note="what the bank balance did in the period; there is no accrual side to it" />
+              {cash.otherCashOut.length > 0 && (
+                <Line
+                  label={onBank && onBank.unnamedLines > 0 ? "Not a cost, and lines not yet named" : "Loan principal, draws, equipment, tax"}
+                  a={0}
+                  c={cash.otherCashOutCents}
+                  href={onBank && onBank.unnamedLines > 0 ? `/money/bank-review?month=${period.months[period.months.length - 1]}` : undefined}
+                  note={onBank && onBank.unnamedLines > 0 ? `${formatCents(onBank.unnamedCents)} on ${onBank.unnamedLines} line${onBank.unnamedLines === 1 ? "" : "s"} nobody has named yet; name them on the bank page and they move to where they belong` : "not a cost; cash out all the same"}
+                />
+              )}
+              <Line
+                label="Cash change"
+                a={null}
+                c={cash.cashChangeCents ?? cash.netProfitCents}
+                strong
+                note={onBank ? `equals the bank's own movement over ${onBank.lines} lines, to the cent` : "what the feeds have seen reach the bank; the statement replaces it, line for line, when it is read"}
+              />
             </tbody>
           </table>
         </div>
         <p className="mt-2 text-xs text-ink-2">{gap.says}</p>
+        {onBank && onBank.unconfirmedReceipts.length > 0 && (
+          <p className="mt-1 text-xs text-ink-3">
+            Beside the cash account, not in it: {onBank.unconfirmedReceipts.map((u) => `${u.label.toLowerCase()} ${formatCents(u.amountCents)} (${u.note})`).join("; ")}.
+          </p>
+        )}
 
         {/*
           Why the two columns differ, in parts that add to exactly the difference.

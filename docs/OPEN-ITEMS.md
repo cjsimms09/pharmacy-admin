@@ -117,6 +117,17 @@ they are coming"; the By-payer tab shows ESI's plan groups and when it last paid
 
 ## Decisions he made today, so nobody reopens them
 
+- **The cash account is the bank statement, categorised.** His words, 2 October 2026: "cash accounting should match
+  the bank, this is how cash accounting works.." Every bank line is revenue, an offset, cost of goods, an operating
+  cost, a flow that is neither (loan principal, sales tax remitted, a transfer to the practice's account), or not yet
+  named — and the account is their sum, equal to the bank's movement to the cent (`src/lib/cash-from-bank-rules.ts`,
+  `cash-from-bank.ts`). A line nobody has named stays inside the account under "Not yet named" until he names it on
+  the bank page: naming lines is the reconciliation. Receipts the bank has not confirmed (register days in transit,
+  RxRescue credit memos that are never cash) sit beside the account. Supersedes the receipts rule of 11 September;
+  extends his 1 October decision to the receipts side. September on the bank: in $753,871.46, out $784,171.52, change
+  −$30,300.06; two cheques ($5,858.79) not yet named; beside it credit memos $23,269.22 and register days $8,258.65.
+  A month with no statement yet keeps the feed-built cash account and says so.
+
 - **The nine Parmed invoices of 1–8 September stand on their PioneerRx receipts.** His words, 2 October 2026:
   "pioneer receipt as invoice for those." Per delivery, as before (`pioneer_purchases.receipt_settles`), not a rule
   for Parmed going forward: its invoices arrive by email from the 9th. A statement naming a receipt-settled
@@ -152,6 +163,14 @@ they are coming"; the By-payer tab shows ESI's plan groups and when it last paid
 - **Revenue stays recognised at pickup, not at fill.** Asked and answered on 12 September: the stock
   is still his until the patient takes it, the cost is held out with the revenue, and an unclaimed
   script gets reversed. $92,154.24 sits in the bin and the account says so.
+
+## Found 2 October — the books, on his questions
+
+| Finding | Money | State | Who |
+|---|---|---|---|
+| **September's accrual gross profit is overstated by about $52,000.** OBSERVATION: the books state $129,672.95 (18.3%) on revenue $707,633.32 and cost $590,635.72. The revenue line is PioneerRx's monthly sales summary — every prescription picked up in September, including ones filled in late August — and the cost line is the fills the site holds, which begin on 1 September: $643,902.38 of fill revenue stands behind $588,144.20 of cost, and the other $57,574 of summary revenue has no cost against it. SHOULD BE: sales less the cost of the goods sold, on one population; PioneerRx's own daily reports, corrected for the cost they repeat on second-payer rows, put the month near 11%, and the site's own fills at fill date near 9–11%. DIFFERENCE: 18.3% against about 11.8% like for like. A first-month artefact of starting the books clean; October will not have it. | ≈ $52,000 of September gross profit | **to fix: one population for both sides, the August pickups named as their own line** | 1 |
+| **The account refuses to call a month complete until a "DIR fees and price concessions" expense is typed by hand.** OBSERVATION: no September claim carries a DIR fee, no remittance adjustment or holdback is recorded, nothing is entered, and the warning stands on the September and October books. SHOULD BE: Part D price concessions have been taken at the point of sale since 2024, inside the paid amount; any post-sale fee arrives on the remittance, which the site reads; nothing is typed. DIFFERENCE: a warning asking for a figure that does not exist as a hand entry. One question open: does any PBM still send a fee as a separate statement or invoice? | — | **to fix: read the remittances' adjustments; "measured and none" when zero; the hand-entry line goes** | 1, question to him |
+| **The cash account differed from the bank by $15,494.78 with $8,190.95 unnamed** — the receipts rule, unplaced and noted lines left out, credit memos counted as cash. See the decision above. | $8,190.95 unnamed | **fixed: equals the bank to the cent; $5,858.79 on two cheques not yet named, inside the account** | 1 |
 
 ## Found 2 October — why the original site is slow, measured
 

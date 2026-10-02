@@ -8,6 +8,18 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, late afternoon: the cash account is the bank statement, categorised** (his rule; decision recorded in
+  `docs/OPEN-ITEMS.md`). `src/lib/cash-from-bank-rules.ts` decides each bank line — by its receipt, invoice or expense
+  link, by the placement engine's own sentence ("Out to Rx Systems.", "IPC: $1,171.46 is exactly these 2 invoices"),
+  by the practice's account *6728 and what the transfer was for — and `cash-from-bank.ts` builds the month's cash
+  account from the lines, equal to the bank's movement to the cent; `accountsFor` swaps it in for every month with a
+  statement. September: revenue $743,174.22, cost of goods $698,709.30, operating $59,790.20, net −$15,325.28, loan
+  principal and sales tax $9,115.99, not yet named $5,858.79 (the two cheques), change −$30,300.06 = the bank. The
+  books page says so under the cash column and lists what sits beside the account. Not yet deployed (the deploy
+  window is after 18:30). Still to do on the same rule: the bank page's categorise-a-line tool (the "tell the site
+  what it cannot match" he asked for), the pack's bridge (now redundant), and two findings on the accrual side in
+  `docs/OPEN-ITEMS.md` (September gross profit overstated ≈ $52,000; the DIR hand-entry warning).
+
 - **2 October, afternoon: he chose to fix the original site rather than continue the rebuild, and speed was first.**
   His words are in `docs/BACKLOG.md` (the brief for every page: simpler, better tools, nothing lost, sellable).
   Measured on the pharmacy computer, the old dashboard from cold ran twenty sources totalling 28.5 s; the app held
