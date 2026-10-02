@@ -8,6 +8,17 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, his verdict on the rebuild, and it binds both sessions.** He printed Today: 29 "Needs you"
+  items, paragraphs on nearly all, template sentences with wrong day counts and dropped subjects, three date
+  formats, chips naming the source list not the thing, tiles disagreeing with their lists, feeds listed twice,
+  a wrapping header. "It is not just the today page, its everything." The brief said six numbers and a list,
+  no paragraphs, a state is a chip, ask only when a rule cannot decide — and the screens were built as engine
+  output poured into lists with the engine's own sentences, five stages in two days, never rendered and read
+  as a page. From here: no screen ships until it has been rendered, printed and every sentence read cold as
+  him; the brief's rules become tests that fail (no paragraphs, tile equals list, one date format, nothing on
+  Needs You without a person's act); one screen at a time, in front of him, before the next; "shipped" means
+  the stage gate in `docs/REBUILD.md` passed as written. Today is first. Do not build another screen the old way.
+
 ### From the pharmacy session — 1 October: the rebuild has begun. Spec in `docs/REBUILD.md`; stages 1 to 4 are live
 
 **Stage 1 of the rebuild is on `feature/compliance`** (commit 1d925fa): the engine (`src/lib/engine`) and Today
