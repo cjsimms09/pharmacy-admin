@@ -186,6 +186,23 @@ export function storyOf(row: InboxRow): LineStory {
   }
 
   if (row.routedAs && row.routedAs !== "unrecognised") {
+    /*
+     * A report the model reads — McKesson's daily Purchase Drill Down, a dashboard picture whose columns the PDF text
+     * runs together — waits for the owner's button, by his rule that the model runs only when he presses one. That is
+     * not a hold and not a fault: it is filed, and the monthly rebate statement carries the same ratio without it.
+     * The owner, 2 October 2026, on seeing two of these under "not recognised": "we should have none of these issues
+     * in new site."
+     */
+    if (result && /needs the model/i.test(result)) {
+      return {
+        outcome: "filed_only",
+        headline: `${kind}, filed; read with the model on your button`,
+        changed: null,
+        why: "A dashboard picture the site reads only with the model, which runs when you press the button and not on its own. The monthly rebate statement carries the same ratio without it, so nothing waits on this.",
+        tone: "muted",
+        invitesRerouting: false,
+      };
+    }
     if (result && HELD.test(result)) {
       return {
         outcome: "held",

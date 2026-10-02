@@ -80,6 +80,38 @@ describe("what the report says about itself", () => {
   });
 });
 
+describe("a month just begun", () => {
+  /*
+   * On the first of the month the report prints the new month with its ratios and no purchase figures yet. Measured
+   * 1 and 2 October 2026: the reader found six months and refused the whole file, because the pairing check wanted
+   * every month paired and the empty month could not be — so the file fell to the model, which the owner's rule keeps
+   * off its own leash, and the day's ratio went unread. A month with no figures is not checked; the others are.
+   */
+  function begun(): PdfItem[] {
+    const rows = [
+      { n: "2", label: "September-2026", net: "$106,322.62", rx: "$105,966.91", brand: "$96,700.76", generic: "$9,621.86", gcr: "21.79%", osRx: "16.54%", osGx: "79.80%" },
+      { n: "3", label: "August-2026", net: "$514,935.28", rx: "$511,890.20", brand: "$465,625.72", generic: "$49,309.56", gcr: "26.02%", osRx: "16.11%", osGx: "60.58%" },
+    ];
+    const out: PdfItem[] = [at(38.25, "1"), at(63, "October-2026")];
+    for (const r of rows) out.push(at(38.25, r.n), at(63, r.label), at(223.828, r.net), at(348.828, r.rx), at(473.828, r.brand), at(605.578, r.generic));
+    out.push(at(72.094, "28.41%"), at(192.094, "15.37%"), at(312.094, "53.43%"));
+    for (const r of rows) out.push(at(72.094, r.gcr), at(192.094, r.osRx), at(312.094, r.osGx));
+    out.push(at(778.313, "$355.71"), at(778.313, "$3,045.08"));
+    return out;
+  }
+  const r = parseDrillDown(begun(), HEADER.replace("September 6", "October 2"));
+
+  test("the new month is read with its ratios and no figures, and the file is not refused for it", () => {
+    assert.deepEqual(r.problems, []);
+    assert.equal(r.months[0].month, "2026-10");
+    assert.equal(r.months[0].gcrPercent, 28.41);
+    assert.equal(r.months[0].netPurchasesCents, null);
+    assert.equal(r.months[1].month, "2026-09");
+    assert.equal(r.months[1].totalBrandCents, 9_670_076);
+    assert.ok(r.checks.every((c) => c.ok), r.checks.map((c) => `${c.what}: ${c.detail}`).join("; "));
+  });
+});
+
 describe("reading the by-month table", () => {
   const r = parseDrillDown(table(), HEADER);
 

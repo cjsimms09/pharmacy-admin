@@ -366,7 +366,7 @@ export function parseDrillDown(items: PdfItem[], text: string): DrillRead {
   const checkable = brandGenericSeen;
   checks.push({
     what: "Every month's brand and generic pair uniquely to its net purchases",
-    ok: brandGenericSeen > 0 && brandGenericOk === brandGenericSeen && paired === months.length,
+    ok: brandGenericSeen > 0 && brandGenericOk === brandGenericSeen && paired === months.filter((m) => m.netPurchasesCents !== null).length,
     detail: `${paired} of ${months.length} months paired, ${brandGenericOk} of ${brandGenericSeen} add up`,
   });
   checks.push({

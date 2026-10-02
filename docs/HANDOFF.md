@@ -125,6 +125,17 @@ Three things are new computation:
   between the identifiers and the first date, which the first regex did not allow for. Proved on the real statement:
   30 invoices, $5,877.21 to the cent, due 10 and 25 October; nine of them ($2,097.51, dated 1–8 September) are not on
   file, because Parmed's invoice feed here began on 9 September.
+- **2 October, his words: "we should have none of these issues in new site."** Three arrivals stood as needing him.
+  Parmed's statement (above) was one. The other two were McKesson's daily Purchase Drill Downs, which have a reader
+  that needs no model (`drill-down-read.ts`) and had read every day through 30 September; on the first of a month the
+  report prints the new month with ratios and no figures, the pairing check wanted every month paired, and the file
+  fell to the model, which his rule keeps on his button. The gate now checks only months that carry figures. Two
+  rules changed with it: an arrival that waits for the model is `filed_only` and never "held" (`inbox-line.ts`); and
+  Today's held-document line is decided by the inbox's own story of each arrival (`storyOf`), not by the imported
+  flag — two McKesson totals sheets, read on purpose and loaded from nowhere, had been standing on Today. Documents
+  · Held now shows every such arrival of the last ninety days, not only those inside the latest two hundred, so the
+  two screens agree. Live after: Held 0; Today holds one document, a scanned technician certificate of 16 September
+  that needs him to say whose it is.
 - Stage 5 (retire the old pages) has begun with its instrument: the gate is "a month with no visit to a retired
   page", and nothing had ever counted a visit. Migration 0137 adds `page_visits` (day, route, count); the old layout
   mounts `VisitBeacon`, which posts the path to `/api/visit`; the new nav carries the old pages behind "More". The

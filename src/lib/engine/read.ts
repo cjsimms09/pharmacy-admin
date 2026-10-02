@@ -566,13 +566,23 @@ export type DocumentsView = {
  */
 export async function documentsView(today: string): Promise<DocumentsView> {
   const [inboxLine, settledLib, manual, retention] = await Promise.all([import("../inbox-line"), import("../inbox-settled"), import("../manual"), import("./retention")]);
-  const [items, settled, docs, settings] = await Promise.all([
+  const ninetyDays = new Date(Date.parse(`${today}T00:00:00Z`) - 90 * 864e5).toISOString();
+  const [items, settled, docs, settings, older] = await Promise.all([
     db.query.inboxItems.findMany({ orderBy: (i, { desc }) => [desc(i.receivedAt)], limit: 200 }),
     settledLib.settledDocuments(),
     db.query.documents.findMany({ columns: { id: true, title: true, category: true, effectiveOn: true, uploadedAt: true, expiresOn: true, noExpiry: true } }),
     import("../settings").then((m) => m.getSettings()).catch(() => null),
+    db.query.inboxItems.findMany({ where: (i, { and, gte, eq }) => and(gte(i.receivedAt, ninetyDays), eq(i.status, "stored")), orderBy: (i, { desc }) => [desc(i.receivedAt)] }),
   ]);
   const pharmacy = (settings as { pharmacy_name?: string | null } | null)?.pharmacy_name || "This pharmacy";
+  /* An arrival older than the latest two hundred that still needs a person is shown with them, so Today and this screen agree. */
+  const seen = new Set(items.map((i) => i.id));
+  for (const i of older) {
+    if (seen.has(i.id)) continue;
+    const story = inboxLine.storyOf(i);
+    const done = i.documentId ? settled.has(i.documentId) : false;
+    if (!done && ["not_recognised", "rejected", "held"].includes(story.outcome)) items.push(i);
+  }
   const arrived = items.map((i) => {
     const story = inboxLine.storyOf(i);
     const settledBy = i.documentId ? (settled.get(i.documentId) ?? null) : null;

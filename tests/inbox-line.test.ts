@@ -24,6 +24,16 @@ const row = (over: Partial<InboxRow> = {}): InboxRow => ({
   ...over,
 });
 
+describe("a report that waits for the model", () => {
+  test("is filed, not held, and asks nothing of anyone", () => {
+    const s = storyOf({ receivedAt: "2026-10-02T12:33:00.000Z", fromAddress: "reports@example.com", subject: "Purchase Drill Down", fileName: "Purchase_Drill_Down.pdf", documentId: "d1", status: "stored", reason: null, routedAs: "purchase_drilldown", routeResult: "Filed, but could not be loaded: This needs the model, and nothing calls it on its own. Open the page and press the button, and it will run then.", scanned: null });
+    assert.equal(s.outcome, "filed_only");
+    assert.equal(s.tone, "muted");
+    assert.equal(s.invitesRerouting, false);
+    assert.match(s.headline, /read with the model on your button/);
+  });
+});
+
 describe("where it came from", () => {
   test("the three ways in are told apart, because there are three now", () => {
     assert.equal(sourceOf({ fromAddress: "reports@mckesson.com" }).source, "mailbox");

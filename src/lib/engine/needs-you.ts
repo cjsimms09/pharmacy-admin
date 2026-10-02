@@ -71,9 +71,15 @@ async function heldDocuments(today: string): Promise<Line[]> {
     where: and(eq(schema.inboxItems.status, "stored"), gte(schema.inboxItems.receivedAt, since)),
     columns: { id: true, receivedAt: true, fromAddress: true, subject: true, fileName: true, routedAs: true, routeResult: true, imported: true, documentId: true },
   });
+  /*
+   * The inbox's own reading of each arrival decides (inbox-line.ts): a totals sheet read on purpose, a report filed
+   * for the model's button, a document recognised and kept are none of them a person's job. Measured 2 October 2026:
+   * two McKesson "Returns Details" totals sheets and two Purchase Drill Downs stood on Today as held documents, and
+   * nothing about any of them needed anyone.
+   */
+  const { storyOf } = await import("../inbox-line");
   return rows
-    .filter((r) => r.imported === false || r.routedAs === "unrecognised")
-    .filter((r) => !/needs the model/i.test(r.routeResult ?? ""))
+    .filter((r) => ["not_recognised", "held", "rejected"].includes(storyOf({ ...r, status: "stored", reason: null, scanned: null }).outcome))
     .map((r) => {
       const sender = (r.fromAddress.split("@")[1] ?? r.fromAddress).toLowerCase();
       const supplierish = /mckesson|parmed|ipc|ipd|anda|rxsystems|providerpay|accesshealth|wwfppa|redsail|emprise/.test(sender);
