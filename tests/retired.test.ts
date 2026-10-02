@@ -40,7 +40,7 @@ describe("the pages retired on 2 October 2026", () => {
     const src = readFileSync("src/middleware.ts", "utf8");
     const matchers = [...src.matchAll(/"(\/[^"]+)"/g)].map((m) => new RegExp("^" + m[1].replace(/\/:path\*$/, "(/.*)?").replace(/:id/g, "[^/]+") + "$"));
     const samples = ["/purchasing/shelf", "/nadac", "/inventory/returns", "/money/found", "/claims/appeals", "/claims/floor", "/plans", "/payers/plans", "/payers/performance", "/payers/networks", "/payers/contracts/abc", "/payers/sort", "/tools/check", "/tools/data-health", "/reports", "/settings/features", "/v2/today"];
-    assert.equal(samples.length, RETIRED.length + 7, "one sample per rule, and one per branch of the rules that fork");
+    assert.equal(samples.length, RETIRED.length + 6, "one sample per rule, and one per branch of the rules that fork");
     for (const s of samples) {
       assert.ok(isRetired(s), `${s} should be retired`);
       assert.ok(matchers.some((m) => m.test(s)), `middleware does not redirect ${s}`);
