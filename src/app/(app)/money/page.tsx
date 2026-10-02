@@ -12,6 +12,9 @@ import { todayIso, fmt } from "@/lib/dates";
 import { parsePeriod, periodOf, neighbours, type PeriodKind } from "@/lib/ledger";
 import { booksFor, recentMonths } from "@/lib/ledger-store";
 import { claimsCompleteness } from "@/lib/claims-completeness";
+import { db, schema } from "@/db";
+import { eq } from "drizzle-orm";
+import { closeMonthFromBooks } from "./close-month";
 import { PageHeader, Card, Notice } from "@/components/ui";
 import { Bars } from "@/components/bars";
 import { Stat, deltaOf } from "@/components/kit";
@@ -77,6 +80,8 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const { accrual, cash, scripts, gap, pace, sources, countedOnce, feeds, difference, balances } = books;
   /* Read back from the last pull, so this can never disagree with the feed that computed it. */
   const completeness = await claimsCompleteness();
+  /* Whether the month can be closed, as the engine judged it: every bank line placed, the receipts gap named, the month over. */
+  const status = period.kind === "month" ? await db.query.monthStatus.findFirst({ where: eq(schema.monthStatus.month, period.key) }).catch(() => null) : null;
   /*
    * The cash account is the bank statement, categorised (cash-from-bank.ts; the owner, 2 October 2026: "cash
    * accounting should match the bank"). Where every month of the period has its statement read, the cash column
@@ -235,6 +240,14 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             day {dayOfMonth} of {daysInMonth}
             {pace ? ` · ${pace.says}` : ""}
           </span>
+        )}
+        {/* Closing, from the page the month is read on. He asked "can we close sept?" and then "dont see close button?": the only one had been on the retired screens. */}
+        {status?.closeState === "closed" && <span className="badge badge-ok ml-auto">closed {status.closedAt ? fmt(status.closedAt.slice(0, 10)) : ""}</span>}
+        {status?.closeState === "ready" && (
+          <form action={closeMonthFromBooks} className="ml-auto">
+            <input type="hidden" name="month" value={period.key} />
+            <button className="btn btn-sm btn-primary">Close {period.label}</button>
+          </form>
         )}
       </div>
 
