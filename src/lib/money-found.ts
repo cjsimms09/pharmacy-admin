@@ -102,12 +102,17 @@ export function totals(rows: MoneyRow[]): { firstYearCents: number; recurringMon
  * list and, where it is only waiting on a fact, named under `blocked` instead — because "we cannot
  * tell you yet, and here is why" is a useful sentence and a silently short list is not.
  */
-export async function moneyFound(): Promise<MoneyFound> {
-  const { held } = await import("./held");
-  return held("money-found", loadMoneyFound);
+/**
+ * The list as the engine last stored it (src/lib/engine/money-found.ts). Pages read this and never compute: measured
+ * 2 October 2026, computing it on open was seventeen seconds and nine hundred megabytes on the pharmacy computer.
+ */
+export async function moneyFound(): Promise<MoneyFound & { computedAt: string | null }> {
+  const { readMoneyFound } = await import("./engine/money-found");
+  return readMoneyFound();
 }
 
-async function loadMoneyFound(): Promise<MoneyFound> {
+/** The list on the live data, computed. Called by the engine only; it also keeps the recommendation log. */
+export async function computeMoneyFound(): Promise<MoneyFound> {
   const rows: MoneyRow[] = [];
   const blocked: MoneyFound["blocked"] = [];
 

@@ -395,6 +395,28 @@ export async function directoryKeys(): Promise<Map<string, { key: string; teCode
   return keys;
 }
 
+export type DirectoryKey = { key: string; teCode: string | null; genericName: string; strength: string; form: string; labeler: string; classification: "B" | "G" | null; otc: boolean };
+
+/**
+ * The same reading, for only the NDCs asked for, holding nothing.
+ *
+ * `directoryKeys()` reads every NDC the FDA lists — 217,773 rows, four seconds, 279 MB held for ten minutes, measured
+ * 2 October 2026 on the pharmacy computer — and the shelf called it to name 1,845 items. Nothing on the shelf needs an
+ * NDC the pharmacy has never touched, so this asks for the ones in hand, in batches SQLite's variable limit allows.
+ */
+export async function directoryKeysFor(ndcs: Iterable<string>): Promise<Map<string, DirectoryKey>> {
+  const wanted = [...new Set([...ndcs].filter(Boolean))];
+  const out = new Map<string, DirectoryKey>();
+  for (let i = 0; i < wanted.length; i += 500) {
+    const rows = await db.query.drugDirectory.findMany({
+      where: inArray(schema.drugDirectory.ndc11, wanted.slice(i, i + 500)),
+      columns: { ndc11: true, equivalenceKey: true, teCode: true, genericName: true, strength: true, form: true, labeler: true, marketingCategory: true },
+    });
+    for (const r of rows) out.set(r.ndc11, { key: r.equivalenceKey, teCode: r.teCode, genericName: r.genericName, strength: r.strength, form: r.form, labeler: r.labeler, ...fdaClassification(r.marketingCategory) });
+  }
+  return out;
+}
+
 /**
  * The product an NDC belongs to, for grouping: the directory's key where the NDC is in it, else
  * the caller's fallback (a description-derived key), else nothing. The directory's key is prefixed

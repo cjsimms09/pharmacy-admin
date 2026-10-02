@@ -55,7 +55,6 @@ const steps: Record<string, () => Promise<unknown>> = {
     if (period) await booksFor(period);
   },
   moneyPosition: async () => (await import("./money-position")).moneyPosition(),
-  moneyFound: async () => (await import("./money-found")).moneyFound(),
   buyListNow: async () => (await import("./shelf")).buyListNow(),
   minimumsNow: async () => (await import("./minimum-store")).minimumsNow(),
   drugProfitNow: async () => (await import("./drug-profit-store")).drugProfitNow(),

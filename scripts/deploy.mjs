@@ -132,6 +132,20 @@ function probe() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
+  // ── Not under him ──────────────────────────────────────────────────
+  /*
+   * A deploy builds on this computer and restarts the site, and 107 of them went out in the thirty days to
+   * 2 October 2026, most in the middle of his day: a build that takes the machine's memory while he is
+   * dispensing, then a cold site whose first open recomputes everything. So this refuses during opening hours
+   * unless he asked for it now, in which case pass --now.
+   */
+  const argv = process.argv.slice(2);
+  const at = new Date();
+  const hour = at.getHours() + at.getMinutes() / 60;
+  if (at.getDay() !== 0 && hour >= 7.5 && hour < 18.5 && !argv.includes("--now")) {
+    fail(`It is ${at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} on a day the pharmacy is open. A deploy builds on this computer and restarts the site under him. Deploy after 6:30 pm or before 7:30 am, or pass --now when he has asked for it now.`);
+  }
+
   // ── What is being deployed ─────────────────────────────────────────
   if (!fs.existsSync(path.join(root, ".git"))) fail("This folder is not a git checkout; there is nothing to push.");
   const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);

@@ -1959,7 +1959,10 @@ export async function invoiceIssues(): Promise<InvoiceIssue[]> {
 }
 
 async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
-  const rows = await db.query.supplierInvoices.findMany();
+  /* The eleven columns this reads; the whole row, items and all, was 131 MB held after one open, measured 2 October 2026. */
+  const rows = await db.query.supplierInvoices.findMany({
+    columns: { id: true, supplier: true, invoiceNumber: true, invoiceDate: true, totalCents: true, schedule: true, linesRead: true, linesUnread: true, needsReview: true, reviewedAt: true, createdAt: true },
+  });
   const out: InvoiceIssue[] = [];
   const today = todayIso();
 

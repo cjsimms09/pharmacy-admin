@@ -298,7 +298,11 @@ async function loadMovement(lookbackDays: number): Promise<{ rows: Velocity[]; f
    */
   const { addDays, todayIso } = await import("./dates");
   const { gte } = await import("drizzle-orm");
-  const claims = await db.query.claims.findMany({ where: gte(schema.claims.dateFilled, addDays(todayIso(), -(lookbackDays + 7))) });
+  /* The twenty columns the grouping reads, not the forty-one the row carries: the raw row alone was most of 351 MB held after one open, measured 2 October 2026. */
+  const claims = await db.query.claims.findMany({
+    where: gte(schema.claims.dateFilled, addDays(todayIso(), -(lookbackDays + 7))),
+    columns: { id: true, rxNumber: true, fillNumber: true, dateFilled: true, ndc11: true, itemName: true, bin: true, pcn: true, groupNumber: true, pbmName: true, payerLabel: true, quantityThousandths: true, remitCents: true, copayCents: true, patientTotalCents: true, acquisitionCents: true, status: true, onAccount: true, reversalKey: true, daysSupply: true },
+  });
   if (claims.length === 0) return null;
 
   /*
@@ -587,15 +591,16 @@ export async function fullShelfNow(): Promise<FullShelfView> {
 const STATE_ORDER: Record<ShelfRow["state"], number> = { out: 0, short: 1, lean: 2, overstocked: 3, dead: 4 };
 
 async function loadFullShelf(): Promise<FullShelfView> {
-  const [{ velocity: vel, snapshot, from, to }, names, keys, catalogue, nadac] = await Promise.all([
+  const [{ velocity: vel, snapshot, from, to }, names, catalogue, nadac] = await Promise.all([
     shelfMovement(),
     import("./drug-names").then((m) => m.drugNames()),
-    import("./drug-directory-store").then((m) => m.directoryKeys()),
     import("./catalogue-cache").then((m) => m.catalogueRows()),
     import("./nadac-latest").then((m) => m.nadacNow()),
   ]);
   const totals = { items: 0, valueCents: 0, valued: 0, named: 0, out: 0, short: 0, dead: 0 };
   if (!snapshot) return { rows: [], countedOn: null, from, to, totals };
+  /* The directory for the NDCs on the shelf, not the 217,773 the FDA lists: four seconds and 279 MB, measured 2 October 2026. */
+  const keys = await (await import("./drug-directory-store")).directoryKeysFor(snapshot.rxRows.map((r) => r.ndc11));
 
   const { packReadings } = await import("./drug-file");
   const velBy = new Map(vel.map((v) => [v.ndc11, v]));

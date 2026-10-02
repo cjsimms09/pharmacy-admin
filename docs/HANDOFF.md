@@ -8,6 +8,32 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, afternoon: he chose to fix the original site rather than continue the rebuild, and speed was first.**
+  His words are in `docs/BACKLOG.md` (the brief for every page: simpler, better tools, nothing lost, sellable).
+  Measured on the pharmacy computer, the old dashboard from cold ran twenty sources totalling 28.5 s; the app held
+  1.4 GB on a machine with 1.3 GB free; 107 deploys in thirty days had each rebuilt and restarted it under him. What
+  changed, each measured before and after:
+  - **Return soon** (`returnWarningNow`): 15,059 ms and +685 MB retained → 102–155 ms, nothing retained. Stored by
+    the engine in `return_soon` / `return_soon_run` (`src/lib/engine/return-soon.ts`), recomputed only when a
+    count, an invoice, a claims file or a price file moved or the day did (12.6 s in the pass, 1,564 rows).
+  - **Money found** (`moneyFound`): 6,842 ms warm-adjacent, 17,201 ms and +927 MB when it paid for its own caches
+    → 108 ms. Stored in `money_found` / `money_found_run` (`src/lib/engine/money-found.ts`) on the held
+    readings' fingerprint (20 s in the pass, 7 rows). Ages and his word on each line still read live from
+    `recommendation_log`. The idle warmer no longer computes it.
+  - **The engine pass runs in a child process** (`scripts/engine-pass.ts`, spawned by `engineRefresh`; in-process
+    under `PHARMACY_ENGINE_INPROCESS=1`, which the test runner sets): the parent held 15 MB heap after a 26 s pass
+    that would have left ~500 MB inside the app. Falls back in-process where tsx or the script is not on disk.
+  - **The shelf's directory lookup** reads only the shelf's NDCs (`directoryKeysFor`): 217,773 rows, 4.2 s and
+    279 MB held → the 1,845 asked for. **The velocity's claims** read twenty columns, not forty-one (954 → 425 ms).
+    **Invoice issues** reads eleven columns — but still 2.0 s and +155 MB, so its cost is elsewhere in it: next.
+  - **A mailbox sweep that stored something wakes the engine** (`engineAfter("inbox sweep")`), so Today and the
+    stored lists are current without waiting for the half hour.
+  - **`npm run deploy` refuses during opening hours** (07:30–18:30, Monday to Saturday) unless `--now` is passed
+    because he asked; a build on this computer and a cold restart under him was most of "too slow".
+  Still cold on the old dashboard after this: the books for the month (`booksFor`, 11.8 s), money position (2.3 s,
+  +130 MB), invoice issues (2.0 s, +155 MB), feeds (0.9 s, could read `feed_state`), compliance summary (0.7 s),
+  alerts (0.7 s). The books is next, and it is also the page he named as hard to follow.
+
 - **2 October, his verdict on the rebuild, and it binds both sessions.** He printed Today: 29 "Needs you"
   items, paragraphs on nearly all, template sentences with wrong day counts and dropped subjects, three date
   formats, chips naming the source list not the thing, tiles disagreeing with their lists, feeds listed twice,

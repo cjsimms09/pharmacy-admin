@@ -383,8 +383,17 @@ export async function returnWarningNow(today?: string): Promise<ReturnWarning | 
   return returnWarning(view.rows, today ?? todayIso());
 }
 
-/** The list on the live data. Server only; the ranking above is what the tests exercise. */
-export async function returnSoonNow(): Promise<ReturnSoonView> {
+/**
+ * The list as the engine last stored it (src/lib/engine/return-soon.ts). Pages read this and never compute: measured
+ * 2 October 2026, computing it on open was fifteen seconds and six hundred megabytes on the pharmacy computer.
+ */
+export async function returnSoonNow(): Promise<ReturnSoonView & { computedAt: string | null }> {
+  const { readReturnSoon } = await import("./engine/return-soon");
+  return readReturnSoon();
+}
+
+/** The list on the live data, computed. Called by the engine only; the ranking above is what the tests exercise. */
+export async function computeReturnSoon(): Promise<ReturnSoonView> {
   const [{ fullShelfNow }, { returnsDueNow }] = await Promise.all([import("./shelf"), import("./returns-due")]);
   const [shelf, due] = await Promise.all([fullShelfNow(), returnsDueNow()]);
   const { daysBetween } = await import("./dates");

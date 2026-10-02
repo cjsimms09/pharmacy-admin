@@ -1097,6 +1097,11 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
   if (result.stored || result.rejected || result.ignored || result.errors.length) {
     await audit({ action: "inbox.sweep", userId: ctx.userId, userName: ctx.userName, details: summary });
   }
+  /* What arrived is on Today and in the stored lists on the engine's next pass, which this starts rather than waiting for the half hour. */
+  if (result.stored) {
+    const { engineAfter } = await import("./engine/run");
+    engineAfter("inbox sweep");
+  }
   return result;
 }
 

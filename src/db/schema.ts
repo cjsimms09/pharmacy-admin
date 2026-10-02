@@ -3878,6 +3878,82 @@ export const cashAhead = sqliteTable("cash_ahead", {
   computedAt: text("computed_at").notNull(),
 });
 
+/**
+ * The return-soon list as the engine last computed it (src/lib/engine/return-soon.ts): one row per line to send back,
+ * in rank order. Computed after a count, an invoice, a claims file or a price file lands and every night; read by the
+ * dashboard, the return-soon page and the digest, which before this each rebuilt it from cold — fifteen seconds and
+ * six hundred megabytes, measured 2 October 2026.
+ */
+export const returnSoon = sqliteTable("return_soon", {
+  key: text("key").primaryKey(),
+  rank: integer("rank").notNull(),
+  ndc11: text("ndc11").notNull(),
+  name: text("name"),
+  onHandThousandths: integer("on_hand_thousandths").notNull(),
+  worthCents: integer("worth_cents"),
+  sendBackThousandths: integer("send_back_thousandths").notNull(),
+  sendBackWorthCents: integer("send_back_worth_cents"),
+  why: text("why").notNull(),
+  /** JSON: the reasons, in words. */
+  reasons: text("reasons").notNull(),
+  deadlineDays: integer("deadline_days"),
+  supplier: text("supplier"),
+  invoiceDate: text("invoice_date"),
+  creditPercentNow: real("credit_percent_now"),
+  dropsToPercent: real("drops_to_percent"),
+  atRiskCents: integer("at_risk_cents"),
+  urgency: text("urgency").notNull(),
+  says: text("says").notNull(),
+  todo: text("todo").notNull(),
+  computedAt: text("computed_at").notNull(),
+});
+
+/** The one row about the list itself: when, on what inputs (the fingerprint), the totals and the notes. */
+export const returnSoonRun = sqliteTable("return_soon_run", {
+  id: text("id").primaryKey(),
+  computedAt: text("computed_at").notNull(),
+  /** The pharmacy's own date of the computation: every deadline on the list is "in N days" from it. */
+  computedOn: text("computed_on").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  rows: integer("rows").notNull(),
+  totals: text("totals").notNull(),
+  notes: text("notes").notNull(),
+  ms: integer("ms").notNull(),
+});
+
+/**
+ * The money list as the engine last computed it (src/lib/engine/money-found.ts): one row per line of money, in rank
+ * order. Recomputed on the engine's next pass after anything moves, and every night; read by the dashboard, the books
+ * and the money page, which before this each rebuilt it from cold — seventeen seconds and nine hundred megabytes,
+ * measured 2 October 2026. Ages and the owner's word on each line stay in recommendation_log.
+ */
+export const moneyFound = sqliteTable("money_found", {
+  key: text("key").primaryKey(),
+  rank: integer("rank").notNull(),
+  says: text("says").notNull(),
+  todo: text("todo").notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  cadence: text("cadence").notNull(),
+  confidence: text("confidence").notNull(),
+  basis: text("basis").notNull(),
+  href: text("href").notNull(),
+  /** JSON: the keys of other rows describing the same money, so nothing is added twice. */
+  overlapsWith: text("overlaps_with"),
+  computedAt: text("computed_at").notNull(),
+});
+
+/** The one row about the money list itself: when, on what inputs (the held readings' fingerprint), and what was blocked or watched. */
+export const moneyFoundRun = sqliteTable("money_found_run", {
+  id: text("id").primaryKey(),
+  computedAt: text("computed_at").notNull(),
+  computedOn: text("computed_on").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  rows: integer("rows").notNull(),
+  blocked: text("blocked").notNull(),
+  watch: text("watch").notNull(),
+  ms: integer("ms").notNull(),
+});
+
 /** The decisions a person can take on a claim leg. */
 export const CLAIM_DECISIONS = ["chase", "wait", "paid_elsewhere", "write_off", "rebill", "settled", "not_ours"] as const;
 export type ClaimDecision = (typeof CLAIM_DECISIONS)[number];

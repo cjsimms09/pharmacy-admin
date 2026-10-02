@@ -1118,3 +1118,26 @@ place, and an arithmetic check before anything is stored.
   source elsewhere. The refusal written on 8 September guarded the NADAC path, where they had never
   been.
 - **NADAC coverage is measured and the site is not blind** — see item 1 above and `docs/HANDOFF.md`.
+
+## 2 October 2026, while speed was being fixed on the old site
+
+- **"We really need to work on the 'the books' page, its hard to follow."** The books is `/money`: the period on both
+  bases with every figure linked to its rows (design audit §2 calls the money list the product and the page wordy).
+  A design pass, with the method now in force: rendered, printed, every sentence read as him, before he sees it.
+  Order: after speed, with Today on the old site.
+- **"also is there a way to reconcile bank statements"** — there is: the Emprise statement scan is read into
+  `bank_lines`, placed by the placement engine (89 → 2 on September's statement), and proved to the cent against the
+  printed opening and closing balances every night (`bank_to_cent`). The screen is Bank review under Money
+  (`/money/bank-review?month=2026-09`). That he asked means the screen is not where he looks for it: the same door
+  problem as the staff pages. Make the reconciliation findable from the books page and from Today's cash figure.
+- **"the site isnt terrible, its just not very user friendly and has ALOT going on.. its hard to follow."** The
+  standard for every page the design pass touches: fewer things on the screen, one line per thing, the explanation
+  one press away, the primary figure and the primary action unmistakable (design audit §3, changes 1–3).
+- **The brief for the whole pass, his words, 2 October:** "and better, more relevant tools. ie easy way to reconcile
+  bank statements (tell site things it cant match). we need to apply this logic to all pages, simpler, easier to read,
+  better tools. I dont want to lose functionality but it needs to be cleaner... Also, so many irrelevant things in
+  site. You need to go through each page, act as me. Remeber the things i am using this site for the most and make it
+  better... this should look like a professional, client facing software that I could sell.."
+  Method: one page at a time, as him — what he does there, what he never does there — rendered, printed and read
+  before he sees it; no function removed without his word on that page; the register of pages and verdicts in the
+  design audit §8 is the inventory to walk.

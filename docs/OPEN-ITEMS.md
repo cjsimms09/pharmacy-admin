@@ -153,6 +153,13 @@ they are coming"; the By-payer tab shows ESI's plan groups and when it last paid
   is still his until the patient takes it, the cost is held out with the revenue, and an unclaimed
   script gets reversed. $92,154.24 sits in the bin and the account says so.
 
+## Found 2 October — why the original site is slow, measured
+
+| Finding | Money | State | Who |
+|---|---|---|---|
+| **The old dashboard from cold ran twenty sources totalling 28.5 s**, the return-soon list alone 15.1 s with 685 MB held afterwards and the money list 6.8–17.2 s with 927 MB; the app held 1.4 GB on a computer with 1.3 GB free; every arriving file emptied the held readings, so cold was the usual state; and 107 deploys in thirty days had each rebuilt and restarted the site under him. OBSERVATION: measured by timing each source in a fresh process (`scripts/support`, deleted). SHOULD BE: a page reads what the engine stored; the brief's one rule. DIFFERENCE: two lists computed on open, one directory loaded whole to name 1,845 items, and builds on the dispensing computer in the day. | — | **fixed, measured: 15,059 → 155 ms; 17,201 → 108 ms; pass in a child process, parent 15 MB after** | 1 |
+| **The books for the month (`booksFor`) takes 11.8 s from cold**, money position 2.3 s and 130 MB, invoice issues 2.0 s and 155 MB. Not yet stored by the engine. | — | **next** | 1 |
+
 ## Found 14 September, written to the three-line gate
 
 ### The PioneerRx receipt does half the job the owner asked of it
