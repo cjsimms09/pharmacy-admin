@@ -66,6 +66,8 @@ describe("reading Parmed's statement of account", () => {
     const s = readParmedStatement(page(rows) + "\n" + totals("1,743.11"))!;
     assert.match(describeParmedStatement(s, ["7000000003"]), /\$1,743\.11 is open across 3 invoices, due 2026-10-10 to 2026-10-25/);
     assert.match(describeParmedStatement(s, ["7000000003"]), /1 of the invoices it bills for is not on file here: 7000000003/);
+    assert.match(describeParmedStatement(s, [], ["7000000002", "7000000003"]), /2 of the invoices it bills for stand on their PioneerRx receipt, by your word\./);
+    assert.doesNotMatch(describeParmedStatement(s, [], ["7000000002"]), /not on file/);
     const read = statementReadOf(s);
     assert.equal(read.supplier, "Parmed");
     assert.equal(read.statementDate, "2026-09-30");

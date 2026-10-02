@@ -1258,9 +1258,11 @@ export async function importRecognised(
         imported = false;
       } else {
         const onFile = new Set((await db.query.supplierInvoices.findMany({ columns: { invoiceNumber: true }, where: (t, { like }) => like(t.supplier, "Parmed%") })).map((v) => v.invoiceNumber));
-        const notOnFile = s.rows.filter((r) => !onFile.has(r.invoiceNumber)).map((r) => r.invoiceNumber);
+        const settled = new Set((await db.query.pioneerPurchases.findMany({ columns: { invoiceNumber: true }, where: (t, { eq }) => eq(t.receiptSettles, true) })).map((p) => (p.invoiceNumber ?? "").trim()));
+        const onReceipt = s.rows.filter((r) => !onFile.has(r.invoiceNumber) && settled.has(r.invoiceNumber)).map((r) => r.invoiceNumber);
+        const notOnFile = s.rows.filter((r) => !onFile.has(r.invoiceNumber) && !settled.has(r.invoiceNumber)).map((r) => r.invoiceNumber);
         const kept = await storeSupplierStatement(statementReadOf(s), filed?.documentId ?? null);
-        routeResult = `${describeParmedStatement(s, notOnFile)} ${kept.says}`;
+        routeResult = `${describeParmedStatement(s, notOnFile, onReceipt)} ${kept.says}`;
         imported = kept.written + kept.updated > 0;
       }
     } else if (cls.kind === "parmed_eft_notice") {

@@ -170,15 +170,20 @@ export function readParmedStatement(text: string): ParmedStatement | null {
 
 const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-/** What the statement says, for the inbox line. */
-export function describeParmedStatement(s: ParmedStatement, notOnFile: string[] = []): string {
+/**
+ * What the statement says, for the inbox line. An invoice this site holds no document for but closed on its
+ * PioneerRx receipt (the owner, 2 October 2026, of nine such: "pioneer receipt as invoice for those") is on file
+ * in the only way that matters, and is said so rather than counted as missing.
+ */
+export function describeParmedStatement(s: ParmedStatement, notOnFile: string[] = [], onReceipt: string[] = []): string {
   const due = s.rows.map((r) => r.dueOn).sort();
   const overdue = s.ageing ? s.ageing.days1to15 + s.ageing.days16to30 + s.ageing.days31to45 + s.ageing.over45 : 0;
   return (
     `ParMed says ${money(s.totalCents)} is open across ${s.rows.length} invoice${s.rows.length === 1 ? "" : "s"}, due ${due[0]} to ${due[due.length - 1]}. ` +
     `Its rows add up to the total it prints, so the figure is proved rather than read. ` +
     `${overdue === 0 ? "None of it is past due by their own ageing." : `${money(overdue)} of it is past due by their own ageing.`}` +
-    `${notOnFile.length ? ` ${notOnFile.length} of the invoices it bills for ${notOnFile.length === 1 ? "is" : "are"} not on file here: ${notOnFile.slice(0, 6).join(", ")}${notOnFile.length > 6 ? "…" : ""}.` : " Every invoice it names is on file."}`
+    `${onReceipt.length ? ` ${onReceipt.length} of the invoices it bills for ${onReceipt.length === 1 ? "stands" : "stand"} on ${onReceipt.length === 1 ? "its" : "their"} PioneerRx receipt, by your word.` : ""}` +
+    `${notOnFile.length ? ` ${notOnFile.length} of the invoices it bills for ${notOnFile.length === 1 ? "is" : "are"} not on file here: ${notOnFile.slice(0, 6).join(", ")}${notOnFile.length > 6 ? "…" : ""}.` : onReceipt.length ? "" : " Every invoice it names is on file."}`
   );
 }
 

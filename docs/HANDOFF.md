@@ -136,6 +136,11 @@ Three things are new computation:
   · Held now shows every such arrival of the last ninety days, not only those inside the latest two hundred, so the
   two screens agree. Live after: Held 0; Today holds one document, a scanned technician certificate of 16 September
   that needs him to say whose it is.
+- **2 October, on Parmed's nine invoices of 1–8 September, his words: "pioneer receipt as invoice for those."** The
+  nine already stood on their PioneerRx receipts (`receipt_settles`, from his earlier "this time but not going
+  forward"); what was wrong was the statement reader calling them "not on file". A statement line whose invoice
+  closed on its receipt now says "stands on its PioneerRx receipt, by your word". Not a rule for Parmed going
+  forward: its invoices arrive by email from the 9th. Recorded under decisions in `docs/OPEN-ITEMS.md`.
 - Stage 5 (retire the old pages) has begun with its instrument: the gate is "a month with no visit to a retired
   page", and nothing had ever counted a visit. Migration 0137 adds `page_visits` (day, route, count); the old layout
   mounts `VisitBeacon`, which posts the path to `/api/visit`; the new nav carries the old pages behind "More". The
