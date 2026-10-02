@@ -30,27 +30,27 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
   return (
     <div className="min-h-screen bg-ground text-ink">
       <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
-          <Link href="/v2/today" className="text-[15px] font-semibold tracking-tight text-ink">
+        <div className="mx-auto flex max-w-6xl flex-nowrap items-center gap-4 px-4 py-3">
+          <Link href="/v2/today" className="shrink-0 whitespace-nowrap text-[15px] font-semibold tracking-tight text-ink">
             West Wichita
           </Link>
-          <nav className="flex items-center gap-1 text-[14px]">
+          <nav className="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto text-[14px]">
             {NAV.map((n) => (
-              <Link key={n.href} href={n.href} className="rounded-md px-3 py-1.5 text-ink-2 hover:bg-ground hover:text-ink">
+              <Link key={n.href} href={n.href} className="whitespace-nowrap rounded-md px-3 py-1.5 text-ink-2 hover:bg-ground hover:text-ink">
                 {n.label}
               </Link>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-3 text-[13px] text-ink-3">
-            <Link href="/dashboard" className="rounded-md px-2 py-1 hover:bg-ground hover:text-ink" title="The old pages, until each one's job is on a new screen">
-              More
+          <div className="ml-auto flex shrink-0 items-center gap-2 text-[13px] text-ink-3">
+            <Link href="/" className="whitespace-nowrap rounded-md px-2 py-1 hover:bg-ground hover:text-ink" title="Every page of the site you know, untouched, until each one's job is on a new screen">
+              Old site
             </Link>
             <Link href="/settings" aria-label="Settings" className="rounded-md px-2 py-1 hover:bg-ground hover:text-ink">
               ⚙
             </Link>
-            <span>{user.name}</span>
+            <span className="hidden whitespace-nowrap md:inline">{user.name}</span>
             <form action={signOut}>
-              <button className="rounded-md px-2 py-1 hover:bg-ground hover:text-ink" type="submit">
+              <button className="whitespace-nowrap rounded-md px-2 py-1 hover:bg-ground hover:text-ink" type="submit">
                 Sign out
               </button>
             </form>

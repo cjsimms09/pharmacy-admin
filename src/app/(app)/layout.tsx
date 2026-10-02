@@ -67,6 +67,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             {/* The find page has its own box, so on a phone the search is one tap on a button rather than a field that does not fit. */}
             <Link href="/find" className="btn btn-sm md:hidden">Find</Link>
             {/* Add and Inbox on every page: what comes in is the whole of the day's paperwork. Add last, so its panel opens from the screen's edge. */}
+            <Link href="/v2/today" className="btn btn-sm" title="The new screens, being rebuilt one at a time; everything here stays until each job is on one of them">New Today</Link>
             <Link href="/inbox" className="btn btn-sm">Inbox</Link>
             <AddAnything />
             <div className="hidden md:block">

@@ -18,6 +18,14 @@ file is how they talk.
   him; the brief's rules become tests that fail (no paragraphs, tile equals list, one date format, nothing on
   Needs You without a person's act); one screen at a time, in front of him, before the next; "shipped" means
   the stage gate in `docs/REBUILD.md` passed as written. Today is first. Do not build another screen the old way.
+- **Same afternoon, the front door went back to the old site.** His words: "staff certificates are gone.. I have no
+  way of printing training manual.. so many things are missing, do we need to go back to old site?" Nothing was
+  deleted (`git log --diff-filter=D` on `src/app/(app)` since the rebuild began: empty); every old page sat behind
+  the word "More", which he never opened. The root now answers with the old dashboard again, the old header carries
+  "New Today", the new header says "Old site" by name, and the root moves to Today only when he says so. He also
+  asked why "Order from" is under Money: because the spec put it under Money · Suppliers and nobody asked whether a
+  person ordering stock looks under "Money". Money (nine tabs) is to be split by what he does — Buying, Bills,
+  Books — when those screens are rebuilt; not before Today is right and in front of him.
 
 ### From the pharmacy session — 1 October: the rebuild has begun. Spec in `docs/REBUILD.md`; stages 1 to 4 are live
 
