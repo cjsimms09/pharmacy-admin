@@ -890,6 +890,8 @@ export type TransactionPlan = {
   markSold: { claimId: string; completedAt: string }[];
   /** Rows already held whose figures the report has since restated, and the row to restate from. */
   refresh: { claimId: string; txn: Transaction }[];
+  /** Paid fills PioneerRx supplied before the report did (claims-backfill.ts): given the report's figures and key, not stored twice. */
+  adopt: { claimId: string; txn: Transaction }[];
   skipped: { txn: Transaction; why: string }[];
   duplicates: number;
 };
@@ -922,10 +924,17 @@ export type TransactionPlan = {
  */
 export function planTransactions(
   txns: Transaction[],
-  existing: { keys: Set<string>; paid: PaidClaimRef[]; unsold?: Map<string, string>; byKey?: Map<string, string> },
+  existing: {
+    keys: Set<string>;
+    paid: PaidClaimRef[];
+    unsold?: Map<string, string>;
+    byKey?: Map<string, string>;
+    /** Paid rows written from PioneerRx, by "rx|fill|bin", for the report's own row to adopt. */
+    pioneerPaid?: Map<string, string>;
+  },
   opts: { ignoreBins?: string[]; ignoreLabels?: RegExp; requireCompleted?: boolean } = {},
 ): TransactionPlan {
-  const plan: TransactionPlan = { insertPaid: [], insertReversedPaid: [], reverseExisting: [], insertUnmatchedReversal: [], markSold: [], refresh: [], skipped: [], duplicates: 0 };
+  const plan: TransactionPlan = { insertPaid: [], insertReversedPaid: [], reverseExisting: [], insertUnmatchedReversal: [], markSold: [], refresh: [], adopt: [], skipped: [], duplicates: 0 };
   const ignoreBins = new Set(opts.ignoreBins ?? []);
   const ignore = opts.ignoreLabels ?? /pharmd/i;
   const usedExisting = new Set<string>();
@@ -965,6 +974,15 @@ export function planTransactions(
     if ((t.bin && ignoreBins.has(t.bin)) || ignore.test(t.payerLabel)) t.cashPlan = true;
     if (t.status === "R") { plan.skipped.push({ txn: t, why: "rejected by the plan, nothing paid" }); continue; }
     if (opts.requireCompleted === true && !t.completedAt) { plan.skipped.push({ txn: t, why: "not yet sold (no completed date)" }); continue; }
+    /*
+     * A paid fill PioneerRx supplied before the report did, now arriving with its transaction key: the report's row
+     * is the record from here. The held row takes the report's figures and key rather than a twin — a twin would
+     * have counted the fill's revenue twice (claims-backfill.ts, 2 October 2026).
+     */
+    if ((t.status === "P" || t.status === "AR") && existing.pioneerPaid) {
+      const supplied = existing.pioneerPaid.get(`${fillKey(t.rxNumber, t.fillNumber)}|${t.bin ?? ""}`);
+      if (supplied) { plan.adopt.push({ claimId: supplied, txn: t }); continue; }
+    }
     /*
      * An account sale goes in as a dispensing, because that is what it is.
      *

@@ -47,7 +47,13 @@ import { formatCents } from "./money";
 import { SITE_STARTS_ON, monthIsOutOfBooks } from "./books-start";
 
 
-export type PLLine = { label: string; amountCents: number; note?: string };
+export type PLLine = {
+  label: string;
+  amountCents: number;
+  note?: string;
+  /** The bank lines behind a cash row built from the statement: date, what the bank printed, the amount as the bank shows it, which rule placed it. */
+  sources?: { on: string; what: string; amountCents: number; how: string }[];
+};
 
 export type MonthlyPL = {
   month: string;

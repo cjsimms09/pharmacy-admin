@@ -435,10 +435,17 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
     if (c.reversalKey) keys.add(c.reversalKey);
   }
   const paid = held.filter((c) => c.status === "paid");
+  /* Paid fills PioneerRx supplied before the report did (claims-backfill.ts), by Rx, refill and BIN: the report's row adopts them. */
+  const supplied = await db.query.claims.findMany({
+    where: and(eq(schema.claims.source, "pioneer_sql"), eq(schema.claims.status, "paid")),
+    columns: { id: true, rxNumber: true, fillNumber: true, bin: true },
+  });
+  const pioneerPaid = new Map(supplied.map((c) => [`${c.rxNumber}|${c.fillNumber ?? ""}|${c.bin ?? ""}`, c.id]));
 
-  const plan = planTransactions(parsed.rows, { keys, paid, unsold, byKey }, { ignoreBins: ["028249"] });
+  const plan = planTransactions(parsed.rows, { keys, paid, unsold, byKey, pioneerPaid }, { ignoreBins: ["028249"] });
   const skipReasons = { ...parsed.reasons };
   for (const s of plan.skipped) skipReasons[s.why] = (skipReasons[s.why] ?? 0) + 1;
+  if (plan.adopt.length) skipReasons["already here from PioneerRx, now keyed to the report"] = plan.adopt.length;
 
   const resolver = buildPbmResolver(await db.query.payerBins.findMany({ columns: { pbmName: true, aliases: true } }), null);
   const binRows = await db.query.payerBins.findMany({ columns: { bin: true, pbmName: true } });
@@ -494,6 +501,16 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
         where claims.id = json_extract(j.value, '$.id')
       `),
   );
+  /*
+   * The report's row takes over a fill PioneerRx supplied first: it gets the report's key, so a later reversal pairs
+   * with it, and counts as reported from here. One fill, one paid row.
+   */
+  for (const a of plan.adopt) {
+    await db
+      .update(schema.claims)
+      .set({ transactionKey: a.txn.transactionKey, source: "transaction_report", importId, completedAt: a.txn.completedAt ? mdyToIso(a.txn.completedAt) : undefined })
+      .where(eq(schema.claims.id, a.claimId));
+  }
   await inBatches(
     plan.markSold.map((s) => ({ id: s.claimId, at: mdyToIso(s.completedAt) })),
     "recording claims as sold",
@@ -513,9 +530,10 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
    * column reach rows that were loaded before either existed, and without this the pharmacy would
    * have had to delete its claims and start again to get the truth in.
    */
-  const restatements = plan.refresh
-    .filter((r) => r.txn.grossProfitCents !== null || r.txn.expectedFacilitatorCents !== null || r.txn.patientTotalCents !== null)
-    .map((r) => ({
+  const restatements = [
+    ...plan.refresh.filter((r) => r.txn.grossProfitCents !== null || r.txn.expectedFacilitatorCents !== null || r.txn.patientTotalCents !== null),
+    ...plan.adopt,
+  ].map((r) => ({
       id: r.claimId,
       remit: r.txn.remitCents,
       copay: r.txn.copayCents,

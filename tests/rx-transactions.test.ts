@@ -707,3 +707,18 @@ describe("a report run over months rather than a day", () => {
     assert.equal(readGrossProfit, parsed.grandTotal!.grossProfitCents, "what we read must equal what the report says");
   });
 });
+
+test("a paid fill PioneerRx supplied first is adopted by the report's own row, not stored twice", () => {
+  const rows = parseRxTransactions(
+    file(
+      "Third Party:,012833 (EXAMPLE) - 012833",
+      "900021-0,P,$89.44,G1,,$74.99,$0.00,$74.99,9/14/2026 9:00:00 AM,09/14/26,012833,30.0000,$1.00,EXAMPLE,00093505698,$3.00",
+    ),
+  ).rows;
+  const p = planTransactions(rows, { keys: new Set(), paid: [], pioneerPaid: new Map([["900021|0|012833", "c-pioneer"]]) });
+  assert.equal(p.insertPaid.length, 0, "not a twin");
+  assert.deepEqual(p.adopt.map((a) => [a.claimId, typeof a.txn.transactionKey === "string" && a.txn.transactionKey.length > 0]), [["c-pioneer", true]]);
+  const other = planTransactions(rows, { keys: new Set(), paid: [], pioneerPaid: new Map([["900021|0|999999", "c-other"]]) });
+  assert.equal(other.insertPaid.length, 1, "a different BIN is a different claim");
+  assert.equal(other.adopt.length, 0);
+});

@@ -110,3 +110,17 @@ describe("every bank line is one of six things", () => {
     assert.equal(nameFromWhy("CKACH9990001 covers 39 Mckesson invoices and comes to exactly this debit."), "Mckesson");
   });
 });
+
+test("every account row carries the bank lines behind it: date, what the bank printed, the amount, and the rule", () => {
+  const g = gatherCashAccount([
+    classifyBankLine(line({ id: "a", on: "2026-09-15", description: "Ln 8319 Pmt from DD 8855", amountCents: -794_932, expenseId: "e1", placedAs: "books_bill" }), ctx),
+    classifyBankLine(line({ id: "b", on: "2026-09-16", description: "Ln 8319 Pmt", amountCents: -100_00, expenseId: "e1", placedAs: "books_bill" }), ctx),
+  ]);
+  assert.equal(g.flows.length, 1);
+  assert.equal(g.flows[0].amountCents, 804_932);
+  assert.deepEqual(
+    g.flows[0].sources?.map((x) => [x.on, x.what, x.amountCents]),
+    [["2026-09-15", "Ln 8319 Pmt from DD 8855", -794_932], ["2026-09-16", "Ln 8319 Pmt", -100_00]],
+  );
+  assert.ok(g.flows[0].sources?.every((x) => x.how.length > 0), "each line says which rule placed it");
+});

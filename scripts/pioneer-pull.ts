@@ -501,10 +501,11 @@ async function pullClaims(): Promise<string> {
    */
   const { db, schema } = await import("../src/db");
   const { and, gte, eq } = await import("drizzle-orm");
-  const onFile = await db
+  const readOnFile = () => db
     .select({ rxNumber: schema.claims.rxNumber, fillNumber: schema.claims.fillNumber, dateFilled: schema.claims.dateFilled, remitCents: schema.claims.remitCents, copayCents: schema.claims.copayCents })
     .from(schema.claims)
     .where(and(gte(schema.claims.dateFilled, "2026-09-01"), eq(schema.claims.status, "paid")));
+  const onFile = await readOnFile();
   /*
    * Which day is short, which is the only form of this anybody can act on. A month-level figure
    * sends somebody hunting; "7 September is 25 fills short, send that day's report again" is a job.
@@ -517,10 +518,10 @@ async function pullClaims(): Promise<string> {
    * 10 September that billed $37,517.10 — while like for like it was short. See reconcileClaims.
    */
   const { reconcileClaims } = await import("../src/lib/pioneer-claims");
-  const recon = reconcileClaims(
-    built.fills.map((f) => ({ rxNumber: f.rxNumber, fillNumber: f.fillNumber, filledOn: f.filledOn, insuranceCents: f.insuranceCents, patientCents: f.patientCents })),
-    onFile.map((c) => ({ rxNumber: c.rxNumber, fillNumber: c.fillNumber ?? 0, filledOn: c.dateFilled, insuranceCents: c.remitCents ?? 0, patientCents: c.copayCents ?? 0 })),
-  );
+  const pioneerSide = built.fills.map((f) => ({ rxNumber: f.rxNumber, fillNumber: f.fillNumber, filledOn: f.filledOn, insuranceCents: f.insuranceCents, patientCents: f.patientCents }));
+  const siteSide = (rows: Awaited<ReturnType<typeof readOnFile>>) =>
+    rows.map((c) => ({ rxNumber: c.rxNumber, fillNumber: c.fillNumber ?? 0, filledOn: c.dateFilled, insuranceCents: c.remitCents ?? 0, patientCents: c.copayCents ?? 0 }));
+  let recon = reconcileClaims(pioneerSide, siteSide(onFile));
 
   /*
    * And write in the fills the report never delivered.
@@ -565,6 +566,8 @@ async function pullClaims(): Promise<string> {
       })),
     "2026-09-01",
   );
+  /* Measured again after the write, so what is stored says what is true now, not what was true a moment before the pull filled it in. */
+  if (filledIn.written > 0) recon = reconcileClaims(pioneerSide, siteSide(await readOnFile()));
 
   const { setSetting } = await import("../src/lib/settings");
   await setSetting(
@@ -586,6 +589,13 @@ async function pullClaims(): Promise<string> {
       missingTotal: recon.missingTotal,
       fillsOnlyOnSite: recon.onlyOnSite.fills,
       aheadOfTheCopy: recon.aheadOfTheCopy,
+      /* What this run wrote in by itself, so the books can say "taken from PioneerRx" rather than tell him to re-send a report. */
+      filledIn: {
+        written: filledIn.written,
+        cents: filledIn.cents,
+        overReversed: filledIn.heldReversed.length,
+        overReversedCents: filledIn.heldReversed.reduce((n, x) => n + x.cents, 0),
+      },
       problems: built.problems.slice(0, 20),
     }),
   );

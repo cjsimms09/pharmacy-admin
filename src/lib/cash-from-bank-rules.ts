@@ -193,7 +193,10 @@ export function classifyBankLine(line: BankLineIn, ctx: Context): Classified {
   return { line, side: "unnamed", label: "Not yet named", who: null, how: line.placedAs === "unplaced" ? "nothing could place it" : `placed as ${line.placedAs}, which names no category` };
 }
 
-export type AccountLine = { label: string; amountCents: number; note?: string };
+/** One bank line behind an account row: the date, what the bank printed, the amount as the bank shows it, and which rule placed it. */
+export type AccountSource = { on: string; what: string; amountCents: number; how: string };
+
+export type AccountLine = { label: string; amountCents: number; note?: string; sources?: AccountSource[] };
 
 /** The classified lines gathered into the account's sections; every section is positive money, out or in as its heading says. */
 export function gatherCashAccount(classified: Classified[]): {
@@ -208,15 +211,17 @@ export function gatherCashAccount(classified: Classified[]): {
   changeCents: number;
 } {
   const sum = (side: Side, sign: 1 | -1) => {
-    const by = new Map<string, { cents: number; n: number }>();
+    const by = new Map<string, { cents: number; n: number; sources: AccountSource[] }>();
     for (const c of classified) {
       if (c.side !== side) continue;
-      const e = by.get(c.label) ?? { cents: 0, n: 0 };
+      const e = by.get(c.label) ?? { cents: 0, n: 0, sources: [] };
       e.cents += sign * c.line.amountCents;
       e.n++;
+      /* The row's own evidence, for the page: "7,949.32 of loan principal. where did you get this?" (the owner, 2 October 2026). */
+      e.sources.push({ on: c.line.on, what: c.line.description, amountCents: c.line.amountCents, how: c.how });
       by.set(c.label, e);
     }
-    return [...by.entries()].sort((a, b) => Math.abs(b[1].cents) - Math.abs(a[1].cents)).map(([label, v]) => ({ label, amountCents: v.cents, note: `${v.n} line${v.n === 1 ? "" : "s"}` }));
+    return [...by.entries()].sort((a, b) => Math.abs(b[1].cents) - Math.abs(a[1].cents)).map(([label, v]) => ({ label, amountCents: v.cents, sources: v.sources, note: `${v.n} line${v.n === 1 ? "" : "s"}` }));
   };
   const inCents = classified.filter((c) => c.line.amountCents > 0).reduce((n, c) => n + c.line.amountCents, 0);
   const outCents = classified.filter((c) => c.line.amountCents < 0).reduce((n, c) => n + c.line.amountCents, 0);

@@ -9,8 +9,10 @@ import type { FillForScripts, MonthlyPL, PLInputs } from "../profit-and-loss";
  * cold — both bases, the six-month strip, the twelve-month trend — so the page he named as hard to follow was also
  * the slowest, at twelve seconds, and cold was the usual state because every arriving file empties the held
  * readings. The month in progress is recomputed on the engine's pass whenever anything moved or the day did (its
- * standing costs accrue by the day); a closed month is recomputed in the nightly pass only, because a late document
- * dated into it is rare and the morning is soon enough.
+ * standing costs accrue by the day). The three most recent closed months are recomputed whenever anything moved as
+ * well: the owner names a bank line in a closed month and expects the page to show it — on 2 October 2026 he named two
+ * September cheques and the books went on asking him to name them, because September was closed and only the night
+ * would have recomputed it. Older closed months wait for the nightly pass, where a late document dated into them is rare.
  */
 
 const currentMonth = (today: string) => today.slice(0, 7);
@@ -43,7 +45,9 @@ export async function writeMonthAccounts(today: string, now: string, opts: { for
       const key = `${month}|${basis}`;
       const row = have.get(key);
       const open = month === currentMonth(today);
-      const fresh = row && (open ? row.fingerprint === fp && row.computedOn === today : true);
+      /* The open month and the three closed months before it follow every change; older months follow the night. */
+      const recent = months.indexOf(month) >= months.length - 4;
+      const fresh = row && (open ? row.fingerprint === fp && row.computedOn === today : recent ? row.fingerprint === fp : true);
       if (!opts.force && fresh) {
         kept.push(key);
         continue;

@@ -1153,3 +1153,9 @@ place, and an arithmetic check before anything is stored.
   sections), the v2 screens; on Today: money waiting, supplies, the Claude ceiling line, the credential nags.
   Method: out of navigation and Today first, computations stopped, nothing deleted from the database for a month.
   To confirm with him: the rebate ladder as one figure; pack-size fixes kept hidden.
+
+- **2 October, afternoon, his words:** "dont you feel like the site could do a better job of presenting this things to
+  me??" — said after three answers (where the loan row came from, what the 187 payments are, what the 44 fills were)
+  had been found by script and given in chat. The standard from here: whatever a script had to find for him is a thing
+  the page shows, with its source and a press. Done the same afternoon: every cash row opens to its bank lines; the
+  Checks card says what the pull took. Not yet: the remits page on untied payments; the supplier invoices page.

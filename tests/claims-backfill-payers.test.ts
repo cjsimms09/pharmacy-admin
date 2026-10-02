@@ -70,3 +70,25 @@ describe("a fill the report never sent, written from PioneerRx", () => {
     assert.equal(r.alreadyHeld, 1);
   });
 });
+
+describe("a fill the report had only as reversed, that PioneerRx holds as paid", () => {
+  test("is written as paid beside the reversal, on his word (2 October 2026); a second run writes nothing", async () => {
+    const { newId } = await import("../src/lib/crypto");
+    const importId = newId();
+    await db.insert(schema.claimImports).values({ id: importId, fileName: "a nightly report, in the test", createdBy: "the test" });
+    await db.insert(schema.claims).values({
+      id: newId(), importId, rxNumber: "900301", fillNumber: 0, dateFilled: "2026-09-14", ndc11: fill.ndc11, bin: "610097",
+      remitCents: -8_944, copayCents: 0, status: "reversed", reversedOn: "2026-09-14", source: "transaction_report", transactionKey: "t-900301-reversal",
+    });
+    const paidInPioneer = { ...fill, rxNumber: "900301", filledOn: "2026-09-14", soldOn: "2026-09-14", payers: undefined, insuranceCents: 8_944, patientCents: 0, fillTotalPriceCents: 8_944 };
+    const r = await backfill([paidInPioneer], "2026-09-01", "the test");
+    assert.equal(r.written, 1, "PioneerRx's paid fill is written");
+    assert.equal(r.heldReversed.length, 1, "and named, so the morning sentence says how many stood that way");
+    assert.match(r.says, /only as reversed/);
+    const rows = (await db.select().from(schema.claims)).filter((c) => c.rxNumber === "900301");
+    assert.deepEqual(rows.map((c) => [c.status, c.source, c.remitCents]).sort(), [["paid", "pioneer_sql", 8_944], ["reversed", "transaction_report", -8_944]]);
+    const again = await backfill([paidInPioneer], "2026-09-01", "the test");
+    assert.equal(again.written, 0);
+    assert.equal(again.alreadyHeld, 1);
+  });
+});

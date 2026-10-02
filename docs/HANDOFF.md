@@ -8,6 +8,25 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, 13:50: his three asks, done on live; the pages go out with the evening deploy.** "take from pioneer": the
+  morning pull now writes a fill PioneerRx holds as paid where the report had only a reversal (44 written, $5,427.65;
+  claims-backfill.ts), measures again after writing, and stores what it took; a report that later carries the
+  re-transmission adopts the row (rx-transactions.ts `adopt`, claims.ts) rather than doubling it — tested at the plan
+  level, not yet seen on live. "use receipt as invoices for others": McKesson 1 and IPC 4 closed on their receipts,
+  ANDA's standing rule set; no supplier waits on an invoice. He pasted "2 lines, $5,858.79, not yet named" from the
+  books: that was the stored September account from before he named them, because a closed month recomputed only
+  overnight; now the three most recent closed months follow every change (engine/accounts.ts). Each cash row carries
+  its bank lines (`sources` on PLLine) and the books page opens them under "At the bank"; the Checks card says what
+  the pull took instead of telling him to re-send reports; "missing" is no longer a badge. His word on all of it:
+  "dont you feel like the site could do a better job of presenting this things to me??" — yes; the standard from here
+  is that whatever a script had to find for him is a thing the page shows, with its source and a press.
+  **Deploy:** scheduled in the pharmacy session at 18:37 (a session-only timer); if that session is gone, run
+  `npm run deploy` after 18:30 by hand, then render and read the books and Today. **For the cloud session:** the
+  remits page (src/app/(app)/remits/page.tsx) cannot be read from the pharmacy session — the deny rule
+  `Read(./remits/**)` in .claude/settings.json catches it — so the untied-payments presentation (189 payments,
+  $3,063.19, by payer, in four-state words, "stand-in date" said as such) is yours; the supplier invoices page design
+  pass is still next after that.
+
 - **2 October, 12:19: everything above is live (ac9d47c), printed and read.** He said "no do it now"; the first build failed
   twice on the edge runtime (a middleware file; see the commit and the memory note), the launcher died mid-install once,
   and the site was down ~35 minutes. Redirects are config redirects now. The printouts showed six faults, fixed and

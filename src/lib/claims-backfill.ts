@@ -25,6 +25,17 @@
  * would arrive as an unmatched reversal and be seen. That is the honest trade, and it is the right
  * way round: a fill that is missing is wrong every day until somebody notices, and a reversal that
  * arrives unmatched is visible the moment it lands.
+ *
+ * ── A fill here only as reversed, that PioneerRx holds as paid ──
+ *
+ * The report delivers a reversal and, some days, not the re-transmission that followed it: the
+ * fill stands here as reversed and earns nothing, while PioneerRx holds it paid. Forty-four
+ * September fills, $5,427.65, stood that way on 2 October 2026 and the books called them
+ * "missing". Asked whether to re-send the reports or take them from the pharmacy system, the
+ * owner: "take from pioneer". So PioneerRx's paid fill is written beside the reversal — the
+ * reversed row stays as what the report said, the paid row carries the money — and the morning
+ * sentence says how many. A report that later carries the re-transmission adopts the row rather
+ * than doubling it (rx-transactions.ts, `adopt`).
  */
 
 import { db, schema } from "@/db";
@@ -63,7 +74,7 @@ export type BackfillReport = {
   considered: number;
   written: number;
   alreadyHeld: number;
-  /** Here as reversed, and PioneerRx still calls them paid. Not missing, and not settled either. */
+  /** Here only as reversed while PioneerRx calls them paid: written as paid beside the reversal, on the owner's word (2 October 2026). */
   heldReversed: { rxNumber: string; fillNumber: number; filledOn: string | null; cents: number }[];
   refused: { rxNumber: string; why: string }[];
   cents: number;
@@ -101,8 +112,9 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
    * so if PioneerRx is right the money is missing from the account just as surely as a fill that
    * was never delivered.
    *
-   * Not written, because the two readings cannot both be true of one fill and choosing between
-   * them is a question about what happened at the counter, not one this can settle. Named instead.
+   * Written as paid from PioneerRx, on the owner's word (2 October 2026, "take from pioneer"): the
+   * dispensing system is the record, and the report's hole is the re-transmission. Named as well,
+   * so the morning sentence says how many stood that way.
    */
   const reversedKeys = new Set(held.filter((h) => h.status === "reversed").map((h) => `${h.rxNumber}|${h.fillNumber ?? 0}`));
   const paidKeys = new Set(held.filter((h) => h.status !== "reversed").map((h) => `${h.rxNumber}|${h.fillNumber ?? 0}`));
@@ -113,10 +125,7 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
       report.alreadyHeld++;
       return false;
     }
-    if (reversedKeys.has(k)) {
-      report.heldReversed.push({ rxNumber: f.rxNumber, fillNumber: f.fillNumber, filledOn: f.filledOn, cents: f.insuranceCents });
-      return false;
-    }
+    if (reversedKeys.has(k)) report.heldReversed.push({ rxNumber: f.rxNumber, fillNumber: f.fillNumber, filledOn: f.filledOn, cents: f.insuranceCents });
     /*
      * A fill with no date cannot be placed in a month, and a month is what every figure on the
      * account is cut by. Refused rather than dated today.
@@ -130,7 +139,7 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
   if (wanted.length === 0) {
     report.says =
       report.heldReversed.length > 0
-        ? `nothing to fill in; ${report.heldReversed.length} fills are here as reversed while PioneerRx still calls them paid`
+        ? `nothing to fill in; ${report.heldReversed.length} fills here as reversed and paid in PioneerRx carry no fill date there`
         : report.alreadyHeld > 0
           ? `every fill PioneerRx has for this period is already here`
           : "nothing to fill in";
@@ -253,7 +262,7 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
     `$${(report.cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} filled in from PioneerRx` +
     `${days.length ? `, mostly ${days.slice(0, 3).map(([d, n]) => `${d} (${n})`).join(", ")}` : ""}` +
     `${report.refused.length ? `; ${report.refused.length} refused for want of a fill date` : ""}` +
-    `${report.heldReversed.length ? `; ${report.heldReversed.length} more are here as reversed while PioneerRx still calls them paid, ` +
-      `$${(report.heldReversed.reduce((n, x) => n + x.cents, 0) / 100).toFixed(2)} — left alone, because which reading is right is a question about the counter` : ""}`;
+    `${report.heldReversed.length ? `; ${report.heldReversed.length} of them the report had only as reversed, ` +
+      `$${(report.heldReversed.reduce((n, x) => n + x.cents, 0) / 100).toFixed(2)}, and PioneerRx's paid fill now stands beside the reversal` : ""}`;
   return report;
 }

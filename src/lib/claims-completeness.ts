@@ -41,6 +41,8 @@ export type ClaimsCompleteness = {
   /** Fills where PioneerRx's payers plus the patient do not add to the fill's own total price, and the first of them. */
   notAddingUp: number;
   notAddingUpList: { rxNumber: string; fillNumber: number; addsToCents: number; fillSaysCents: number }[];
+  /** What the morning pull wrote in by itself from PioneerRx on its last run, and how many of those the report had only as reversed. */
+  takenFromPioneer: { fills: number; cents: number; overReversed: number; overReversedCents: number };
 };
 
 export async function claimsCompleteness(): Promise<ClaimsCompleteness | null> {
@@ -58,6 +60,7 @@ export async function claimsCompleteness(): Promise<ClaimsCompleteness | null> {
   const days = Array.isArray(v.daysShort) ? (v.daysShort as { day: string; fills: number; cents: number }[]) : [];
   const missing = (v.missingTotal ?? {}) as { fills?: number; cents?: number };
   const ahead = (v.aheadOfTheCopy ?? {}) as { fills?: number; cents?: number };
+  const filled = (v.filledIn ?? {}) as { written?: number; cents?: number; overReversed?: number; overReversedCents?: number };
   /*
    * A pull from before this was measured has no `coverTo`, and its figures were computed the old
    * way — against unequal windows. Showing them would put the very number this replaced back on a
@@ -80,5 +83,6 @@ export async function claimsCompleteness(): Promise<ClaimsCompleteness | null> {
     aheadCents: n(ahead.cents),
     notAddingUp: n(v.fillsThatDoNotAddUp),
     notAddingUpList: Array.isArray(v.fillsThatDoNotAddUpList) ? (v.fillsThatDoNotAddUpList as ClaimsCompleteness["notAddingUpList"]) : [],
+    takenFromPioneer: { fills: n(filled.written), cents: n(filled.cents), overReversed: n(filled.overReversed), overReversedCents: n(filled.overReversedCents) },
   };
 }

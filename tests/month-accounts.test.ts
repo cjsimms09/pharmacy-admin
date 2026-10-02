@@ -52,3 +52,30 @@ describe("the month accounts are stored by the engine", () => {
     assert.ok((viaAccounts as { stored?: { computedAt: string } }).stored, "the books now read the store");
   });
 });
+
+describe("a closed month follows a change at once, for the three most recent", () => {
+  let done: () => void;
+  before(async () => {
+    done = await useScratchDb();
+  });
+  after(() => done());
+  test("a bank line named in September on 2 October: the pass recomputes September, not only the open month", async () => {
+    const { writeMonthAccounts } = await import("../src/lib/engine/accounts");
+    const { SITE_STARTS_ON } = await import("../src/lib/books-start");
+    const { audit } = await import("../src/lib/audit");
+    const first = SITE_STARTS_ON.slice(0, 7);
+    const next = new Date(Date.parse(`${first}-01T00:00:00Z`));
+    next.setUTCMonth(next.getUTCMonth() + 1);
+    const second = next.toISOString().slice(0, 7);
+    const today = `${second}-02`;
+    const w1 = await writeMonthAccounts(today, `${today}T14:00:00.000Z`);
+    assert.ok(w1.computed.includes(`${second}|cash`), "the open month is stored");
+    const w2 = await writeMonthAccounts(today, `${today}T14:10:00.000Z`);
+    assert.deepEqual(w2.computed, [], "nothing moved: every month kept");
+    /* The site's fingerprint is held for two seconds; a decision lands after that, as it would on the site. */
+    await new Promise((r) => setTimeout(r, 2_100));
+    await audit({ action: "bank.line_decided", userId: null, userName: "the test", entity: "bank_line", entityId: "x", details: "a cheque named as before the books" });
+    const w3 = await writeMonthAccounts(today, `${today}T14:20:00.000Z`);
+    assert.deepEqual(w3.computed.sort(), [`${first}|accrual`, `${first}|cash`, `${second}|accrual`, `${second}|cash`]);
+  });
+});

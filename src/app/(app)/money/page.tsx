@@ -392,6 +392,20 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             No statement for {period.label} yet; Emprise sends it after month end. Until then the cash column is what the feeds have seen: {formatCents(cash.revenueCents)} in and {formatCents(cash.costOfGoodsCents + cash.operatingCents + cash.otherCashOutCents)} out so far.
           </p>
         )}
+        {onBank && (
+          <details className="mt-3 text-xs">
+            <summary className="cursor-pointer text-ink-3">The cash account line by line, with the bank lines behind each row</summary>
+            <AccountLines
+              sections={[
+                { title: "Revenue", rows: cash.revenue },
+                { title: "Taken off revenue", rows: cash.offsets },
+                { title: "Cost of goods", rows: cash.costOfGoods },
+                { title: "Running costs", rows: cash.operating },
+                { title: "Not a cost, or not yet named", rows: cash.otherCashOut },
+              ]}
+            />
+          </details>
+        )}
         {!onBank && bankLines.unplaced.length > 0 && (
           <p className="mt-1 text-xs text-ink-2">
             {bankLines.unplaced.length} line{bankLines.unplaced.length === 1 ? "" : "s"} from the statement not placed:{" "}
@@ -624,12 +638,19 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
               <div className="min-w-0">
                 <div className="row-title">
                   Every fill PioneerRx has, against every fill here
-                  {completeness.missingFills > 0 ? <span className="badge badge-warn ml-2">{completeness.missingFills} missing</span> : <span className="badge badge-ok ml-2">complete</span>}
+                  {completeness.missingFills > 0 ? <span className="badge badge-warn ml-2">{completeness.missingFills} not captured</span> : <span className="badge badge-ok ml-2">complete</span>}
                 </div>
                 <p className="row-why">
                   {completeness.missingFills === 0
                     ? `Through ${fmt(completeness.coverTo ?? "")}, every one of the ${completeness.pioneerFills.toLocaleString()} fills PioneerRx holds is here.`
-                    : `${formatCents(completeness.missingCents)} on ${completeness.missingFills} fill${completeness.missingFills === 1 ? "" : "s"} PioneerRx booked that the nightly report never delivered, through ${fmt(completeness.coverTo ?? "")}.`}
+                    : `${formatCents(completeness.missingCents)} on ${completeness.missingFills} fill${completeness.missingFills === 1 ? "" : "s"} PioneerRx booked that are not here, through ${fmt(completeness.coverTo ?? "")}.`}
+                  {completeness.takenFromPioneer.fills > 0 && (
+                    <>
+                      {" "}
+                      The morning pull took {completeness.takenFromPioneer.fills} fill{completeness.takenFromPioneer.fills === 1 ? "" : "s"}, {formatCents(completeness.takenFromPioneer.cents)}, from PioneerRx
+                      {completeness.takenFromPioneer.overReversed > 0 ? ` (${completeness.takenFromPioneer.overReversed} the nightly report had only as reversed)` : ""}.
+                    </>
+                  )}
                 </p>
                 {(completeness.missingFills > 0 || completeness.notAddingUp > 0) && (
                   <details className="mt-1 text-xs text-ink-2">
@@ -645,7 +666,11 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                         ))}
                       </ul>
                     )}
-                    {completeness.missingFills > 0 && <p className="mt-1">Send those days&rsquo; Rx transaction reports again from PioneerRx; a fresh run carries the fills the first one missed.</p>}
+                    {completeness.missingFills > 0 && (
+                      <p className="mt-1">
+                        The morning pull writes these in from PioneerRx by itself. One still listed after this morning&rsquo;s pull has no fill date in PioneerRx, or the pull did not run; the feeds page says which.
+                      </p>
+                    )}
                     {completeness.notAddingUp > 0 && (
                       <p className="mt-1">
                         {completeness.notAddingUp} fill{completeness.notAddingUp === 1 ? "" : "s"} where the payers and the patient do not add to the fill&rsquo;s price in PioneerRx&rsquo;s own figures:{" "}
@@ -717,3 +742,44 @@ function Line({ label, a, c, href, note, strong }: { label: string; a: number | 
 }
 
 /** The three lines worth the most from the money list, read on their own so the books are not held up by them. */
+
+/** Every row of the cash account with the bank lines that make it: the answer to "where did you get this?" on the page itself. */
+type CashRow = { label: string; amountCents: number; note?: string; sources?: { on: string; what: string; amountCents: number; how: string }[] };
+function AccountLines({ sections }: { sections: { title: string; rows: CashRow[] }[] }) {
+  return (
+    <div className="mt-2 space-y-3">
+      {sections
+        .filter((s) => s.rows.length > 0)
+        .map((s) => (
+          <div key={s.title}>
+            <div className="font-semibold text-ink-2">{s.title}</div>
+            <ul className="mt-1 divide-y divide-line">
+              {s.rows.map((r) => (
+                <li key={r.label} className="py-1">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="min-w-0">
+                      {r.label}
+                      {r.note ? <span className="ml-1 text-ink-3">· {r.note}</span> : null}
+                    </span>
+                    <span className="tabular-nums">{formatCents(r.amountCents)}</span>
+                  </div>
+                  {r.sources && r.sources.length > 0 && (
+                    <ul className="mt-0.5 space-y-0.5 pl-3 text-ink-3">
+                      {r.sources.map((x, i) => (
+                        <li key={i} className="flex flex-wrap items-baseline gap-x-2">
+                          <span className="tabular-nums">{fmt(x.on)}</span>
+                          <span className="min-w-0 grow truncate" title={x.what}>{x.what}</span>
+                          <span className="tabular-nums">{formatCents(x.amountCents)}</span>
+                          <span className="w-full text-[11px] sm:w-auto">{x.how}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+    </div>
+  );
+}
