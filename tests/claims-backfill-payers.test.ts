@@ -92,3 +92,46 @@ describe("a fill the report had only as reversed, that PioneerRx holds as paid",
     assert.equal(again.alreadyHeld, 1);
   });
 });
+
+describe("a payer the report never delivered, on a fill that is here", () => {
+  test("the absent payer's row is written from PioneerRx, carrying the quantity and the cost when it is the first payer; a second run writes nothing", async () => {
+    const { newId } = await import("../src/lib/crypto");
+    const importId = newId();
+    await db.insert(schema.claimImports).values({ id: importId, fileName: "a nightly report with only the copay card's row, in the test", createdBy: "the test" });
+    /* The report sent the copay card's row and not the primary's $0 row, so the fill is here with no quantity and no cost. */
+    await db.insert(schema.claims).values({
+      id: newId(), importId, rxNumber: "900302", fillNumber: 0, dateFilled: "2026-09-01", ndc11: "70165002530", bin: "024284", payerPosition: "secondary",
+      remitCents: 109_691, copayCents: 7_500, acquisitionCents: 0, quantityThousandths: 0, status: "paid", completedAt: "2026-09-01", source: "transaction_report", transactionKey: "t-900302-card",
+    });
+    const twoPayers = {
+      ...fill,
+      rxNumber: "900302",
+      filledOn: "2026-09-01",
+      soldOn: "2026-09-01",
+      ndc11: "70165002530",
+      quantityThousandths: 60_000,
+      insuranceCents: 109_691,
+      patientCents: 7_500,
+      acquisitionCents: 114_731,
+      fillTotalPriceCents: 117_191,
+      payers: [
+        { position: "primary" as const, bin: "610455", pcn: "P", groupNumber: "G", networkId: null, remitCents: 0, patientCents: 0, evoucherCents: null, dirFeeCents: null },
+        { position: "secondary" as const, bin: "024284", pcn: "C", groupNumber: "G2", networkId: null, remitCents: 109_691, patientCents: 7_500, evoucherCents: null, dirFeeCents: null },
+      ],
+    };
+    const r = await backfill([twoPayers], "2026-09-01", "the test");
+    assert.equal(r.written, 0, "the fill itself is here");
+    assert.equal(r.alreadyHeld, 1);
+    assert.equal(r.payerRowsAdded, 1, "the primary's row is written");
+    assert.equal(r.payerRowsCostCents, 114_731, "and it carries the bottle's cost");
+    assert.match(r.says, /payer row the report never sent/);
+    const rows = (await db.select().from(schema.claims)).filter((c) => c.rxNumber === "900302");
+    assert.deepEqual(
+      rows.map((c) => [c.bin, c.payerPosition, c.remitCents, c.acquisitionCents, c.quantityThousandths, c.source]).sort(),
+      [["024284", "secondary", 109_691, 0, 0, "transaction_report"], ["610455", "primary", 0, 114_731, 60_000, "pioneer_sql"]],
+    );
+    const again = await backfill([twoPayers], "2026-09-01", "the test");
+    assert.equal(again.payerRowsAdded, 0);
+    assert.equal(again.written, 0);
+  });
+});

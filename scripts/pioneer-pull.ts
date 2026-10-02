@@ -502,10 +502,17 @@ async function pullClaims(): Promise<string> {
   const { db, schema } = await import("../src/db");
   const { and, gte, eq } = await import("drizzle-orm");
   const readOnFile = () => db
-    .select({ rxNumber: schema.claims.rxNumber, fillNumber: schema.claims.fillNumber, dateFilled: schema.claims.dateFilled, remitCents: schema.claims.remitCents, copayCents: schema.claims.copayCents })
+    .select({ rxNumber: schema.claims.rxNumber, fillNumber: schema.claims.fillNumber, dateFilled: schema.claims.dateFilled, remitCents: schema.claims.remitCents, copayCents: schema.claims.copayCents, bin: schema.claims.bin })
     .from(schema.claims)
     .where(and(gte(schema.claims.dateFilled, "2026-09-01"), eq(schema.claims.status, "paid")));
   const onFile = await readOnFile();
+  /* The payers held for each paid fill, so a fill here with a payer absent reaches the backfill (claims-backfill.ts, "A payer the report never delivered"). */
+  const heldBins = new Map<string, Set<string>>();
+  for (const c of onFile) {
+    const k = `${c.rxNumber}|${c.fillNumber ?? 0}`;
+    if (!heldBins.has(k)) heldBins.set(k, new Set());
+    heldBins.get(k)!.add(c.bin ?? "");
+  }
   /*
    * Which day is short, which is the only form of this anybody can act on. A month-level figure
    * sends somebody hunting; "7 September is 25 fills short, send that day's report again" is a job.
@@ -533,7 +540,11 @@ async function pullClaims(): Promise<string> {
   const { backfillClaimsFromPioneer } = await import("../src/lib/claims-backfill");
   const filledIn = await backfillClaimsFromPioneer(
     built.fills
-      .filter((f) => !new Set(onFile.map((c) => `${c.rxNumber}|${c.fillNumber ?? 0}`)).has(`${f.rxNumber}|${f.fillNumber}`))
+      .filter((f) => {
+        const bins = heldBins.get(`${f.rxNumber}|${f.fillNumber}`);
+        if (!bins) return true;
+        return [f.primary, ...(f.secondary ? [f.secondary] : []), ...f.furtherPayers].some((p) => !bins.has(p.bin ?? ""));
+      })
       .map((f) => ({
         rxNumber: f.rxNumber,
         fillNumber: f.fillNumber,
@@ -595,6 +606,8 @@ async function pullClaims(): Promise<string> {
         cents: filledIn.cents,
         overReversed: filledIn.heldReversed.length,
         overReversedCents: filledIn.heldReversed.reduce((n, x) => n + x.cents, 0),
+        payerRows: filledIn.payerRowsAdded,
+        payerRowsCostCents: filledIn.payerRowsCostCents,
       },
       problems: built.problems.slice(0, 20),
     }),
@@ -604,7 +617,7 @@ async function pullClaims(): Promise<string> {
     `${built.fills.length.toLocaleString("en-US")} fills (${built.payerCounts.twoPayers} with two payers` +
     `${built.payerCounts.more ? `, ${built.payerCounts.more} with more` : ""}); ` +
     `${recon.says}` +
-    `${filledIn.written || filledIn.heldReversed.length ? ` ${filledIn.says}.` : ""}` +
+    `${filledIn.written || filledIn.heldReversed.length || filledIn.payerRowsAdded ? ` ${filledIn.says}.` : ""}` +
     `${built.disagree.length ? ` ${built.disagree.length} fills where the payers and the patient do not add to the fill's price.` : ""}`
   );
 }

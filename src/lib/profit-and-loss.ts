@@ -196,9 +196,16 @@ export type PLInputs = {
    */
   costUnknownFills?: number;
   costUnknownRevenueCents?: number | null;
+  /** The drugs on those fills, so the sentence can name what to put a cost on in PioneerRx. */
+  costUnknownItems?: string[];
   waitingFills?: number;
   waitingRevenueCents?: number | null;
   waitingCostCents?: number | null;
+  /** Of the fills in the bin, those filled more than a fortnight before the day this was computed: the ones to return to stock. */
+  waitingPastFortnightFills?: number;
+  waitingPastFortnightRevenueCents?: number | null;
+  /** The day the bin was counted, for the sentence; absent on an account built without one. */
+  waitingAsOf?: string | null;
   /** The value on the shelf at the first and last count of the month, for the independent check. */
   openingStockCents?: number | null;
   closingStockCents?: number | null;
@@ -675,19 +682,29 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * few days reads low until those scripts are picked up. Without this line the reader has no way
    * to tell that from trade actually falling away.
    */
+  /*
+   * The owner, 2 October 2026, on a closed September that still printed "still in the bin … some of this will never
+   * be revenue at all": "still see this". A bin is a fact of the month, not a fault in it; the sentence states what
+   * the account did with it and names the one act there is — return the ones past the fortnight to stock.
+   */
   if (i.waitingFills && (i.waitingRevenueCents ?? 0) > 0) {
+    const past = i.waitingPastFortnightFills ?? 0;
+    const dayWord = (d: string) => new Date(Date.parse(`${d}T00:00:00Z`)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
     caveats.push(
-      `${i.waitingFills.toLocaleString("en-US")} prescriptions filled this month are still in the bin, ` +
-        `${formatCents(i.waitingRevenueCents ?? 0)} of them. None of it is revenue until somebody collects them, and the ` +
-        `${formatCents(i.waitingCostCents ?? 0)} of stock behind them is on the shelf rather than in cost of goods. ` +
-        "A script unclaimed for a fortnight is reversed, so some of this will never be revenue at all.",
+      `${i.waitingFills.toLocaleString("en-US")} prescriptions filled this month ${i.waitingAsOf ? `had not been collected by ${dayWord(i.waitingAsOf)}` : "are still in the bin"}: ` +
+        `${formatCents(i.waitingRevenueCents ?? 0)} that is not this month's revenue, and ${formatCents(i.waitingCostCents ?? 0)} of stock on the shelf rather than in cost of goods. ` +
+        (past > 0
+          ? `${past.toLocaleString("en-US")} of them, ${formatCents(i.waitingPastFortnightRevenueCents ?? 0)}, are past the fortnight: return them to stock, and their claims are reversed. The rest become revenue in the month they are collected.`
+          : "Each becomes revenue in the month it is collected; one unclaimed for a fortnight is returned to stock and its claim reversed."),
     );
   }
 
   if (i.costUnknownFills && (i.costUnknownRevenueCents ?? 0) > 0) {
+    const named = i.costUnknownItems ?? [];
     caveats.push(
-      `${i.costUnknownFills.toLocaleString("en-US")} prescriptions sold this month carry no acquisition cost, so ${formatCents(i.costUnknownRevenueCents ?? 0)} of revenue is held out of this account along with the cost that would have gone against it. ` +
-        "Counting the revenue with nothing behind it would put the whole of it into gross profit. The figure is missing from the report, not from the pharmacy — the fills are real and so is the money.",
+      `${i.costUnknownFills.toLocaleString("en-US")} prescriptions sold this month carry no acquisition cost in PioneerRx, so ${formatCents(i.costUnknownRevenueCents ?? 0)} of revenue is held out of this account with the cost that belongs against it; counted with nothing behind it, all of it would read as profit. ` +
+        "The morning pull takes the cost from PioneerRx where the drug carries one; still listed after a pull means the drug carries none there, or the fill was filled before the books began" +
+        (named.length ? `: ${named.join("; ")}.` : "."),
     );
   }
 
@@ -1192,6 +1209,10 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
   const waiting = fills.filter((f) => !f.soldOn && f.dateFilled.startsWith(month));
   const waitingRevenueCents = waiting.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0);
   const waitingCostCents = waiting.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0);
+  /* Past the fortnight by the day this was computed: the ones to return to stock, which is the act the sentence has to name. */
+  const fortnightAgo = new Date(Date.parse(`${shared.today}T00:00:00Z`) - 14 * 86_400_000).toISOString().slice(0, 10);
+  const waitingPast = waiting.filter((f) => f.dateFilled <= fortnightAgo);
+  const waitingPastFortnightRevenueCents = waitingPast.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0);
   /*
    * A fill whose cost nobody knows is left out of both sides, which is what this file has always
    * said it does and did not do.
@@ -1211,6 +1232,8 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    */
   const costUnknown = monthFills.filter((f) => f.acquisitionCents === null);
   const costUnknownRevenueCents = costUnknown.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0);
+  /* Named, so the sentence says which drugs to put a cost on in PioneerRx rather than that "a cost" is missing. */
+  const costUnknownItems = [...new Set(costUnknown.map((f) => `${(f.itemName ?? f.ndc11 ?? "an unnamed item").replace(/\s+/g, " ").trim()} (filled ${f.dateFilled})`))].slice(0, 8);
   const mine = monthFills.filter((f) => f.acquisitionCents !== null);
   /*
    * What the month's dispensing actually brought in, per fill rather than per transmission, so a
@@ -1354,9 +1377,13 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     claimsPatientCents,
     costUnknownFills: costUnknown.length,
     costUnknownRevenueCents,
+    costUnknownItems,
     waitingFills: waiting.length,
     waitingRevenueCents,
     waitingCostCents,
+    waitingPastFortnightFills: waitingPast.length,
+    waitingPastFortnightRevenueCents,
+    waitingAsOf: shared.today,
     claimsCount: monthFills.length,
     dispensedCostCents,
     purchasesCents,

@@ -36,6 +36,15 @@
  * reversed row stays as what the report said, the paid row carries the money — and the morning
  * sentence says how many. A report that later carries the re-transmission adopts the row rather
  * than doubling it (rx-transactions.ts, `adopt`).
+ *
+ * ── A payer the report never delivered ──
+ *
+ * Eight September fills (2 October 2026) stood with no acquisition cost and no quantity because
+ * the report had sent only the copay card's row: the primary plan had paid $0 and carried the
+ * bottle's cost, and a $0 row never arrived. PioneerRx holds both rows. So a fill that is here
+ * with a payer absent gets that payer's row, written as the report would have sent it — the first
+ * payer carries the quantity and the cost — keyed by Rx, refill and BIN so a report that later
+ * carries it adopts the row.
  */
 
 import { db, schema } from "@/db";
@@ -72,6 +81,9 @@ export type BackfilledFill = {
 
 export type BackfillReport = {
   considered: number;
+  /** Payer rows written onto fills already here (a primary that paid nothing and carried the cost), and the cost they carried. */
+  payerRowsAdded: number;
+  payerRowsCostCents: number;
   written: number;
   alreadyHeld: number;
   /** Here only as reversed while PioneerRx calls them paid: written as paid beside the reversal, on the owner's word (2 October 2026). */
@@ -88,7 +100,7 @@ export type BackfillReport = {
  * dated on or after it are considered, and the caller passes the month being worked.
  */
 export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: string, user = "the PioneerRx pull"): Promise<BackfillReport> {
-  const report: BackfillReport = { considered: fills.length, written: 0, alreadyHeld: 0, heldReversed: [], refused: [], cents: 0, says: "" };
+  const report: BackfillReport = { considered: fills.length, payerRowsAdded: 0, payerRowsCostCents: 0, written: 0, alreadyHeld: 0, heldReversed: [], refused: [], cents: 0, says: "" };
   if (fills.length === 0) {
     report.says = "nothing to fill in";
     return report;
@@ -99,7 +111,7 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
   const held = rxNumbers.length
     ? await db.query.claims.findMany({
         where: and(inArray(schema.claims.rxNumber, rxNumbers), gte(schema.claims.dateFilled, from)),
-        columns: { rxNumber: true, fillNumber: true, status: true },
+        columns: { rxNumber: true, fillNumber: true, status: true, bin: true },
       })
     : [];
   const heldKeys = new Set(held.map((h) => `${h.rxNumber}|${h.fillNumber ?? 0}`));
@@ -118,11 +130,23 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
    */
   const reversedKeys = new Set(held.filter((h) => h.status === "reversed").map((h) => `${h.rxNumber}|${h.fillNumber ?? 0}`));
   const paidKeys = new Set(held.filter((h) => h.status !== "reversed").map((h) => `${h.rxNumber}|${h.fillNumber ?? 0}`));
+  /* Which payers' rows are here for each paid fill, so a payer the report never delivered can be written on its own. */
+  const heldBins = new Map<string, Set<string>>();
+  for (const h of held) {
+    if (h.status === "reversed") continue;
+    const k = `${h.rxNumber}|${h.fillNumber ?? 0}`;
+    if (!heldBins.has(k)) heldBins.set(k, new Set());
+    heldBins.get(k)!.add(h.bin ?? "");
+  }
+  const missingPayers: { fill: BackfilledFill; payers: NonNullable<BackfilledFill["payers"]> }[] = [];
 
   const wanted = inRange.filter((f) => {
     const k = `${f.rxNumber}|${f.fillNumber}`;
     if (paidKeys.has(k)) {
       report.alreadyHeld++;
+      const bins = heldBins.get(k) ?? new Set<string>();
+      const absent = (f.payers ?? []).filter((p) => !bins.has(p.bin ?? ""));
+      if (absent.length && f.filledOn) missingPayers.push({ fill: f, payers: absent });
       return false;
     }
     if (reversedKeys.has(k)) report.heldReversed.push({ rxNumber: f.rxNumber, fillNumber: f.fillNumber, filledOn: f.filledOn, cents: f.insuranceCents });
@@ -136,7 +160,7 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
     }
     return true;
   });
-  if (wanted.length === 0) {
+  if (wanted.length === 0 && missingPayers.length === 0) {
     report.says =
       report.heldReversed.length > 0
         ? `nothing to fill in; ${report.heldReversed.length} fills here as reversed and paid in PioneerRx carry no fill date there`
@@ -251,16 +275,54 @@ export async function backfillClaimsFromPioneer(fills: BackfilledFill[], from: s
   }]);
 
   for (let i = 0; i < rows.length; i += 300) await db.insert(schema.claims).values(rows.slice(i, i + 300));
+  /* The absent payer's row on a fill already here; the first payer carries the quantity and the cost (see the header). */
+  const payerRows: (typeof schema.claims.$inferInsert)[] = missingPayers.flatMap(({ fill: f, payers }) =>
+    payers.map((p) => {
+      const i = (f.payers ?? []).indexOf(p);
+      return {
+        id: newId(),
+        importId,
+        rxNumber: f.rxNumber,
+        fillNumber: f.fillNumber,
+        dateFilled: f.filledOn!,
+        ndc11: f.ndc11,
+        itemName: f.itemName,
+        bin: p.bin,
+        pcn: p.pcn,
+        groupNumber: p.groupNumber,
+        networkId: p.networkId,
+        quantityThousandths: i === 0 ? f.quantityThousandths : null,
+        daysSupply: f.daysSupply,
+        remitCents: p.remitCents,
+        copayCents: p.patientCents,
+        acquisitionCents: i === 0 ? f.acquisitionCents : null,
+        dispensingFeePaidCents: i === 0 ? f.dispensingFeeCents : null,
+        evoucherCents: p.evoucherCents,
+        dirFeeCents: p.dirFeeCents,
+        payerPosition: p.position,
+        fillTotalPriceCents: i === 0 ? (f.fillTotalPriceCents ?? null) : null,
+        status: "paid" as const,
+        completedAt: f.soldOn,
+        source: "pioneer_sql",
+      };
+    }),
+  );
+  for (let i = 0; i < payerRows.length; i += 300) await db.insert(schema.claims).values(payerRows.slice(i, i + 300));
+  report.payerRowsAdded = payerRows.length;
+  report.payerRowsCostCents = payerRows.reduce((n, r) => n + (r.acquisitionCents ?? 0), 0);
   report.written = wanted.length;
   report.cents = wanted.reduce((n, f) => n + f.insuranceCents, 0);
 
   const byDay = new Map<string, number>();
   for (const f of wanted) byDay.set(f.filledOn!, (byDay.get(f.filledOn!) ?? 0) + 1);
   const days = [...byDay].sort((a, b) => b[1] - a[1]);
+  const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   report.says =
-    `${report.written} fill${report.written === 1 ? "" : "s"} worth ` +
-    `$${(report.cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} filled in from PioneerRx` +
-    `${days.length ? `, mostly ${days.slice(0, 3).map(([d, n]) => `${d} (${n})`).join(", ")}` : ""}` +
+    (report.written
+      ? `${report.written} fill${report.written === 1 ? "" : "s"} worth ${money(report.cents)} filled in from PioneerRx` +
+        `${days.length ? `, mostly ${days.slice(0, 3).map(([d, n]) => `${d} (${n})`).join(", ")}` : ""}`
+      : "every fill PioneerRx has for this period is already here") +
+    `${report.payerRowsAdded ? `; ${report.payerRowsAdded} payer row${report.payerRowsAdded === 1 ? "" : "s"} the report never sent written onto fills already here, carrying ${money(report.payerRowsCostCents)} of cost` : ""}` +
     `${report.refused.length ? `; ${report.refused.length} refused for want of a fill date` : ""}` +
     `${report.heldReversed.length ? `; ${report.heldReversed.length} of them the report had only as reversed, ` +
       `$${(report.heldReversed.reduce((n, x) => n + x.cents, 0) / 100).toFixed(2)}, and PioneerRx's paid fill now stands beside the reversal` : ""}`;

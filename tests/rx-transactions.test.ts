@@ -722,3 +722,22 @@ test("a paid fill PioneerRx supplied first is adopted by the report's own row, n
   assert.equal(other.insertPaid.length, 1, "a different BIN is a different claim");
   assert.equal(other.adopt.length, 0);
 });
+
+describe("a reversal pairs with the transmission of its own fill date first (2 October 2026)", () => {
+  /* Paid on the 4th, reversed, re-transmitted on the 9th at the same price: the reversal prints the 4th and cancels the 4th. */
+  const same = (status: string, date: string, completed: string, acq: string) => `900030-0,${status},${status === "A" ? "\"($1,088.86)\"" : "\"$1,088.86\""},G1,,$0.00,$0.00,$0.00,${completed},${date},004336,${status === "A" ? "-30.0000" : "30.0000"},${status === "A" ? "\"($1,127.88)\"" : `"${acq}"`},P1,00074709430,${status === "A" ? "($39.02)" : "$39.02"}`;
+  test("within one file: the original is the one cancelled, the re-transmission stands and is sold", () => {
+    const rows = parseRxTransactions(file("Third Party:,004336 (ADV) - 004336", same("P", "09/04/26", "", "$1,127.88"), same("A", "09/04/26", "", ""), same("P", "09/09/26", "9/9/2026 10:00:00 AM", "$1,127.97"))).rows;
+    const p = planTransactions(rows, { keys: new Set(), paid: [] });
+    assert.deepEqual(p.insertReversedPaid.map((x) => x.paid.dateFilled), ["2026-09-04"], "the 4th is cancelled");
+    assert.deepEqual(p.insertPaid.map((x) => [x.dateFilled, x.completedAt !== null]), [["2026-09-09", true]], "the 9th stands, sold");
+  });
+  test("against claims on file: the reversal cancels the claim of its own date, not the latest match", () => {
+    const rows = parseRxTransactions(file("Third Party:,004336 (ADV) - 004336", same("A", "09/04/26", "", ""))).rows;
+    const ref = (id: string, dateFilled: string) => ({ id, rxNumber: "900030", fillNumber: 0, dateFilled, bin: "004336", ndc11: "00074709430", remitCents: 108_886, copayCents: 0 });
+    const p = planTransactions(rows, { keys: new Set(), paid: [ref("orig", "2026-09-04"), ref("rebill", "2026-09-09")] });
+    assert.deepEqual(p.reverseExisting.map((x) => x.claimId), ["orig"]);
+    const noDates = planTransactions(rows, { keys: new Set(), paid: [{ ...ref("a", "2026-09-04"), dateFilled: undefined }, { ...ref("b", "2026-09-09"), dateFilled: undefined }] });
+    assert.deepEqual(noDates.reverseExisting.map((x) => x.claimId), ["b"], "without dates the old rule stands: the latest match");
+  });
+});

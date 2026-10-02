@@ -651,6 +651,12 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                       {completeness.takenFromPioneer.overReversed > 0 ? ` (${completeness.takenFromPioneer.overReversed} the nightly report had only as reversed)` : ""}.
                     </>
                   )}
+                  {completeness.takenFromPioneer.payerRows > 0 && (
+                    <>
+                      {" "}
+                      It also wrote {completeness.takenFromPioneer.payerRows} payer row{completeness.takenFromPioneer.payerRows === 1 ? "" : "s"} the nightly report never sent onto fills already here, carrying {formatCents(completeness.takenFromPioneer.payerRowsCostCents)} of cost.
+                    </>
+                  )}
                 </p>
                 {(completeness.missingFills > 0 || completeness.notAddingUp > 0) && (
                   <details className="mt-1 text-xs text-ink-2">

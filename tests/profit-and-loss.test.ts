@@ -386,9 +386,21 @@ describe("what the cash account is allowed to carry", () => {
     const r = monthlyPL({ ...base, waitingFills: 386, waitingRevenueCents: 7_270_449, waitingCostCents: 6_660_444 });
     const said = r.caveats.join(" ");
     assert.ok(said.includes("386 prescriptions filled this month are still in the bin"));
-    assert.ok(said.includes("$72,704.49 of them"), "the money waiting");
-    assert.ok(said.includes("$66,604.44 of stock behind them is on the shelf"), "and the stock behind it");
-    assert.ok(said.includes("reversed"), "and that some will never be revenue");
+    assert.ok(said.includes("$72,704.49 that is not this month's revenue"), "the money waiting");
+    assert.ok(said.includes("$66,604.44 of stock on the shelf"), "and the stock behind it");
+    assert.ok(said.includes("reversed"), "and that one unclaimed for a fortnight is reversed");
+  });
+  test("a bin counted on a day names what is past the fortnight and the act: return them to stock", () => {
+    const r = monthlyPL({ ...base, waitingFills: 322, waitingRevenueCents: 5_527_845, waitingCostCents: 5_061_672, waitingPastFortnightFills: 18, waitingPastFortnightRevenueCents: 312_000, waitingAsOf: "2026-10-02" });
+    const said = r.caveats.join(" ");
+    assert.ok(said.includes("322 prescriptions filled this month had not been collected by Oct 2"), said);
+    assert.ok(said.includes("18 of them, $3,120.00, are past the fortnight: return them to stock"), said);
+  });
+  test("a fill with no cost in PioneerRx names the drug to put a cost on", () => {
+    const r = monthlyPL({ ...base, costUnknownFills: 2, costUnknownRevenueCents: 176_911, costUnknownItems: ["ADZENYS XR-ODT 15.7 MG TABLET (filled 2026-08-31)", "ZEPBOUND 5 MG/DOSE (filled 2026-09-01)"] });
+    const said = r.caveats.join(" ");
+    assert.ok(said.includes("2 prescriptions sold this month carry no acquisition cost in PioneerRx"), said);
+    assert.ok(said.includes("the fill was filled before the books began: ADZENYS XR-ODT 15.7 MG TABLET (filled 2026-08-31); ZEPBOUND 5 MG/DOSE (filled 2026-09-01)."), said);
   });
 
   /*

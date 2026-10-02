@@ -421,7 +421,7 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
   // them), and the paid claims a reversal in this file might cancel.
   const held = await db.query.claims.findMany({
     where: eq(schema.claims.source, "transaction_report"),
-    columns: { id: true, transactionKey: true, reversalKey: true, status: true, completedAt: true, rxNumber: true, fillNumber: true, bin: true, ndc11: true, remitCents: true, copayCents: true },
+    columns: { id: true, transactionKey: true, reversalKey: true, status: true, completedAt: true, rxNumber: true, fillNumber: true, dateFilled: true, bin: true, ndc11: true, remitCents: true, copayCents: true },
   });
   const keys = new Set<string>();
   const unsold = new Map<string, string>();

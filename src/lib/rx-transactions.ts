@@ -871,6 +871,8 @@ export type PaidClaimRef = {
   id: string;
   rxNumber: string;
   fillNumber: number | null;
+  /** The claim's fill date, so a reversal pairs with the transmission of its own date first (see the pairing below). */
+  dateFilled?: string | null;
   bin: string | null;
   ndc11: string | null;
   remitCents: number | null;
@@ -1000,14 +1002,26 @@ export function planTransactions(
       fillKey(c.rxNumber, c.fillNumber) === fillKey(t.rxNumber, t.fillNumber) &&
       c.bin === t.bin && c.ndc11 === t.ndc11 && c.remitCents === negate(t.remitCents) && c.copayCents === negate(t.copayCents);
 
+    /*
+     * Of the claims that match by money, the one filled on the reversal's own date comes first.
+     *
+     * A claim paid on the 4th, reversed, and re-transmitted on the 9th at the same price is two paid
+     * transmissions that match the one reversal equally by amount; taking the latest paired the
+     * reversal with the re-transmission, so the original stayed paid and unsold while the one the
+     * patient collected read as reversed — on a Qulipta and an Ubrelvy, $1,922.06, 2 October 2026.
+     * The reversal prints the original's fill date, which is the tie-break.
+     */
+    const sameDay = (c: { dateFilled?: string | null }) => (c.dateFilled ?? null) === t.dateFilled;
     let hit = -1;
-    for (let i = plan.insertPaid.length - 1; i >= 0; i--) if (matches(plan.insertPaid[i])) { hit = i; break; }
+    for (let i = plan.insertPaid.length - 1; i >= 0; i--) if (matches(plan.insertPaid[i]) && sameDay(plan.insertPaid[i])) { hit = i; break; }
+    if (hit < 0) for (let i = plan.insertPaid.length - 1; i >= 0; i--) if (matches(plan.insertPaid[i])) { hit = i; break; }
     if (hit >= 0) {
       const [paid] = plan.insertPaid.splice(hit, 1);
       plan.insertReversedPaid.push({ paid, reversal: t });
       continue;
     }
-    const stored = existing.paid.filter((c) => !usedExisting.has(c.id) && matches(c)).pop();
+    const candidates = existing.paid.filter((c) => !usedExisting.has(c.id) && matches(c));
+    const stored = candidates.filter(sameDay).pop() ?? candidates.pop();
     if (stored) {
       usedExisting.add(stored.id);
       plan.reverseExisting.push({ claimId: stored.id, reversal: t });

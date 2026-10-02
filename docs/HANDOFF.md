@@ -8,6 +8,20 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, 14:40: the two paragraphs he pasted back ("still see this, still no way to close a month").** September was
+  already closed (12:18, on his "can we close sept?"); the badge and the Close control are in the evening deploy. The
+  paragraphs were restated: the bin sentence on a closed month says what was not collected by the day it was computed,
+  what is past the fortnight (14 fills, $6,423.88: return to stock) and that the rest become revenue when collected; the
+  no-cost sentence names the drugs with their fill dates and what the pull does. Behind them, three faults, all with
+  PioneerRx right and the nightly report wrong: six fills missing the primary's $0 row that carried the cost (the pull
+  now writes a payer row the report never sent); two fills whose reversal had been paired to the re-transmission
+  (pairing rule fixed to prefer the reversal's own fill date; the two repaired on live); and one fill from 31 August.
+  September accrual now: revenue $667,170.01, gross profit $79,797.79 (12.0%), running costs $68,187.87, net
+  $11,609.92; cash: −$30,300.06, every line named. Two questions for him are on the register (the 11 fills PioneerRx
+  dropped; late-August fills sold in September). He asked what the engine needs; the answer given: PioneerRx's copy as
+  the record of every fill with the report as the same-day preview, restating held rows where the copy differs, the
+  remit tie by claim id after the pull, and every figure on a page with its rows behind it.
+
 - **2 October, 13:50: his three asks, done on live; the pages go out with the evening deploy.** "take from pioneer": the
   morning pull now writes a fill PioneerRx holds as paid where the report had only a reversal (44 written, $5,427.65;
   claims-backfill.ts), measures again after writing, and stores what it took; a report that later carries the
