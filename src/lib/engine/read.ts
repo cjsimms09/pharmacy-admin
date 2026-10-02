@@ -225,3 +225,195 @@ export async function deliveriesView(month: string): Promise<DeliveriesView> {
     changedSinceSent: m.changedSinceSent,
   };
 }
+
+/* ───────────────────────────── Claims ───────────────────────────── */
+
+export type Leg = {
+  claimId: string;
+  legKey: string;
+  rxNumber: string;
+  fillNumber: number | null;
+  dateFilled: string;
+  soldOn: string | null;
+  itemName: string | null;
+  payer: string;
+  pcn: string | null;
+  bin: string | null;
+  route: string | null;
+  programme: boolean;
+  state: string;
+  expectedCents: number;
+  paidCents: number;
+  shortCents: number;
+  ageDays: number;
+  cycleDays: number | null;
+  dueOn: string | null;
+  lastPaidOn: string | null;
+  reasons: { group: string; reason: string; cents: number }[];
+  decision: string | null;
+  decisionNote: string | null;
+};
+
+export type PayerLine = {
+  payer: string;
+  legs: number;
+  openLegs: number;
+  owedCents: number;
+  dueCents: number;
+  dueLegs: number;
+  bands: [number, number, number, number, number];
+  oldestOpen: string | null;
+  cycle: string;
+  measured: boolean;
+  programme: boolean;
+  routes: string | null;
+  paidLegs: number;
+  paidCents: number;
+  shortLegs: number;
+  shortCents: number;
+  overLegs: number;
+  reversedPaidLegs: number;
+  lastPaidOn: string | null;
+};
+
+export type UnmatchedPayment = { id: string; receivedOn: string | null; payer: string | null; source: string; amountCents: number; rxNumber: string; fillNumber: number | null; dateFilled: string | null; reference: string | null; onRxAndDate: number; onRx: number };
+
+export type ClaimsView = {
+  computedAt: string | null;
+  figures: { legs: number; owedCents: number; owedLegs: number; dueCents: number; dueLegs: number; paidThisMonthCents: number; shortCents: number; shortLegs: number; unmatchedCents: number; unmatchedLegs: number; reversedPaidCents: number; reversedPaidLegs: number };
+  byPayer: PayerLine[];
+  unpaid: Leg[];
+  short: Leg[];
+  shortByReason: { reason: string; legs: number; cents: number }[];
+  unmatched: UnmatchedPayment[];
+  preBooks: { payments: number; cents: number };
+  decided: Leg[];
+  payer: string | null;
+};
+
+const LEG_SQL = sql`claim_id, leg_key, rx_number, fill_number, date_filled, sold_on, item_name, payer, pcn, bin, route, programme, state, expected_cents, paid_cents, short_cents, age_days, cycle_days, due_on, last_paid_on, reasons, decision, decision_note`;
+type LegRow = { claim_id: string; leg_key: string; rx_number: string; fill_number: number | null; date_filled: string; sold_on: string | null; item_name: string | null; payer: string; pcn: string | null; bin: string | null; route: string | null; programme: number; state: string; expected_cents: number; paid_cents: number; short_cents: number; age_days: number; cycle_days: number | null; due_on: string | null; last_paid_on: string | null; reasons: string | null; decision: string | null; decision_note: string | null };
+const leg = (r: LegRow): Leg => ({
+  claimId: r.claim_id,
+  legKey: r.leg_key,
+  rxNumber: r.rx_number,
+  fillNumber: r.fill_number,
+  dateFilled: r.date_filled,
+  soldOn: r.sold_on,
+  itemName: r.item_name,
+  payer: r.payer,
+  pcn: r.pcn,
+  bin: r.bin,
+  route: r.route,
+  programme: !!r.programme,
+  state: r.state,
+  expectedCents: r.expected_cents,
+  paidCents: r.paid_cents,
+  shortCents: r.short_cents,
+  ageDays: r.age_days,
+  cycleDays: r.cycle_days,
+  dueOn: r.due_on,
+  lastPaidOn: r.last_paid_on,
+  reasons: r.reasons ? (JSON.parse(r.reasons) as { group: string; reason: string; cents: number }[]) : [],
+  decision: r.decision,
+  decisionNote: r.decision_note,
+});
+
+/**
+ * Claims: the standing of every leg in the books (engine/claims.ts), as six figures, a line per payer, and the
+ * lists — what is unpaid, what was paid short and why, the payments that found no claim, and what a person has
+ * decided. A payer narrows the lists and the figures to that payer.
+ */
+export async function claimsView(today: string, filter: { payer?: string | null } = {}): Promise<ClaimsView> {
+  const { OPEN_STATES, TERMINAL_DECISIONS } = await import("./claims");
+  const { SITE_STARTS_ON } = await import("../books-start");
+  const payer = filter.payer?.trim() || null;
+  const month = today.slice(0, 7);
+  const [rows, paidMonth, unmatchedRows, preBooks, computed] = await Promise.all([
+    db.all(payer ? sql`select ${LEG_SQL} from claim_standing where payer = ${payer} order by date_filled, rx_number` : sql`select ${LEG_SQL} from claim_standing order by date_filled, rx_number`) as Promise<LegRow[]>,
+    db.all(sql`select coalesce(sum(p.amount_cents), 0) c from claim_payments p join claim_standing s on s.claim_id = p.claim_id where p.source <> 'mtf' and p.out_of_books = 0 and p.received_on >= ${month + "-01"} and p.received_on <= ${today}${payer ? sql` and s.payer = ${payer}` : sql``}`) as Promise<{ c: number }[]>,
+    db.all(
+      sql`select p.id, p.received_on, p.payer, p.source, p.amount_cents, p.rx_number, p.fill_number, p.date_filled, p.reference,
+        (select count(*) from claims c where c.rx_number = p.rx_number and c.date_filled = p.date_filled) on_rx_date,
+        (select count(*) from claims c where c.rx_number = p.rx_number) on_rx
+        from claim_payments p where p.claim_id is null and p.out_of_books = 0 and (p.date_filled is null or p.date_filled >= ${SITE_STARTS_ON}) order by p.received_on desc, p.amount_cents desc limit 400`,
+    ) as Promise<{ id: string; received_on: string | null; payer: string | null; source: string; amount_cents: number; rx_number: string; fill_number: number | null; date_filled: string | null; reference: string | null; on_rx_date: number; on_rx: number }[]>,
+    db.all(sql`select count(*) n, coalesce(sum(amount_cents), 0) c from claim_payments where claim_id is null and out_of_books = 0 and date_filled < ${SITE_STARTS_ON}`) as Promise<{ n: number; c: number }[]>,
+    db.all(sql`select max(computed_at) at from claim_standing`) as Promise<{ at: string | null }[]>,
+  ]);
+  const legs = rows.map(leg);
+  const open = (l: Leg) => OPEN_STATES.has(l.state as never) && !TERMINAL_DECISIONS.has(l.decision ?? "");
+  const band = (age: number) => (age <= 7 ? 0 : age <= 14 ? 1 : age <= 30 ? 2 : age <= 60 ? 3 : 4);
+  const byPayer = new Map<string, PayerLine>();
+  const f = { legs: legs.length, owedCents: 0, owedLegs: 0, dueCents: 0, dueLegs: 0, paidThisMonthCents: paidMonth[0]?.c ?? 0, shortCents: 0, shortLegs: 0, unmatchedCents: 0, unmatchedLegs: 0, reversedPaidCents: 0, reversedPaidLegs: 0 };
+  for (const l of legs) {
+    const e = byPayer.get(l.payer) ?? { payer: l.payer, legs: 0, openLegs: 0, owedCents: 0, dueCents: 0, dueLegs: 0, bands: [0, 0, 0, 0, 0] as [number, number, number, number, number], oldestOpen: null, cycle: "", measured: false, programme: l.programme, routes: null, paidLegs: 0, paidCents: 0, shortLegs: 0, shortCents: 0, overLegs: 0, reversedPaidLegs: 0, lastPaidOn: null };
+    e.legs++;
+    if (l.cycleDays !== null && !l.programme) e.measured = true;
+    if (l.route) e.routes = [...new Set([...(e.routes ?? "").split(", ").filter(Boolean), ...l.route.split(", ")])].join(", ");
+    if (l.lastPaidOn && (!e.lastPaidOn || l.lastPaidOn > e.lastPaidOn)) e.lastPaidOn = l.lastPaidOn;
+    if (open(l)) {
+      e.openLegs++;
+      e.owedCents += l.shortCents;
+      e.bands[band(l.ageDays)] += l.shortCents;
+      if (!e.oldestOpen || l.dateFilled < e.oldestOpen) e.oldestOpen = l.dateFilled;
+      f.owedCents += l.shortCents;
+      f.owedLegs++;
+      if (l.state === "due") {
+        e.dueCents += l.shortCents;
+        e.dueLegs++;
+        f.dueCents += l.shortCents;
+        f.dueLegs++;
+      }
+      if (l.state === "short") {
+        e.shortLegs++;
+        e.shortCents += l.shortCents;
+        f.shortCents += l.shortCents;
+        f.shortLegs++;
+      }
+    }
+    if (l.state === "paid" || l.state === "short" || l.state === "over") {
+      e.paidLegs++;
+      e.paidCents += l.paidCents;
+    }
+    if (l.state === "over") e.overLegs++;
+    if (l.state === "reversed_paid") {
+      e.reversedPaidLegs++;
+      f.reversedPaidLegs++;
+      f.reversedPaidCents += l.paidCents;
+    }
+    byPayer.set(l.payer, e);
+  }
+  const cyclesByPayer = new Map<string, Set<number>>();
+  for (const l of legs) if (l.cycleDays !== null) cyclesByPayer.set(l.payer, (cyclesByPayer.get(l.payer) ?? new Set()).add(l.cycleDays));
+  for (const e of byPayer.values()) {
+    const cs = [...(cyclesByPayer.get(e.payer) ?? [])].sort((a, b) => a - b);
+    e.cycle = cs.length === 0 ? (e.programme ? "programme" : "not measured") : cs.length === 1 ? `${cs[0]} days` : `${cs[0]}–${cs[cs.length - 1]} days by plan`;
+  }
+  const unmatched: UnmatchedPayment[] = unmatchedRows.map((r) => ({ id: r.id, receivedOn: r.received_on, payer: r.payer, source: r.source, amountCents: r.amount_cents, rxNumber: r.rx_number, fillNumber: r.fill_number, dateFilled: r.date_filled, reference: r.reference, onRxAndDate: r.on_rx_date, onRx: r.on_rx }));
+  f.unmatchedLegs = unmatched.length;
+  f.unmatchedCents = unmatched.reduce((n, u) => n + u.amountCents, 0);
+  const short = legs.filter((l) => l.state === "short" && !TERMINAL_DECISIONS.has(l.decision ?? ""));
+  const reasonTally = new Map<string, { legs: number; cents: number }>();
+  for (const l of short) {
+    const keys = l.reasons.filter((r) => r.group !== "PR").map((r) => `${r.group}-${r.reason}`);
+    for (const k of keys.length ? keys : ["no reasons on file"]) {
+      const t = reasonTally.get(k) ?? { legs: 0, cents: 0 };
+      t.legs++;
+      t.cents += keys.length ? l.reasons.filter((r) => `${r.group}-${r.reason}` === k).reduce((n, r) => n + r.cents, 0) : l.shortCents;
+      reasonTally.set(k, t);
+    }
+  }
+  return {
+    computedAt: computed[0]?.at ?? null,
+    figures: f,
+    byPayer: [...byPayer.values()].sort((a, b) => b.owedCents - a.owedCents || b.legs - a.legs),
+    unpaid: legs.filter((l) => open(l) && l.state !== "short").sort((a, b) => a.dateFilled.localeCompare(b.dateFilled)),
+    short,
+    shortByReason: [...reasonTally].map(([reason, t]) => ({ reason, ...t })).sort((a, b) => b.cents - a.cents),
+    unmatched: payer ? unmatched.filter((u) => (u.payer ?? "").toLowerCase().includes(payer.toLowerCase())) : unmatched,
+    preBooks: { payments: preBooks[0]?.n ?? 0, cents: preBooks[0]?.c ?? 0 },
+    decided: legs.filter((l) => l.decision).sort((a, b) => b.dateFilled.localeCompare(a.dateFilled)),
+    payer,
+  };
+}

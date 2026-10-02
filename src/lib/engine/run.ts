@@ -33,6 +33,8 @@ export async function engineRefresh(reason: string, opts: { proofs?: boolean; to
     try {
       const { writeFeedState } = await import("./feeds");
       wrote.feeds = await writeFeedState(now, today);
+      const { refreshClaimStanding } = await import("./claims");
+      wrote.claims = await refreshClaimStanding(today, now);
       const { monthsToKeep, writeMonth } = await import("./month");
       const months = monthsToKeep(today);
       const figures = [];
@@ -51,6 +53,7 @@ export async function engineRefresh(reason: string, opts: { proofs?: boolean; to
           await p.readerArithmetic(today),
           ...(await Promise.all(months.map((m) => p.remitToClaim(m)))),
           await p.expectedArrived(),
+          await p.paymentsOnce(),
         ];
         wrote.proofs = await p.writeProofs(results, now);
         try {

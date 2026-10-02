@@ -8,7 +8,7 @@ file is how they talk.
 
 ## Open items
 
-### From the pharmacy session — 1 October: the rebuild has begun. Spec in `docs/REBUILD.md`; stages 1 and 2 are live
+### From the pharmacy session — 1 October: the rebuild has begun. Spec in `docs/REBUILD.md`; stages 1, 2 and 3 are live
 
 **Stage 1 of the rebuild is on `feature/compliance`** (commit 1d925fa): the engine (`src/lib/engine`) and Today
 (`/v2/today`, route group `src/app/(site)`). Migration 0134 adds `needs_you`, `feed_state`, `proof_run`,
@@ -27,6 +27,43 @@ Spending and Deliveries as lookups over `engine/read.ts` (`suppliersView`, `remi
 - A supplier's statements are counted from `supplier_statement_lines` (distinct `statement_date`), not from document
   titles. A C-II count reads `supplier_invoices.schedule = 'schedule_2'`; `controlled_items` is an empty string, not
   null, on most rows, so `is not null` counts every invoice.
+
+**Stage 3 (Claims, `/v2/claims`) is live.** Migration 0136. What it settled, in the order it was found:
+- **A payer's cycle is measured per plan group** (payer + PCN/BIN), `engine/cycles.ts`. One payer name hides
+  several contracts on different clocks: OptumRx pooled p90 was 17 days while its IRX/610011 claims pay in 28–29
+  and 9999/610097 in 13, so the pool called 85 IRX claims ($25,193.18) late at 18 days. A group with 25 tied
+  payments is judged by its own p90; a smaller one stretches the payer's p90 to its own, never shortens it. Today,
+  the month and Cash ahead all judge by the group. That is the "OptumRx 182" of the stage gate, explained.
+- **One payment, one row.** 752 payments ($27,732.69) stood twice against their claims — once from the 835, once
+  from ProviderPay's remittance detail — and read as over-payments; 908 more stood twice against pre-books fills.
+  `claim_payments.origin` names the kind of document each row came from (`payment-origin.ts`); `recordClaimPayment`
+  keeps one row per claim, amount, day and source across kinds of document and lets the 835's row take over a
+  report's. Same-kind repeats stay (a claim paid, taken back and paid again inside one remittance is two lines; each
+  reader counts its own). `scripts/support/dedup-payments.ts` removed the 1,336 on live; the nightly proof
+  `payments_once` checks it holds.
+- **The 835's CAS adjustments and PLB lines are stored** (`payment_adjustments`, `remittance_holdbacks`: both tables
+  existed, neither was written). `scripts/support/backfill-835-detail.ts` re-reads the files on disk — but the
+  ProviderPay 835s of the 1 October pull are not on disk anywhere the sweep reads (only the twelve facilitator files
+  are), so September's short payments carry no reasons. Every 835 read from now on keeps them.
+- **`claim_standing`** (`engine/claims.ts`): one row per claim leg in the books — expected, paid (each payment once,
+  the RxRescue top-off and the facilitator's money kept apart), route, plan group, cycle, state (paid · none · short ·
+  over · unpaid · due · unmeasured · programme · cash · fee · reversed · reversed_paid), the reasons, the decision.
+  Rebuilt on every engine pass, first, because the month, Cash ahead and Today's pots now read it instead of their
+  own SQL.
+- **`claim_decisions`**: chase · wait (until a day) · paid elsewhere · write off · re-bill · settled · not ours, keyed
+  by the leg (rx | fill | date | BIN) so a re-import cannot orphan them. Written from the screen; undo on the Decided
+  tab. The `chase` / `wait` / `channel` answers Today had been offering without a handler now have one road.
+- **One name per payer** (`engine/payers.ts`): Prime / Prime Therapeutics / Prime Therapeutics LLC meet; so do
+  Capital Rx's, Express Scripts', Navitus's, MedOne's, Liviniti's spellings. The `payer_alias` rule (declared,
+  never read) is read first — written from the By-payer tab. A processor ("SS&C HEALTH" on an 835) is never folded
+  into a programme that carries its name.
+- The screen: six figures, By payer (aged 0–7 / 8–14 / 15–30 / 31–60 / 60+, due, cycle, route, last paid; a payer's
+  plan groups when one is chosen), Unpaid scripts (oldest first, a decision on each), Short-paid (by the payer's own
+  reason), Unmatched payments (in-books only; pre-books counted in one line; "tie it" where exactly one claim shares
+  the prescription and day), Decided. Appeals, Floor and Plans stay on the old pages until stage 4/5.
+- Files the next stages will touch: `src/app/(site)/*`, `src/lib/engine/*`. Say so on the pull request before
+  editing `claim-payments.ts` (the duplicate rule and the adjustments live in `recordClaimPayment` /
+  `importOneRemittance`), `engine/claims.ts` or `engine/cycles.ts`.
 - **A migration file needs `--> statement-breakpoint` between statements** or the migrator runs only the first;
   0133 and 0134 were written without and had to be finished by hand. Every file from here carries the markers.
 - Files the next stages will touch: `src/app/(site)/*` (new screens), `src/lib/engine/*`. The old pages are

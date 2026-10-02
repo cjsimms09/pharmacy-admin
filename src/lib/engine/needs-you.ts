@@ -2,7 +2,6 @@ import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { rankForAlertKey, rankForMoney, type Rank } from "./rank";
 import { SITE_STARTS_ON } from "../books-start";
-import { payerCycles, cycleDays } from "./cycles";
 
 /**
  * The one list: everything a person must answer, computed when data lands and every night, stored, ranked.
@@ -123,34 +122,29 @@ async function alertLines(): Promise<Line[]> {
 }
 
 /**
- * Claims the payers have not paid, as pots a person can act on: a payer owed a lot that has never paid (the site
- * cannot say late; it can say unmeasured and large), and a payer with claims past its own measured cycle.
+ * Claims the payers have not paid, as pots a person can act on, read from the claim standing (engine/claims.ts) so
+ * Today, the month and Cash ahead never disagree: a payer owed a lot that has never been measured (the site cannot
+ * say late; it can say unmeasured and large), and a payer with claims past their plan groups' own cycles. A leg a
+ * person has settled, written off or called paid elsewhere is in no pot.
  */
 async function claimPots(today: string): Promise<Line[]> {
-  const cycles = await payerCycles();
-  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.bin bin, c.remit_cents cents, julianday(${today}) - julianday(c.date_filled) age, c.date_filled filled from claims c where c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; pcn: string | null; bin: string | null; cents: number; age: number; filled: string }[];
-  /*
-   * A manufacturer programme is not a plan. The owner, 1 October 2026, of DST / ConnectiveRx (PCN CNRX, every claim
-   * Wegovy): "dst IS a copay card!!!" It pays on its own terms and by its own route, which the site learns from the
-   * first payment; until then the pot is said as a programme's, never as a plan's late money.
-   */
-  const programme = (payer: string, pcn: string | null) => /cnrx|connectiverx|copay|voucher|redsail|veridikal|dst pharmacy/i.test(`${payer} ${pcn ?? ""}`);
-  /* The pot is the payer's; each claim is judged by its own plan group's cycle (cycles.ts), and the pot remembers the range it used. */
-  const pots = new Map<string, { n: number; cents: number; dueN: number; dueCents: number; oldest: string; cycle: number | null; cycleMin: number | null; cycleMax: number | null; sample: number; programme: boolean; pcn: string | null }>();
-  for (const u of unpaid) {
-    const cycle = cycleDays(cycles, u.payer);
-    const own = cycleDays(cycles, u.payer, u.pcn, u.bin);
-    const e = pots.get(u.payer) ?? { n: 0, cents: 0, dueN: 0, dueCents: 0, oldest: u.filled, cycle, cycleMin: null, cycleMax: null, sample: cycles.get(u.payer)?.n ?? 0, programme: programme(u.payer, u.pcn), pcn: u.pcn };
+  const { TERMINAL_DECISIONS } = await import("./claims");
+  const rows = (await db.all(sql`select payer, pcn, programme, state, short_cents cents, date_filled filled, cycle_days cycle, decision from claim_standing where state in ('unpaid', 'due', 'unmeasured', 'programme')`)) as { payer: string; pcn: string | null; programme: number; state: string; cents: number; filled: string; cycle: number | null; decision: string | null }[];
+  const pots = new Map<string, { n: number; cents: number; dueN: number; dueCents: number; oldest: string; measured: boolean; cycleMin: number | null; cycleMax: number | null; programme: boolean; pcn: string | null }>();
+  for (const r of rows) {
+    if (TERMINAL_DECISIONS.has(r.decision ?? "")) continue;
+    const e = pots.get(r.payer) ?? { n: 0, cents: 0, dueN: 0, dueCents: 0, oldest: r.filled, measured: false, cycleMin: null, cycleMax: null, programme: !!r.programme, pcn: r.pcn };
     e.n++;
-    e.cents += u.cents;
-    if (u.filled < e.oldest) e.oldest = u.filled;
-    if (own !== null && u.age > own) {
+    e.cents += r.cents;
+    if (r.filled < e.oldest) e.oldest = r.filled;
+    if (r.cycle !== null) e.measured = true;
+    if (r.state === "due" && r.cycle !== null) {
       e.dueN++;
-      e.dueCents += u.cents;
-      e.cycleMin = e.cycleMin === null ? own : Math.min(e.cycleMin, own);
-      e.cycleMax = e.cycleMax === null ? own : Math.max(e.cycleMax, own);
+      e.dueCents += r.cents;
+      e.cycleMin = e.cycleMin === null ? r.cycle : Math.min(e.cycleMin, r.cycle);
+      e.cycleMax = e.cycleMax === null ? r.cycle : Math.max(e.cycleMax, r.cycle);
     }
-    pots.set(u.payer, e);
+    pots.set(r.payer, e);
   }
   const { rules } = await import("./rules");
   const routes = await rules("programme_route");
@@ -158,31 +152,30 @@ async function claimPots(today: string): Promise<Line[]> {
   const out: Line[] = [];
   for (const [payer, e] of pots) {
     const route = e.programme ? routeFor(payer, e.pcn) : null;
-    const cycleDays = route && typeof route.value.cycleDays === "number" ? (route.value.cycleDays as number) : null;
+    const routeDays = route && typeof route.value.cycleDays === "number" ? (route.value.cycleDays as number) : null;
     const oldestAge = (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${e.oldest}T00:00:00Z`)) / 864e5;
+    const href = `/v2/claims?payer=${encodeURIComponent(payer)}`;
     /* A programme whose route and cycle are known is a pot inside its cycle: nothing to ask until the cycle has passed. */
-    if (route && cycleDays !== null && oldestAge <= cycleDays) continue;
-    if (e.cycle === null && e.cents >= 20_000_00 && oldestAge > 21) {
+    if (route && routeDays !== null && oldestAge <= routeDays) continue;
+    if (!e.measured && e.cents >= 20_000_00 && oldestAge > 21) {
       out.push({
         id: `claims_unmeasured|${payer}`,
         kind: "claims_unmeasured",
         rank: 3,
-        title: e.programme
-          ? `${payer}, a manufacturer programme: ${money(e.cents)} on ${e.n} claims since ${e.oldest}, ${e.sample === 0 ? "nothing received by any route yet" : `only ${e.sample} payment${e.sample === 1 ? "" : "s"} seen`}`
-          : `${payer}: ${money(e.cents)} billed since ${e.oldest}, ${e.sample === 0 ? "nothing ever received" : `only ${e.sample} payment${e.sample === 1 ? "" : "s"} ever received`}`,
+        title: e.programme ? `${payer}, a manufacturer programme: ${money(e.cents)} on ${e.n} claims since ${e.oldest}` : `${payer}: ${money(e.cents)} billed since ${e.oldest}, no cycle measured yet`,
         detail: e.programme
           ? route
-            ? `${String(route.value.note ?? "")} The oldest claim is ${Math.round(oldestAge)} days old, past the ${cycleDays ?? "?"}-day cycle measured on ${route.saidOn}.`
+            ? `${String(route.value.note ?? "")} The oldest claim is ${Math.round(oldestAge)} days old, past the ${routeDays ?? "?"}-day cycle measured on ${route.saidOn}.`
             : `A programme pays on its own terms and by its own route; the first payment will say which and how long it takes. The oldest claim is ${Math.round(oldestAge)} days old. Not a plan, not called late.`
-          : `${e.n} claims. The site cannot call this late: it has never measured how this payer pays. It can say the pot is large and the oldest claim is ${Math.round(oldestAge)} days old.`,
+          : `${e.n} claims. The site cannot call this late: it has fewer than 25 payments tied to this payer's claims, so it has never measured how they pay. It can say the pot is large and the oldest claim is ${Math.round(oldestAge)} days old.`,
         amountCents: e.cents,
-        href: "/payers/waiting",
+        href,
         answers: e.programme
           ? [{ label: "How it pays us", action: "channel", params: { payer } }, { label: "It pays later; wait", action: "wait", params: { payer } }]
           : [{ label: "Which channel pays them", action: "channel", params: { payer } }, { label: "They pay monthly; wait", action: "wait", params: { payer } }],
         rows: { payer, claims: e.n, programme: e.programme },
       });
-    } else if (e.cycle !== null && e.dueCents >= 500_00) {
+    } else if (e.dueCents >= 500_00) {
       out.push({
         id: `claims_due|${payer}`,
         kind: "claims_due",
@@ -190,7 +183,7 @@ async function claimPots(today: string): Promise<Line[]> {
         title: e.cycleMin === e.cycleMax ? `${payer}: ${e.dueN} claims past its ${e.cycleMax}-day cycle, ${money(e.dueCents)}` : `${payer}: ${e.dueN} claims past their plans' cycles (${e.cycleMin}–${e.cycleMax} days), ${money(e.dueCents)}`,
         detail: `Nine in ten of their payments arrive within ${e.cycleMin === e.cycleMax ? `${e.cycleMax} days` : `${e.cycleMin} to ${e.cycleMax} days, by plan`} of the fill; these are older. ${e.n - e.dueN} more claims (${money(e.cents - e.dueCents)}) are still inside their cycle.`,
         amountCents: e.dueCents,
-        href: "/payers/waiting",
+        href,
         answers: [{ label: "Chase", action: "chase", params: { payer } }, { label: "Looked, they are coming", action: "wait", params: { payer } }],
         rows: { payer, due: e.dueN, cycle: e.cycleMax },
       });
@@ -240,7 +233,7 @@ async function proofFailures(today: string): Promise<Line[]> {
       rank: p.proof === "claims_eq_pioneer" ? 3 : 4,
       title: p.says,
       detail: `A proof the engine runs every night, failed on ${p.run_at.slice(0, 10)}.`,
-      href: p.proof === "claims_eq_pioneer" ? "/tools/data-health" : p.proof === "remit_to_claim" ? "/claims" : `/money/bank-review?month=${p.scope ?? ""}`,
+      href: p.proof === "claims_eq_pioneer" ? "/tools/data-health" : p.proof === "remit_to_claim" || p.proof === "payments_once" ? "/v2/claims?tab=unmatched" : `/money/bank-review?month=${p.scope ?? ""}`,
       answers: [{ label: "Open", action: "open" }],
       rows: { proof: p.proof, scope: p.scope },
     });

@@ -15,7 +15,7 @@ import type { MonthFigures } from "./month";
  * None of these invents a tolerance. A proof passes exactly or it fails and says by how much.
  */
 
-export type ProofKey = "bank_to_cent" | "receipts_to_bank" | "claims_eq_pioneer" | "reader_arithmetic" | "remit_to_claim" | "expected_arrived";
+export type ProofKey = "bank_to_cent" | "receipts_to_bank" | "claims_eq_pioneer" | "reader_arithmetic" | "remit_to_claim" | "expected_arrived" | "payments_once";
 
 export type ProofResult = { proof: ProofKey; scope: string | null; passed: boolean; figures: Record<string, unknown>; says: string };
 
@@ -101,6 +101,30 @@ export async function remitToClaim(month: string): Promise<ProofResult> {
     says: passed
       ? `${month}: every remittance payment for a fill inside the books is tied to its claim (${(f.matched ?? 0).toLocaleString("en-US")} payments, ${money(f.matched_cents ?? 0)}).`
       : `${month}: ${(f.matched ?? 0).toLocaleString("en-US")} payments tied to their claim (${money(f.matched_cents ?? 0)}, ${(share * 100).toFixed(1)}%); ${f.unmatched} not tied (${money(f.unmatched_cents ?? 0)}). ${money(f.before_books ?? 0)} more is for fills before the books, cash and not receivable.`,
+  };
+}
+
+/**
+ * Every payment stands once. The same money recorded from two kinds of document (the 835 and a report) read as an
+ * over-payment on 752 claims on 1 October 2026; recordClaimPayment now refuses the second, and this is the check that
+ * the refusal holds. Two rows from the same kind of document are the reader's own double lines and are not counted.
+ */
+export async function paymentsOnce(): Promise<ProofResult> {
+  const { originClass, legacyOrigin } = await import("../payment-origin");
+  const pairs = (await db.all(
+    sql`select a.amount_cents cents, a.notes na, a.reference ra, a.source sa, a.payer pa, a.origin oa, b.notes nb, b.reference rb, b.source sb, b.payer pb, b.origin ob from claim_payments a join claim_payments b on b.claim_id = a.claim_id and b.id > a.id and b.amount_cents = a.amount_cents and b.received_on = a.received_on and b.source = a.source where a.claim_id is not null and a.out_of_books = 0`,
+  )) as { cents: number; na: string | null; ra: string | null; sa: string; pa: string | null; oa: string | null; nb: string | null; rb: string | null; sb: string; pb: string | null; ob: string | null }[];
+  const twice = pairs.filter((p) => originClass(p.oa ?? legacyOrigin({ notes: p.na, reference: p.ra, source: p.sa, payer: p.pa })) !== originClass(p.ob ?? legacyOrigin({ notes: p.nb, reference: p.rb, source: p.sb, payer: p.pb })));
+  const cents = twice.reduce((n, p) => n + p.cents, 0);
+  const passed = twice.length === 0;
+  return {
+    proof: "payments_once",
+    scope: null,
+    passed,
+    figures: { pairs: pairs.length, twice: twice.length, cents },
+    says: passed
+      ? `Every payment stands once against its claim${pairs.length ? ` (${pairs.length} same-day pairs on file are one document's own double lines)` : ""}.`
+      : `${twice.length} payments stand twice against their claim (${money(cents)}): the same money from two kinds of document. scripts/support/dedup-payments.ts removes the second.`,
   };
 }
 

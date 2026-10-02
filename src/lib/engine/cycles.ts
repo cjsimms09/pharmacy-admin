@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { SITE_STARTS_ON } from "../books-start";
+import { payerNamer } from "./payers";
 
 /**
  * How long each payer takes to pay, measured on the payments the site has tied to their claims.
@@ -28,13 +29,14 @@ export const CYCLE_MIN_PAYMENTS = 25;
 /** Below this a group has shown nothing worth stretching the payer's cycle by. */
 export const GROUP_HINT_MIN = 5;
 
-/** By payer, as a Map; by plan group under `groups`. */
+/** By payer, as a Map; by plan group under `groups`; `name` folds a payer's spellings to the one the keys use. */
 export class Cycles extends Map<string, Cycle> {
   groups = new Map<string, Cycle>();
+  name: (payer: string | null | undefined) => string = (p) => p ?? "";
 }
 
 /** What the judging functions accept: a Cycles, or a plain by-payer Map with no groups (a test, an older caller). */
-export type CycleSource = Map<string, Cycle> & { groups?: Map<string, Cycle> };
+export type CycleSource = Map<string, Cycle> & { groups?: Map<string, Cycle>; name?: (payer: string | null | undefined) => string };
 
 export const groupKey = (payer: string, pcn: string | null | undefined, bin: string | null | undefined) => `${payer}|${pcn ?? "-"}/${bin ?? "-"}`;
 
@@ -50,24 +52,28 @@ function summarise(by: Map<string, number[]>): Map<string, Cycle> {
 }
 
 export async function payerCycles(since = SITE_STARTS_ON): Promise<Cycles> {
+  const name = await payerNamer();
   const rows = (await db.all(
     sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.bin bin, julianday(p.received_on) - julianday(c.date_filled) days from claim_payments p join claims c on c.id = p.claim_id where p.source = 'plan' and c.date_filled >= ${since} and p.received_on is not null group by c.id, p.received_on`,
   )) as { payer: string; pcn: string | null; bin: string | null; days: number }[];
   const byPayer = new Map<string, number[]>();
   const byGroup = new Map<string, number[]>();
   for (const r of rows) {
-    byPayer.set(r.payer, [...(byPayer.get(r.payer) ?? []), r.days]);
-    const g = groupKey(r.payer, r.pcn, r.bin);
+    const payer = name(r.payer);
+    byPayer.set(payer, [...(byPayer.get(payer) ?? []), r.days]);
+    const g = groupKey(payer, r.pcn, r.bin);
     byGroup.set(g, [...(byGroup.get(g) ?? []), r.days]);
   }
   const out = new Cycles();
+  out.name = name;
   for (const [k, v] of summarise(byPayer)) out.set(k, v);
   out.groups = summarise(byGroup);
   return out;
 }
 
 /** The cycle a claim is judged by, or null where neither its plan group nor its payer is measured. */
-export function cycleDays(cycles: CycleSource, payer: string, pcn?: string | null, bin?: string | null): number | null {
+export function cycleDays(cycles: CycleSource, rawPayer: string, pcn?: string | null, bin?: string | null): number | null {
+  const payer = cycles.name ? cycles.name(rawPayer) : rawPayer;
   const g = pcn !== undefined || bin !== undefined ? cycles.groups?.get(groupKey(payer, pcn, bin)) : undefined;
   if (g && g.n >= CYCLE_MIN_PAYMENTS) return g.p90;
   const p = cycles.get(payer);
@@ -76,7 +82,8 @@ export function cycleDays(cycles: CycleSource, payer: string, pcn?: string | nul
 }
 
 /** The typical wait, for projecting when money lands: the group's p50 where the group is measured, else the payer's where it has shown five. */
-export function typicalDays(cycles: CycleSource, payer: string, pcn?: string | null, bin?: string | null): number | null {
+export function typicalDays(cycles: CycleSource, rawPayer: string, pcn?: string | null, bin?: string | null): number | null {
+  const payer = cycles.name ? cycles.name(rawPayer) : rawPayer;
   const g = pcn !== undefined || bin !== undefined ? cycles.groups?.get(groupKey(payer, pcn, bin)) : undefined;
   if (g && g.n >= CYCLE_MIN_PAYMENTS) return g.p50;
   const p = cycles.get(payer);

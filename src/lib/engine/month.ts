@@ -1,7 +1,7 @@
 import { and, eq, gte, lte, like, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { SITE_STARTS_ON } from "../books-start";
-import { payerCycles, cycleDays } from "./cycles";
+import { OPEN_STATES, TERMINAL_DECISIONS, type ClaimState } from "./claims";
 
 /**
  * The month as the engine last computed it: the bank's figures, the receipts-to-bank gap with every dollar named,
@@ -108,15 +108,14 @@ export async function computeMonth(month: string, today: string): Promise<MonthF
   /* Revenue at pickup: what the plan pays plus what the patient paid, on the day the patient collected. */
   const rev = (await db.all(sql`select coalesce(sum(remit_cents + copay_cents), 0) c from claims where status = 'paid' and coalesce(sold_on, date_filled) >= ${from} and coalesce(sold_on, date_filled) <= ${to} and coalesce(sold_on, date_filled) >= ${SITE_STARTS_ON}`)) as { c: number }[];
 
-  /* What the payers owe on the month's fills, and how much of it is past the payer's own measured cycle. */
-  const cycles = await payerCycles();
-  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.bin bin, c.remit_cents cents, julianday(${today}) - julianday(c.date_filled) age from claims c where c.date_filled >= ${from} and c.date_filled <= ${to} and c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; pcn: string | null; bin: string | null; cents: number; age: number }[];
+  /* What the payers owe on the month's fills, and how much of it is past its plan group's own measured cycle: the claim standing (engine/claims.ts), which Today and Cash ahead read too. */
+  const standing = (await db.all(sql`select state, short_cents cents, decision from claim_standing where date_filled >= ${from} and date_filled <= ${to}`)) as { state: ClaimState; cents: number; decision: string | null }[];
   let arUnpaid = 0;
   let arDue = 0;
-  for (const u of unpaid) {
-    arUnpaid += u.cents;
-    const days = cycleDays(cycles, u.payer, u.pcn, u.bin);
-    if (days !== null && u.age > days) arDue += u.cents;
+  for (const r of standing) {
+    if (TERMINAL_DECISIONS.has(r.decision ?? "")) continue;
+    if (OPEN_STATES.has(r.state)) arUnpaid += r.cents;
+    if (r.state === "due") arDue += r.cents;
   }
 
   const held = await db.query.monthStatus.findFirst({ where: eq(schema.monthStatus.month, month) });

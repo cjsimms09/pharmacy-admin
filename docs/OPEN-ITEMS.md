@@ -74,6 +74,27 @@ once, strongest evidence first; so the other — $2,008.00 advised on the 15th, 
 of the 23rd that an 835 names — stays waiting, which is the true state: nothing on file stands for it. Read cold by
 the author, as him; no second session read it.
 
+**Found 1 October, building stage 3 (Claims).** Three faults in the claim money, each measured on live data before it
+was touched, and each now closed by code rather than by hand:
+- *Payments counted twice.* 752 payments ($27,732.69) stood twice against their claims — once from the 835, once from
+  ProviderPay's remittance detail of 18 September — and every one read as an over-payment; 908 more stood twice
+  against pre-books fills. Closed: `recordClaimPayment` keeps one row per claim, amount, day and source across kinds
+  of document; the 1,336 were removed; the nightly proof `payments_once` watches it. After the cleaning, over-pays are
+  6 legs ($435.62), all double lines inside one 835 — the payer paying twice, which it will take back.
+- *A pooled cycle called a slow plan late.* OptumRx under one name pays on three clocks (13, 27 and 29 days by
+  PCN/BIN); the pool said 17 and called 85 IRX claims ($25,193.18) late at 18 days. Closed: cycles per plan group.
+  OptumRx's Today line went from that false alarm to 30 claims past the 13-day cycle of the one group that is late.
+- *The 835's reasons were thrown away.* `payment_adjustments` and `remittance_holdbacks` had never been written.
+  Closed going forward; **not recoverable for September**: the ProviderPay 835 files of the 1 October pull are not on
+  disk anywhere the sweep reads (the twelve facilitator files are). Next pull: land them in the remittances folder
+  beside the database, or set the facilitator download folder, so the reasons are kept.
+
+Still a question, not a finding — **Express Scripts, 90 claims from 1–16 September, $9,601.56, past its 14-day
+cycle** (measured on 190 of its own tied payments). ESI's remittances through ProviderPay run to 29 September and
+do not name them, so a missed pull does not explain it. What might: a plan of ESI's paying on a longer clock than the
+three groups measured (all 14–15 days), or claims ESI is holding. On Today as a due pot with "Chase" and "Looked,
+they are coming"; the By-payer tab shows ESI's plan groups and when it last paid. Measured 1 October 2026.
+
 ## Being corrected in another session
 
 | What | Money | What was asked |

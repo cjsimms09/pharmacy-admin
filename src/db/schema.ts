@@ -3908,7 +3908,7 @@ export const claimDecisions = sqliteTable(
 );
 
 /** The states a claim leg can be in, as the engine computes them (engine/claims.ts). */
-export const CLAIM_STATES = ["paid", "short", "over", "unpaid", "due", "unmeasured", "programme", "cash", "fee", "reversed", "reversed_paid"] as const;
+export const CLAIM_STATES = ["paid", "none", "short", "over", "unpaid", "due", "unmeasured", "programme", "cash", "fee", "reversed", "reversed_paid"] as const;
 export type ClaimState = (typeof CLAIM_STATES)[number];
 
 /**

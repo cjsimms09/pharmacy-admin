@@ -4,7 +4,6 @@ import { readBankDescriptor } from "../bank-descriptors";
 import { SITE_STARTS_ON } from "../books-start";
 import { payerCycles, cycleDays, typicalDays, type CycleSource } from "./cycles";
 import { openStatementDebits } from "./statement-debits";
-import { rules } from "./rules";
 
 /**
  * Cash ahead: the next four weeks of the bank account, by day, from what the site already holds.
@@ -243,14 +242,11 @@ export async function computeCashAhead(today: string): Promise<{ days: Day[]; fr
   for (const [k, v] of named) flows.push({ day: k.split("|")[1], cents: v.cents, kind: "out", label: `${k.split("|")[0]} draw (statement of ${v.statementDate})`, basis: "statement" });
   assumptions.push(`Wholesalers repeat their weekday averages over ${daysBetween(windowFrom, lastDay) + 1} days of bank lines; a draw a statement of account names is the statement's figure, unless the statement is smaller than the average, which means it has not seen the whole week.`);
 
-  /* Payers: every unpaid claim on the day its payer typically pays; programmes on their known cycle. */
+  /* Payers: every unpaid claim on the day its plan group typically pays; programmes on their known cycle. From the claim standing (engine/claims.ts), as Today and the month read it. A short-paid leg is not here: what the payer kept is not coming. */
   const cycles = await payerCycles();
-  const routes = await rules("programme_route");
-  const unpaid = (await db.all(sql`select coalesce(c.pbm_name, c.payer_label) payer, c.pcn pcn, c.bin bin, c.remit_cents cents, c.date_filled filled from claims c where c.date_filled >= ${SITE_STARTS_ON} and c.status = 'paid' and c.remit_cents > 0 and c.cash_plan = 0 and c.id not in (select claim_id from claim_payments where claim_id is not null)`)) as { payer: string; pcn: string | null; bin: string | null; cents: number; filled: string }[];
-  const withRoutes = unpaid.map((u) => {
-    const r = routes.find((x) => new RegExp(x.key, "i").test(`${u.payer} ${u.pcn ?? ""}`));
-    return { payer: u.payer, pcn: u.pcn, bin: u.bin, cents: u.cents, filled: u.filled, programmeCycleDays: r && typeof r.value.cycleDays === "number" ? (r.value.cycleDays as number) : null };
-  });
+  const { TERMINAL_DECISIONS } = await import("./claims");
+  const unpaid = (await db.all(sql`select payer, pcn, bin, short_cents cents, date_filled filled, programme, cycle_days cycle, decision from claim_standing where state in ('unpaid', 'due', 'unmeasured', 'programme')`)) as { payer: string; pcn: string | null; bin: string | null; cents: number; filled: string; programme: number; cycle: number | null; decision: string | null }[];
+  const withRoutes = unpaid.filter((u) => !TERMINAL_DECISIONS.has(u.decision ?? "")).map((u) => ({ payer: u.payer, pcn: u.pcn, bin: u.bin, cents: u.cents, filled: u.filled, programmeCycleDays: u.programme ? u.cycle : null }));
   flows.push(...projectClaims(withRoutes, cycles, from, to));
   const measured = [...cycles].filter(([, c]) => c.n >= 5).length;
   assumptions.push(`Unpaid claims arrive on their payer's typical day (${measured} payers measured); a claim already past it is counted tomorrow; a payer with no cycle is left out.`);
