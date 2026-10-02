@@ -13,8 +13,8 @@ const NAV = [
   { href: "/v2/today", label: "Today" },
   { href: "/v2/money", label: "Money" },
   { href: "/v2/claims", label: "Claims" },
-  { href: "/compliance", label: "Compliance" },
-  { href: "/inbox", label: "Documents" },
+  { href: "/v2/compliance", label: "Compliance" },
+  { href: "/v2/documents", label: "Documents" },
 ];
 
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {

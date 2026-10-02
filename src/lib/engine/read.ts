@@ -417,3 +417,216 @@ export async function claimsView(today: string, filter: { payer?: string | null 
     payer,
   };
 }
+
+/* ───────────────────────────── Compliance ───────────────────────────── */
+
+export type ComplianceView = {
+  today: string;
+  figures: { missed: number; partial: number; dueSoon: number; unsignedMonths: number; cqiDays: number | null; csDays: number | null; staffGaps: number; unanswered: number };
+  register: { missed: import("../compliance-status").OpenItem[]; partial: import("../compliance-status").OpenItem[]; openNow: import("../compliance-status").OpenItem[]; unanswered: import("../compliance-status").Unanswered[]; minutesOutstanding: number };
+  due: import("../due").DueItem[];
+  temps: {
+    sensors: { id: string; name: string; kind: string; tracked: boolean; minTenthsF: number; maxTenthsF: number; lastReadingAt: string | null; calibration: { state: string; daysLeft: number | null; says: string } }[];
+    awaiting: { sensorId: string; sensorName: string; periodKey: string; readings: number; unexplained: number }[];
+    unexplained: { id: string; sensorId: string; sensorName: string; takenAt: string; valueTenthsF: number; rangeMin: number; rangeMax: number; note: string | null }[];
+    readingsLast24h: number;
+    connected: boolean;
+  };
+  cqi: { snapshot: import("../compliance").CqiSnapshot; stages: { id: string; incidentNumber: number; type: string; reportCreatedOn: string; stage: { key: string; label: string; next: string; dueOn: string | null; level: string; automatic: boolean } }[]; carried: { openReviews: number; thin: number; ineffective: number; capMissing: number; any: boolean } };
+  controlled: { inventory: { last: string | null; dueOn: string | null; count: number }; discrepancies: { id: string; discoveredOn: string; drugName: string; schedule: string; expectedThousandths: number | null; countedThousandths: number | null; unit: string | null; resolution: string | null; resolvedOn: string | null; reportedToDea: boolean }[]; requirements: { key: string; title: string; state: string; says: string }[]; perpetual: import("./perpetual").PerpetualReport | null };
+  staff: import("../staff-matrix").StaffMatrix;
+  manual: { standing: import("../manual-store").ManualStanding; audit: import("../manual-audit").AuditProgress; ack: { superseded: number; missing: number; changedOn: string | null }; decisionsOutstanding: number };
+  inspection: { report: import("../inspection").InspectionReport; progress: import("../self-inspection").InspectionProgress | null; findings: import("../self-inspection").OpenFinding[]; lastCompleted: string | null; baas: { total: number; live: number; problems: number; ok: boolean; summary: string } };
+};
+
+/**
+ * Compliance: every duty the site tracks, as the libraries that already judge them say it — the register's periods,
+ * the renewal and training list, the temperature months, the CQI period and its incidents, the controlled-substance
+ * inventory and discrepancies with the perpetual Schedule II count beside them, the staff matrix, the manual's
+ * standing, the inspection report. One view, so the figures at the top and the tabs below cannot disagree.
+ */
+export async function complianceView(today: string): Promise<ComplianceView> {
+  const [cs, due, cqiLib, compliance, imonnit, calibrationLib, staffMatrixLib, manualStore, manualAudit, manualAck, decisions, inspectionLib, selfInspection, baaLib, invoiceCompliance, perpetualLib] = await Promise.all([
+    import("../compliance-status"),
+    import("../due"),
+    import("../cqi"),
+    import("../compliance"),
+    import("../imonnit"),
+    import("../calibration"),
+    import("../staff-matrix"),
+    import("../manual-store"),
+    import("../manual-audit"),
+    import("../manual-acknowledgement"),
+    import("../practice-decisions"),
+    import("../inspection"),
+    import("../self-inspection"),
+    import("../business-associates"),
+    import("../invoice-compliance"),
+    import("./perpetual"),
+  ]);
+  const quiet = async <T,>(f: () => Promise<T>, fallback: T): Promise<T> => {
+    try {
+      return await f();
+    } catch {
+      return fallback;
+    }
+  };
+  const [summary, dueList, snapshot, stages, carried, csStatus, sensors, awaiting, unexplained, recent, connected, matrix, standing, audit, ack, outstanding, report, current, findings, history, baas, requirements, perpetual, discrepancies] = await Promise.all([
+    cs.complianceSummary(),
+    due.dueList({ horizonDays: 90 }),
+    compliance.cqiSnapshot(),
+    cqiLib.incidentsWithStage(),
+    quiet(
+      async () => {
+        const c = await cqiLib.carriedForward((await cqiLib.currentCqiObligation()).period.periodStart);
+        return { openReviews: c.openReviews.length, thin: c.thin.length, ineffective: c.ineffective.length, capMissing: c.capMissing.length, any: c.any };
+      },
+      { openReviews: 0, thin: 0, ineffective: 0, capMissing: 0, any: false },
+    ),
+    compliance.csInventoryStatus(),
+    imonnit.trackedSensors(),
+    imonnit.monthsAwaitingSignOff(),
+    imonnit.unexplainedExcursions(50),
+    imonnit.recentReadings(500),
+    imonnit.hasCredentials(),
+    staffMatrixLib.staffMatrix(),
+    manualStore.manualStanding(),
+    manualAudit.auditProgress(),
+    manualAck.acknowledgementGap(),
+    decisions.decisionsOutstanding(),
+    inspectionLib.inspectionReport(),
+    selfInspection.currentInspection(),
+    selfInspection.openFindings(),
+    selfInspection.history(),
+    baaLib.registerStatus(),
+    invoiceCompliance.invoiceCompliance(),
+    quiet(() => perpetualLib.perpetualReport(today), null),
+    db.query.csDiscrepancies.findMany({ orderBy: (d, { desc }) => [desc(d.discoveredOn)] }),
+  ]);
+  const progress = current ? await selfInspection.progress(current.id) : null;
+  const dayAgo = new Date(Date.now() - 864e5).toISOString();
+  const cqiDays = snapshot.dueOn ? Math.round((Date.parse(`${snapshot.dueOn}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 864e5) : null;
+  const csDays = csStatus.dueOn ? Math.round((Date.parse(`${csStatus.dueOn}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 864e5) : null;
+  return {
+    today,
+    figures: {
+      missed: summary.missed.length,
+      partial: summary.partial.length,
+      dueSoon: dueList.filter((d) => d.severity === "overdue" || d.severity === "due_soon" || d.severity === "no_date").length,
+      unsignedMonths: awaiting.length,
+      cqiDays,
+      csDays,
+      staffGaps: matrix.gaps,
+      unanswered: summary.unanswered.length,
+    },
+    register: { missed: summary.missed, partial: summary.partial, openNow: summary.openNow, unanswered: summary.unanswered, minutesOutstanding: summary.minutesOutstanding },
+    due: dueList,
+    temps: {
+      sensors: sensors.map((s) => {
+        const c = calibrationLib.calibration(s, today);
+        return { id: s.id, name: s.name, kind: s.kind, tracked: s.tracked, minTenthsF: s.minTenthsF, maxTenthsF: s.maxTenthsF, lastReadingAt: s.lastReadingAt, calibration: { state: c.state, daysLeft: c.daysLeft, says: c.says } };
+      }),
+      awaiting,
+      unexplained: unexplained.map((r) => ({ id: r.id, sensorId: r.sensorId, sensorName: r.sensorName, takenAt: r.takenAt, valueTenthsF: r.valueTenthsF, rangeMin: r.rangeMin, rangeMax: r.rangeMax, note: r.note })),
+      readingsLast24h: recent.filter((r) => r.takenAt >= dayAgo).length,
+      connected,
+    },
+    cqi: {
+      snapshot,
+      stages: stages.map(({ incident, stage }) => ({ id: incident.id, incidentNumber: incident.incidentNumber, type: incident.type, reportCreatedOn: incident.reportCreatedOn, stage: { key: stage.key, label: stage.label, next: stage.next, dueOn: stage.dueOn, level: stage.level, automatic: stage.automatic } })),
+      carried,
+    },
+    controlled: {
+      inventory: csStatus,
+      discrepancies: discrepancies.map((d) => ({ id: d.id, discoveredOn: d.discoveredOn, drugName: d.drugName, schedule: d.schedule, expectedThousandths: d.expectedThousandths, countedThousandths: d.countedThousandths, unit: d.unit, resolution: d.resolution, resolvedOn: d.resolvedOn, reportedToDea: !!d.reportedToDea })),
+      requirements: requirements.map((r) => ({ key: r.key, title: r.requires, state: r.state, says: `${r.how}${r.state !== "ok" && r.fix ? ` ${r.fix}` : ""} (${r.citation})` })),
+      perpetual,
+    },
+    staff: matrix,
+    manual: { standing, audit, ack, decisionsOutstanding: outstanding },
+    inspection: { report, progress, findings, lastCompleted: history.find((h) => h.completedOn)?.completedOn ?? null, baas },
+  };
+}
+
+/* ───────────────────────────── Documents ───────────────────────────── */
+
+export type DocumentsView = {
+  arrived: { id: string; receivedAt: string; source: string; from: string | null; subject: string | null; fileName: string | null; documentId: string | null; routedAs: string | null; story: import("../inbox-line").LineStory; settledBy: string | null; needsAttention: boolean }[];
+  held: number;
+  retention: { kinds: { kind: string; documents: number; mayDestroy: number; keep: number; never: number; rule: string | null }[]; mayDestroy: { id: string; title: string | null; category: string | null; from: string | null; since: string; rule: string }[]; awaiting: { question: string; documents: number; categories: string[] }[]; undated: number };
+  forms: { name: string; purpose: string; href: string; cadence: string; where: string; authority: string }[];
+  appendixVersion: string | null;
+  counts: { documents: number; categories: number; last30: number };
+};
+
+/**
+ * Documents: what arrived and what the site did with it, what still needs a person, the retention clock over every
+ * document on file, the forms the manual's appendix produces. Search is its own call (findAnything) because it takes
+ * a query.
+ */
+export async function documentsView(today: string): Promise<DocumentsView> {
+  const [inboxLine, settledLib, manual, retention] = await Promise.all([import("../inbox-line"), import("../inbox-settled"), import("../manual"), import("./retention")]);
+  const [items, settled, docs, settings] = await Promise.all([
+    db.query.inboxItems.findMany({ orderBy: (i, { desc }) => [desc(i.receivedAt)], limit: 200 }),
+    settledLib.settledDocuments(),
+    db.query.documents.findMany({ columns: { id: true, title: true, category: true, effectiveOn: true, uploadedAt: true, expiresOn: true, noExpiry: true } }),
+    import("../settings").then((m) => m.getSettings()).catch(() => null),
+  ]);
+  const pharmacy = (settings as { pharmacy_name?: string | null } | null)?.pharmacy_name || "This pharmacy";
+  const arrived = items.map((i) => {
+    const story = inboxLine.storyOf(i);
+    const settledBy = i.documentId ? (settled.get(i.documentId) ?? null) : null;
+    const needsAttention = !settledBy && ["not_recognised", "rejected", "held"].includes(story.outcome);
+    return { id: i.id, receivedAt: i.receivedAt, source: inboxLine.sourceOf(i).label, from: i.fromAddress ? i.fromAddress.replace(/^[^@]*@/, "@") : null, subject: i.subject, fileName: i.fileName, documentId: i.documentId, routedAs: i.routedAs, story, settledBy, needsAttention };
+  });
+  const kinds = new Map<string, { kind: string; documents: number; mayDestroy: number; keep: number; never: number; rule: string | null }>();
+  const mayDestroy: DocumentsView["retention"]["mayDestroy"] = [];
+  const awaiting = new Map<string, { question: string; documents: number; categories: Set<string> }>();
+  let undated = 0;
+  for (const d of docs) {
+    const from = d.effectiveOn ?? d.uploadedAt?.slice(0, 10) ?? null;
+    const v = retention.retentionOf(d.category, from, today);
+    const kind = retention.kindOfCategory(d.category) ?? "unknown";
+    const k = kinds.get(kind) ?? { kind, documents: 0, mayDestroy: 0, keep: 0, never: 0, rule: null };
+    k.documents++;
+    if (v.state === "keep") {
+      k.keep++;
+      k.rule = `${v.rule.years} years · ${v.rule.cite}`;
+    } else if (v.state === "may_destroy") {
+      k.mayDestroy++;
+      k.rule = `${v.rule.years} years · ${v.rule.cite}`;
+      mayDestroy.push({ id: d.id, title: d.title, category: d.category, from, since: v.since, rule: v.rule.cite });
+    } else if (v.state === "never") {
+      k.never++;
+      k.rule = `never · ${v.rule.cite}`;
+    } else {
+      if (!from) undated++;
+      const a = awaiting.get(v.question) ?? { question: v.question, documents: 0, categories: new Set<string>() };
+      a.documents++;
+      a.categories.add(d.category ?? "uncategorised");
+      awaiting.set(v.question, a);
+    }
+    kinds.set(kind, k);
+  }
+  const forms = manual.FORMS.map((f) => ({ name: f.name, purpose: f.purpose, href: f.href, cadence: f.cadence, where: f.where, authority: f.authority }));
+  let appendixVersion: string | null = null;
+  try {
+    appendixVersion = manual.appendixVersion(manual.policies(pharmacy));
+  } catch {
+    appendixVersion = null;
+  }
+  const monthAgo = new Date(Date.now() - 30 * 864e5).toISOString();
+  return {
+    arrived,
+    held: arrived.filter((a) => a.needsAttention).length,
+    retention: {
+      kinds: [...kinds.values()].sort((a, b) => b.documents - a.documents),
+      mayDestroy: mayDestroy.sort((a, b) => a.since.localeCompare(b.since)),
+      awaiting: [...awaiting.values()].map((a) => ({ question: a.question, documents: a.documents, categories: [...a.categories] })).sort((a, b) => b.documents - a.documents),
+      undated,
+    },
+    forms,
+    appendixVersion,
+    counts: { documents: docs.length, categories: new Set(docs.map((d) => d.category ?? "")).size, last30: docs.filter((d) => (d.uploadedAt ?? "") >= monthAgo).length },
+  };
+}

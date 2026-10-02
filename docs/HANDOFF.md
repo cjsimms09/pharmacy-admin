@@ -8,7 +8,7 @@ file is how they talk.
 
 ## Open items
 
-### From the pharmacy session — 1 October: the rebuild has begun. Spec in `docs/REBUILD.md`; stages 1, 2 and 3 are live
+### From the pharmacy session — 1 October: the rebuild has begun. Spec in `docs/REBUILD.md`; stages 1 to 4 are live
 
 **Stage 1 of the rebuild is on `feature/compliance`** (commit 1d925fa): the engine (`src/lib/engine`) and Today
 (`/v2/today`, route group `src/app/(site)`). Migration 0134 adds `needs_you`, `feed_state`, `proof_run`,
@@ -64,6 +64,34 @@ Spending and Deliveries as lookups over `engine/read.ts` (`suppliersView`, `remi
 - Files the next stages will touch: `src/app/(site)/*`, `src/lib/engine/*`. Say so on the pull request before
   editing `claim-payments.ts` (the duplicate rule and the adjustments live in `recordClaimPayment` /
   `importOneRemittance`), `engine/claims.ts` or `engine/cycles.ts`.
+
+**Stage 4 (Compliance `/v2/compliance` and Documents `/v2/documents`) is live.** No migration. The two screens are
+lookups over the libraries that already judge each duty (`complianceView` / `documentsView` in `engine/read.ts`:
+`complianceSummary`, `dueList`, `cqiSnapshot` + `incidentsWithStage` + `carriedForward`, `csInventoryStatus`,
+`trackedSensors` + `monthsAwaitingSignOff` + `unexplainedExcursions` + `calibration`, `staffMatrix`,
+`manualStanding` + `auditProgress` + `acknowledgementGap`, `inspectionReport` + the self-inspection state,
+`storyOf` + `settledDocuments`, `findAnything`, `FORMS`). The forms that take words — an incident, a summary, the
+self-inspection walk, a person's file, the manual, sensor set-up — stay on their own pages, linked from each tab.
+Three things are new computation:
+- **The perpetual Schedule II count** (`engine/perpetual.ts`): PioneerRx's daily on-hand file reconciled against its
+  own receipts and the claims file's fills and reversals, per product (the directory's equivalence key, because a
+  fill is often dispensed from another manufacturer's bottle of the same drug) with the NDCs beneath. Three things
+  the first reading got wrong and the module now says: a day's file does not list every item (not measured ≠ zero);
+  a receipt's invoice date and its booking-in differ by a day (a variance counts only once it holds two measured
+  days); two NDCs of one product net off. Live on 1 October: 95 products, 141 NDCs, 7 days; 2 products off and
+  stable (27 units, both amphetamine ER strengths), 8 moved on the last day only. What it cannot see, said on the
+  screen: adjustments typed into PioneerRx by hand.
+- **The retention clock** (`engine/retention.ts`): ten periods with their citations, the longer of Kansas and federal
+  where both apply; a kind of record the rule is not sure of (CQI, self-inspection, immunisation records, staff
+  files, insurance) is a question for him, never a period; nothing is destroyed by it.
+- **The gate's alert regression test** (`tests/alerts-regression.test.ts`): the CS inventory, temperature sign-off
+  and CQI summary alerts asserted through `alerts()` itself on a scratch database, because each block in
+  `alerts.ts` swallows its own errors and a broken reader used to silence the alert without a test failing.
+- Actions: attest a duty (signed with a typed name), answer whether a duty applies, explain a reading, sign off a
+  sensor's month (refused while any excursion is unexplained), log and resolve a discrepancy; re-read, teach, undo
+  and sweep on Documents, and add a document by hand through the old door.
+- Stage 5 (retire the old pages) is next. The old pages still carry: the inventory page's hard-copy warning, the
+  POA's capacity recitals and the daily pharmacist log statement, none of which has a library behind it yet.
 - **A migration file needs `--> statement-breakpoint` between statements** or the migrator runs only the first;
   0133 and 0134 were written without and had to be finished by hand. Every file from here carries the markers.
 - Files the next stages will touch: `src/app/(site)/*` (new screens), `src/lib/engine/*`. The old pages are
