@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { bankReview, monthsWithStatements } from "@/lib/bank-review-store";
+import { bankReview, monthsWithStatements, recentPayerNames } from "@/lib/bank-review-store";
+import { categories, vendors } from "@/lib/expenses";
+import { allStandingCosts } from "@/lib/standing-costs";
+import { BankLineDecider } from "@/components/bank-line-decider";
+import { nameBankLine } from "./actions";
 import { formatCents } from "@/lib/money";
 import { fmt, todayIso } from "@/lib/dates";
 import { familyTabs } from "@/lib/families";
@@ -31,12 +35,24 @@ export const metadata = { title: "The bank statement" };
  * twice. Collapsing that into "matched" hid the difference between money the site understood and
  * money it had merely seen, and it is the difference that says whether the feeds are working.
  */
-export default async function BankReviewPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+export default async function BankReviewPage({ searchParams }: { searchParams: Promise<{ month?: string; ok?: string; error?: string; q?: string }> }) {
   await requireUser();
-  const { month: asked } = await searchParams;
+  const { month: asked, ok, error, q: askedQ } = await searchParams;
   const months = await monthsWithStatements();
   const month = asked && /^\d{4}-\d{2}$/.test(asked) ? asked : (months[0] ?? todayIso().slice(0, 7));
   const r = await bankReview(month);
+  /*
+   * The tool on the row. The owner, 2 October 2026: "easy way to reconcile bank statements (tell site things it cant
+   * match)". This page said a cheque was "yours to categorise" and offered nothing here to do it with. The lists are
+   * the site's own: categories, payees, payers that have paid before, the standing costs.
+   */
+  const [cats, vends, standing, payers] = await Promise.all([categories(), vendors(), allStandingCosts(), recentPayerNames()]);
+  const categoryNames = cats.map((c) => c.name).sort((a, b) => a.localeCompare(b));
+  const vendorNames = vends.map((v) => v.name).sort((a, b) => a.localeCompare(b));
+  const standingNames = standing.map((s) => s.name);
+  const q = (askedQ ?? "").trim().toLowerCase();
+  /* One sentence at rest; the rest behind a press. */
+  const firstSentence = (s: string) => s.replace(/\s+/g, " ").split(/(?<=\.)\s/)[0];
 
   const TONE: Record<string, string> = { needs_you: "badge-crit", confirmed: "badge-ok", booked: "badge-muted" };
   const LABEL: Record<string, string> = { needs_you: "needs you", confirmed: "confirmed", booked: "booked here" };
@@ -44,6 +60,7 @@ export default async function BankReviewPage({ searchParams }: { searchParams: P
   /* Worst first: a page somebody works through puts the work at the top. */
   const order = { needs_you: 0, booked: 1, confirmed: 2 } as const;
   const lines = [...r.lines].sort((a, b) => order[a.state] - order[b.state] || a.on.localeCompare(b.on));
+  const shown = q ? lines.filter((l) => l.description.toLowerCase().includes(q) || (l.why ?? "").toLowerCase().includes(q) || formatCents(l.amountCents).replace(/[,$]/g, "").includes(q.replace(/[,$]/g, ""))) : lines;
 
   return (
     <>
@@ -77,7 +94,12 @@ export default async function BankReviewPage({ searchParams }: { searchParams: P
         control nobody finds is the likeliest reason. It is the same server action; only the place
         it is offered has changed.
       */}
-      <form action={readBankStatement} encType="multipart/form-data" className="my-4 flex flex-wrap items-end gap-3 rounded-xl bg-surface p-5" style={{ boxShadow: "var(--shadow-rest)" }}>
+      {ok && <Notice kind="ok">{ok}</Notice>}
+      {error && <Notice kind="crit">{error}</Notice>}
+
+      <details className="my-4">
+        <summary className="cursor-pointer text-sm font-medium text-ink-2">Read a statement</summary>
+      <form action={readBankStatement} encType="multipart/form-data" className="mt-2 flex flex-wrap items-end gap-3 rounded-xl bg-surface p-5" style={{ boxShadow: "var(--shadow-rest)" }}>
         <input type="hidden" name="period" value={month} />
         <Field
           label="Read a statement"
@@ -87,6 +109,7 @@ export default async function BankReviewPage({ searchParams }: { searchParams: P
         </Field>
         <SubmitButton className="btn btn-primary" pendingLabel="Reading the statement…">Read it</SubmitButton>
       </form>
+      </details>
 
       {r.lines.length === 0 ? (
         <Notice kind="warn">{r.says}</Notice>
@@ -115,7 +138,16 @@ export default async function BankReviewPage({ searchParams }: { searchParams: P
             </Card>
           </div>
 
-          <Card title={`Every line in ${month}`} count={r.lines.length}>
+          <Card
+            title={`Every line in ${month}`}
+            count={shown.length}
+            actions={
+              <form method="get" className="flex items-center gap-2">
+                <input type="hidden" name="month" value={month} />
+                <input name="q" defaultValue={askedQ ?? ""} placeholder="find a line by words or amount" aria-label="Find a line" className="field h-9 w-64 rounded-full text-sm" />
+              </form>
+            }
+          >
             <div className="overflow-x-auto">
               <table className="table min-w-[860px]">
                 <thead>
@@ -127,15 +159,28 @@ export default async function BankReviewPage({ searchParams }: { searchParams: P
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map((l) => (
-                    <tr key={l.id}>
+                  {shown.map((l) => (
+                    <tr key={l.id} id={`line-${l.id}`}>
                       <td className="whitespace-nowrap text-xs">{fmt(l.on)}</td>
                       <td>
                         <span className={`badge ${TONE[l.state]}`}>{LABEL[l.state]}</span>
                       </td>
                       <td>
                         <span className="block text-sm">{l.description}</span>
-                        {l.why && <span className="mt-0.5 block text-xs text-ink-2">{l.why}</span>}
+                        {l.why &&
+                          (firstSentence(l.why).length < l.why.replace(/\s+/g, " ").length ? (
+                            <details className="mt-0.5 text-xs text-ink-2">
+                              <summary className="cursor-pointer list-none">
+                                {firstSentence(l.why)} <span className="text-ink-3">more</span>
+                              </summary>
+                              <span className="block pt-1">{l.why}</span>
+                            </details>
+                          ) : (
+                            <span className="mt-0.5 block text-xs text-ink-2">{l.why}</span>
+                          ))}
+                        {l.state === "needs_you" && (
+                          <BankLineDecider lineId={l.id} month={month} amountCents={l.amountCents} categories={categoryNames} vendors={vendorNames} payers={payers} standing={standingNames} action={nameBankLine} />
+                        )}
                       </td>
                       <td className={`num whitespace-nowrap text-sm ${l.amountCents < 0 ? "" : "text-accent"}`}>
                         {formatCents(l.amountCents)}

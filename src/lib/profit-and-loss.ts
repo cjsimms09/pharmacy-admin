@@ -227,6 +227,14 @@ export type PLInputs = {
    * bank; on the accrual basis it is nothing, because the goods were never counted there. Null on accrual.
    */
   beforeBooksPaidCents?: number | null;
+  /**
+   * What the payers took back at provider level on the month's remittances (835 PLB: fees, recoupments), in cents,
+   * positive. Measured from the files, never typed. The owner, 2 October 2026, on a warning that asked him to type
+   * "DIR fees and price concessions" by hand: "what??" — and he was right to ask: Part D price concessions have been
+   * taken at the point of sale since 2024, inside the paid amounts, and anything taken after the sale is on the
+   * remittance, which the site reads.
+   */
+  remitFeesCents?: number | null;
   /** Billed by a supplier whose payments the site can see, and not taken yet. Owed, not spent. */
   notYetTakenCents?: number;
   /**
@@ -300,6 +308,7 @@ export function beforeBooksInputs(month: string, basis: "accrual" | "cash"): PLI
     uninvoicedPurchases: 0,
     cashCogsSays: null,
     beforeBooksPaidCents: null,
+    remitFeesCents: null,
     notYetTakenCents: 0,
     cashCountedTwice: [],
     standing: [],
@@ -411,6 +420,29 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
         note: fromClaims ? "What patients paid at the counter, as the claims recorded it." : undefined,
       });
     }
+    /*
+     * Sales the dispensing record cannot cost, taken back out before gross profit.
+     *
+     * The summary is the till: every prescription picked up in the month, including ones filled before the books
+     * began — in September 2026, $55,000-odd of August-filled prescriptions picked up in the first days of the books.
+     * The cost line below is the fills the site holds. Revenue from one population against cost from another
+     * flattered September's gross profit by about $52,000: found 2 October 2026 when the owner asked whether the
+     * figure was right. So what the till took beyond what the held fills account for is named and taken out before
+     * gross profit: the cost of those sales is not held, and a sale counted with no cost against it is profit
+     * invented. The till's own figure stays on the lines above, so revenue still agrees with the bank.
+     */
+    if (!fromClaims && remitCents && patientCents && i.claimsRevenueCents !== null && i.claimsRevenueCents !== undefined) {
+      const tillRx = remitCents + patientCents;
+      const held = i.claimsRevenueCents + (i.costUnknownRevenueCents ?? 0);
+      const beyond = tillRx - held;
+      if (beyond > 0) {
+        revenue.push({
+          label: "— less prescriptions the till sold that the dispensing record does not account for",
+          amountCents: -beyond,
+          note: `The summary took ${formatCents(tillRx)} for prescriptions; the fills held here and picked up this month come to ${formatCents(held)}. The rest is prescriptions filled before the books began, or sales not in the claims file, and their cost is not held — so they are taken out before gross profit rather than counted as pure profit.`,
+        });
+      }
+    }
     if (i.sales?.retailCents) {
       revenue.push({ label: "Retail and over the counter", amountCents: i.sales.retailCents, note: "Before sales tax. The tax collected is the state's money and is not in this account." });
     }
@@ -467,6 +499,10 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
   const revenueCents = sum(revenue);
 
   const offsets = byCategory(i.expenses, "revenue_offset");
+  /* What the payers took at provider level on the remittances, measured from the 835s, in the month they took it. */
+  if (i.remitFeesCents) {
+    offsets.push({ label: "Payer fees and recoupments taken on remittances", amountCents: i.remitFeesCents, note: "From the 835s' provider-level adjustments, in the month the payer took them." });
+  }
   const netRevenueCents = revenueCents - sum(offsets);
 
   /*
@@ -725,9 +761,17 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * often than it means "there were none". Silence on a line that only ever reduces profit reads as
    * good news, which is exactly the wrong way for a missing figure to read.
    */
-  /* DIR itself, not any offset: a PSAO fee or a chargeback on file says nothing about whether DIR has been entered. */
-  if (!i.expenses.some((e) => e.categoryName === "DIR fees and price concessions")) {
-    missing.push("DIR fees and price concessions for the month. These are entered by hand, so an empty line means nobody has entered them rather than that there were none.");
+  /*
+   * Payer fees and concessions are measured, never demanded.
+   *
+   * This used to refuse to call a month complete until somebody typed "DIR fees and price concessions" on Spending.
+   * The owner, 2 October 2026: "what??". No September claim carried a DIR fee, no remittance carried a provider-level
+   * adjustment, and the warning stood on every month. Part D price concessions have been taken at the point of sale
+   * since 2024, inside the paid amounts; a fee a payer still takes after the sale arrives on the remittance, which the
+   * site reads (remitFeesCents). So a month with none says so, as a measured fact, and asks nobody to type anything.
+   */
+  if (!i.remitFeesCents && !i.expenses.some((e) => e.kind === "revenue_offset")) {
+    caveats.push("No payer fees, concessions or recoupments appeared on this month's remittances, so none are taken out of revenue. Part D price concessions have been taken at the point of sale since 2024 and are already inside the paid amounts.");
   }
 
   const stockMovementCents = i.purchasesCents !== null && i.dispensedCostCents !== null ? i.purchasesCents - i.dispensedCostCents : null;
@@ -925,6 +969,8 @@ export type SharedInputs = {
   paymentAllocations: { invoiceId: string; paidOn: string; amountCents: number }[];
   /** By month: the bank's debits placed as "predates the books", in cents, positive. See PLInputs.beforeBooksPaidCents. */
   beforeBooksPaid: Map<string, number>;
+  /** By month received: provider-level adjustments on the 835s (remittance_holdbacks), in cents, positive where the payer took money. */
+  holdbacks: Map<string, number>;
 };
 
 export async function loadShared(months: string[], basis: "accrual" | "cash"): Promise<SharedInputs> {
@@ -1057,9 +1103,16 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
     (await db.query.documents.findMany({ columns: { id: true, sha256: true } })).map((d) => [d.id, d.sha256]),
   );
   const beforeBooksRows = (await db.all(sql`select substr("on", 1, 7) month, coalesce(sum(-amount_cents), 0) cents from bank_lines where placed_as = 'before_books' and amount_cents < 0 group by 1`)) as { month: string; cents: number }[];
+  /*
+   * Unproven until the first PLB arrives: no remittance on file has carried one (checked 2 October 2026, 0 rows), so the
+   * sign convention of amount_cents is taken from the reader's own comment and must be checked against the first real
+   * file. Positive here means money the payer took.
+   */
+  const holdbackRows = (await db.all(sql`select substr(received_on, 1, 7) month, coalesce(sum(amount_cents), 0) cents from remittance_holdbacks where out_of_books = 0 group by 1`)) as { month: string; cents: number }[];
   return {
     basis,
     beforeBooksPaid: new Map(beforeBooksRows.map((r) => [r.month, Number(r.cents)])),
+    holdbacks: new Map(holdbackRows.map((r) => [r.month, Number(r.cents)])),
     sales,
     cats,
     fills,
@@ -1295,6 +1348,7 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     uninvoicedPurchasesCents,
     cashCogsSays: cash.says,
     beforeBooksPaidCents: basis === "cash" ? (shared.beforeBooksPaid.get(month) ?? 0) : null,
+    remitFeesCents: shared.holdbacks.get(month) ?? 0,
     cashCountedTwice,
     notYetTakenCents: cash.notYetTakenCents,
     uninvoicedPurchases: uninvoiced.length,

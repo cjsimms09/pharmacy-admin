@@ -28,6 +28,33 @@ const base: PLInputs = {
   ],
 };
 
+describe("the till against the dispensing record, 2 October 2026", () => {
+  test("prescriptions the till sold that the held fills do not account for are taken out before gross profit, and named", () => {
+    /*
+     * September 2026: the sales summary counted every prescription picked up in the month, including ones filled in
+     * late August; the cost line was the fills the site holds, which begin on 1 September. Revenue from one population
+     * against cost from another flattered gross profit by about $52,000. The till's figure stays; the part the held
+     * fills cannot account for is taken out before gross profit, because its cost is not held.
+     */
+    const pl = monthlyPL({ ...base, claimsRevenueCents: 60_000_000, claimsRemitCents: 52_000_000, claimsPatientCents: 8_000_000, costUnknownRevenueCents: 0 });
+    const less = pl.revenue.find((l) => /does not account for/.test(l.label));
+    assert.ok(less, "the line is there, and named");
+    assert.equal(less!.amountCents, -(57_077_894 + 9_325_956 - 60_000_000));
+    assert.equal(pl.revenueCents, 66_949_738 - (66_403_850 - 60_000_000));
+    const whole = monthlyPL({ ...base, claimsRevenueCents: 66_403_850, claimsRemitCents: 57_077_894, claimsPatientCents: 9_325_956 });
+    assert.equal(whole.revenue.some((l) => /does not account for/.test(l.label)), false, "a month the fills fully account for has no such line");
+  });
+
+  test("payer fees taken on remittances come out of revenue, measured; none is a sentence, never a demand to type", () => {
+    const fees = monthlyPL({ ...base, remitFeesCents: 123_45 });
+    assert.ok(fees.offsets.some((l) => /remittances/.test(l.label) && l.amountCents === 123_45));
+    assert.equal(fees.netRevenueCents, fees.revenueCents - 900_000 - 123_45);
+    const none = monthlyPL({ ...base, expenses: base.expenses.filter((e) => e.kind !== "revenue_offset"), remitFeesCents: 0 });
+    assert.equal(none.missing.some((m) => /DIR/.test(m)), false, "nothing asks him to type DIR fees");
+    assert.ok(none.caveats.some((c) => /point of sale/.test(c)), "and the month says, as a fact, that none appeared");
+  });
+});
+
 describe("the cash account carries what the bank paid", () => {
   test("goods bought before the books and paid this month are the cash month's cost of goods, and nothing on accrual", () => {
     const cash = monthlyPL({ ...base, basis: "cash", billedPurchasesCents: 50_000_000, beforeBooksPaidCents: 14_346_700 });
@@ -176,14 +203,17 @@ describe("figures that arrive in a different month from the one that earned them
     assert.equal(cash.revenueCents, 51_000_000, "and a rebate is never revenue on either basis");
   });
 
-  test("no DIR entered is reported as nobody having entered it", () => {
+  test("no payer fee on the remittances is a measured fact, not a demand to type one", () => {
     /*
-     * DIR is typed in by hand, so an empty line almost always means "not done yet" rather than
-     * "there were none" — and silence on a figure that only ever reduces profit reads as good news.
+     * This used to refuse to call the month complete until "DIR fees and price concessions" had been typed on
+     * Spending. The owner, 2 October 2026, reading that warning: "what??". Part D price concessions have been taken
+     * at the point of sale since 2024, inside the paid amounts, and a fee a payer still takes after the sale is on
+     * the remittance, which the site reads. So a month with none says so and asks nobody to type anything.
      */
-    const pl = monthlyPL({ ...base, expenses: base.expenses.filter((e) => e.kind !== "revenue_offset") });
-    assert.ok(pl.missing.some((m) => /DIR/.test(m)));
-    assert.equal(pl.usable, false);
+    const pl = monthlyPL({ ...base, expenses: base.expenses.filter((e) => e.kind !== "revenue_offset"), remitFeesCents: 0 });
+    assert.equal(pl.missing.some((m) => /DIR/.test(m)), false);
+    assert.ok(pl.caveats.some((c) => /point of sale/.test(c)));
+    assert.equal(pl.usable, true);
   });
 });
 

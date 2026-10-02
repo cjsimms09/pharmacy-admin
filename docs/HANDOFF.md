@@ -19,6 +19,15 @@ file is how they talk.
   window is after 18:30). Still to do on the same rule: the bank page's categorise-a-line tool (the "tell the site
   what it cannot match" he asked for), the pack's bridge (now redundant), and two findings on the accrual side in
   `docs/OPEN-ITEMS.md` (September gross profit overstated ≈ $52,000; the DIR hand-entry warning).
+- **Same evening, three more on the books:** (1) the accrual revenue line "— less prescriptions the till sold that the
+  dispensing record does not account for" (`profit-and-loss.ts`): the sales summary's figure stays, and what the
+  held fills cannot account for is taken out before gross profit — September $129,672.95 → $81,780.24; (2) the DIR
+  hand-entry demand is gone; payer fees come from the 835s' provider-level adjustments (`remitFeesCents`), measured,
+  none said as a fact; (3) the bank page's tool on the row (`bank-decision-form.ts` pure and tested,
+  `bank-review/actions.ts`, `components/bank-line-decider.tsx`): a line nothing could place is named where it sits —
+  a cost under a category and payee, a cheque, a standing cost, before the books, noted; a deposit from a payer, a
+  register run — through the same `decideBankLine` Today uses; plus a find box, the upload behind a disclosure, one
+  sentence per row at rest. None of it rendered yet: it deploys at 18:36 and is to be printed and read then.
 
 - **2 October, afternoon: he chose to fix the original site rather than continue the rebuild, and speed was first.**
   His words are in `docs/BACKLOG.md` (the brief for every page: simpler, better tools, nothing lost, sellable).

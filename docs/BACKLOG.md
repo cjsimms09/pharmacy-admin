@@ -1141,3 +1141,15 @@ place, and an arithmetic check before anything is stored.
   Method: one page at a time, as him — what he does there, what he never does there — rendered, printed and read
   before he sees it; no function removed without his word on that page; the register of pages and verdicts in the
   design audit §8 is the inventory to walk.
+- **The scope, his words, 2 October (evening):** "what things should we drop from site? we need to make this site more
+  useble.. I want compliance, I want invoice organization and storing, temp logs, delivery invoices, accounting, and
+  remits reconciliation and tracking(MTF, Aytu, SFTP). Everything else can go.." and "it needs to be more clean, less
+  busy, more professional, faster, more accurate, more automated and help me with the things above.. what do we need
+  to drop in order to do that. I get a headache looking at this site and trying to read all the paragraphs and words.."
+  The cut (about 33 pages): all of buying (what to buy, shelf, minimums, catalogue, products, replay, return soon,
+  supplies, over NADAC, NADAC, supplier terms and rebate ladders, pack-size fixes as a page), money found and "worth
+  the most", claims analysis (appeals, Kansas floor, who pays best, plan classification, networks to contracts,
+  contract reading), tools (PioneerRx SQL, morning check, data health, report check, sort the folder, extra
+  sections), the v2 screens; on Today: money waiting, supplies, the Claude ceiling line, the credential nags.
+  Method: out of navigation and Today first, computations stopped, nothing deleted from the database for a month.
+  To confirm with him: the rebate ladder as one figure; pack-size fixes kept hidden.

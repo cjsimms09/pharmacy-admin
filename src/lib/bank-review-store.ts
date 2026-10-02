@@ -129,6 +129,12 @@ export async function bankReview(month: string): Promise<BankReview> {
   };
 }
 
+/** Payers that have paid in the last 120 days, for the row's list: a name typed once is offered the next time. */
+export async function recentPayerNames(): Promise<string[]> {
+  const rows = await db.all<{ payer: string }>(sql`select distinct payer from cash_receipts where payer is not null and payer != '' and received_on >= date('now', '-120 days') order by payer limit 60`);
+  return rows.map((r) => r.payer);
+}
+
 /** Which months have a statement read, newest first, so the page can offer them. */
 export async function monthsWithStatements(): Promise<string[]> {
   const rows = await db.all<{ m: string }>(sql`select distinct substr("on", 1, 7) as m from bank_lines order by m desc`);
