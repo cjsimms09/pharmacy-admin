@@ -19,7 +19,6 @@ export const config = {
     "/purchasing/:path*",
     "/nadac/:path*",
     "/inventory/returns/:path*",
-    "/suppliers/:id/terms/:path*",
     "/money/found/:path*",
     "/claims/appeals/:path*",
     "/claims/floor/:path*",

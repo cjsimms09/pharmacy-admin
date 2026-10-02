@@ -1147,7 +1147,7 @@ place, and an arithmetic check before anything is stored.
   busy, more professional, faster, more accurate, more automated and help me with the things above.. what do we need
   to drop in order to do that. I get a headache looking at this site and trying to read all the paragraphs and words.."
   The cut (about 33 pages): all of buying (what to buy, shelf, minimums, catalogue, products, replay, return soon,
-  supplies, over NADAC, NADAC, supplier terms and rebate ladders, pack-size fixes as a page), money found and "worth
+  supplies, over NADAC, NADAC, pack-size fixes as a page — not the rebate ladder: "yes keep rebate latter"), money found and "worth
   the most", claims analysis (appeals, Kansas floor, who pays best, plan classification, networks to contracts,
   contract reading), tools (morning check, data health, report check, sort the folder, extra
   sections), the v2 screens; on Today: money waiting, supplies, the Claude ceiling line, the credential nags.

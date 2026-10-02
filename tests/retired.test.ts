@@ -13,8 +13,8 @@ import { WARM_STEPS } from "../src/lib/warm-policy";
  */
 describe("the pages retired on 2 October 2026", () => {
   test("retired and kept, by address", () => {
-    for (const p of ["/purchasing", "/purchasing/shelf", "/nadac", "/money/found", "/claims/floor", "/payers/performance", "/payers/contracts/abc", "/reports", "/v2/today", "/plans", "/suppliers/x/terms"]) assert.equal(isRetired(p), true, p);
-    for (const p of ["/", "/money", "/money/bank-review", "/inventory/invoices", "/suppliers", "/suppliers/x", "/temps", "/deliveries", "/remits", "/remits/mtf", "/claims", "/payers", "/payers/owed", "/compliance", "/inbox", "/expenses", "/settings", "/inventory/pack-sizes", "/tools/pioneer-sql"]) assert.equal(isRetired(p), false, p);
+    for (const p of ["/purchasing", "/purchasing/shelf", "/nadac", "/money/found", "/claims/floor", "/payers/performance", "/payers/contracts/abc", "/reports", "/v2/today", "/plans"]) assert.equal(isRetired(p), true, p);
+    for (const p of ["/", "/money", "/money/bank-review", "/inventory/invoices", "/suppliers", "/suppliers/x", "/temps", "/deliveries", "/remits", "/remits/mtf", "/claims", "/payers", "/payers/owed", "/compliance", "/inbox", "/expenses", "/settings", "/inventory/pack-sizes", "/tools/pioneer-sql", "/suppliers/x/terms"]) assert.equal(isRetired(p), false, p);
   });
 
   test("no retired page is in the menu, and the kept doors are", () => {
@@ -39,8 +39,8 @@ describe("the pages retired on 2 October 2026", () => {
   test("the redirect's matcher catches one address under every retired rule, and nothing kept", () => {
     const src = readFileSync("src/middleware.ts", "utf8");
     const matchers = [...src.matchAll(/"(\/[^"]+)"/g)].map((m) => new RegExp("^" + m[1].replace(/\/:path\*$/, "(/.*)?").replace(/:id/g, "[^/]+") + "$"));
-    const samples = ["/purchasing/shelf", "/nadac", "/inventory/returns", "/suppliers/x/terms", "/money/found", "/claims/appeals", "/claims/floor", "/plans", "/payers/plans", "/payers/performance", "/payers/networks", "/payers/contracts/abc", "/payers/sort", "/tools/check", "/tools/data-health", "/reports", "/settings/features", "/v2/today"];
-    assert.equal(samples.length, RETIRED.length + 6, "one sample per rule, and one per branch of the rules that fork");
+    const samples = ["/purchasing/shelf", "/nadac", "/inventory/returns", "/money/found", "/claims/appeals", "/claims/floor", "/plans", "/payers/plans", "/payers/performance", "/payers/networks", "/payers/contracts/abc", "/payers/sort", "/tools/check", "/tools/data-health", "/reports", "/settings/features", "/v2/today"];
+    assert.equal(samples.length, RETIRED.length + 7, "one sample per rule, and one per branch of the rules that fork");
     for (const s of samples) {
       assert.ok(isRetired(s), `${s} should be retired`);
       assert.ok(matchers.some((m) => m.test(s)), `middleware does not redirect ${s}`);

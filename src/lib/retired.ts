@@ -10,10 +10,10 @@
  * the tests read one list.
  */
 export const RETIRED: { test: RegExp; area: string }[] = [
+  /* Not the rebate ladder: "yes keep rebate latter", his words the same day, so /suppliers and its terms pages stay. */
   { test: /^\/purchasing(\/|$)/, area: "buying: what to buy, the shelf, minimums, the catalogue, products, replay, return soon, supplies, bought over NADAC" },
   { test: /^\/nadac(\/|$)/, area: "the NADAC page" },
   { test: /^\/inventory\/returns(\/|$)/, area: "what to send back" },
-  { test: /^\/suppliers\/[^/]+\/terms(\/|$)/, area: "supplier terms and rebate ladders" },
   { test: /^\/money\/found(\/|$)/, area: "money found" },
   { test: /^\/claims\/(appeals|floor)(\/|$)/, area: "appeals and the Kansas floor" },
   { test: /^\/plans(\/|$)/, area: "plan classification" },
