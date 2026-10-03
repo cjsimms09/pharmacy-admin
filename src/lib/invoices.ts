@@ -2286,7 +2286,7 @@ async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
    */
   if (prices.charges.length > 0 && !out.some((a) => a.key === "prices-disagree")) {
     const n = prices.charges.length;
-    const c = `${(Math.abs(prices.chargesCents) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const c = `$${(Math.abs(prices.chargesCents) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     out.push({
       key: "invoice-charges",
       severity: "warn",

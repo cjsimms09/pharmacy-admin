@@ -51,4 +51,10 @@ describe("a month before the books begin", () => {
     const first = await monthlyChecklist(SITE_STARTS_ON.slice(0, 7));
     assert.ok(first.outstanding > 0, "September is in books and has real things outstanding");
   });
+
+  test("REGRESSION: never asks for a file he has said he will not send", async () => {
+    /* 2 October 2026: an adjustment-report row was added, he said he is not emailing it, and it would have held every month's close and raised "still to upload" on the 5th. */
+    const first = await monthlyChecklist(SITE_STARTS_ON.slice(0, 7));
+    assert.ok(first.items.every((i) => i.key !== "adjustment_report"));
+  });
 });

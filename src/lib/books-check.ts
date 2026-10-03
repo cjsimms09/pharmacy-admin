@@ -411,6 +411,8 @@ export type Feed = {
    * is written down, and only one of the two is a problem.
    */
   gap: string | null;
+  /** True where the feed is kept off both accounts on purpose: shown as a decision, never as a fault. */
+  deliberate?: boolean;
   href: string;
 };
 
@@ -419,8 +421,8 @@ export type Feed = {
  *
  * The owner's second requirement — *"needs to not forget about expenses or revenue it knows"* —
  * cannot be met by looking at the account, because the thing being looked for is not on it. It can
- * only be met by listing the feeds and saying, for each, what the books do with it. Three of them
- * do not reach the account at all today, and each is named with what that costs.
+ * only be met by listing the feeds and saying, for each, what the books do with it. Two of them
+ * reach neither account, on purpose, and each says why.
  */
 export function feedsInTheBooks(): Feed[] {
   return [
@@ -436,10 +438,10 @@ export function feedsInTheBooks(): Feed[] {
       name: "The System Sales Summary",
       carries: "The whole till by month: prescriptions and the front of shop, before sales tax.",
       reaches: "accrual",
-      how: "The authority for accrual revenue. Where it is loaded the claims are not added to it.",
-      gap:
-        "It carries retail revenue and nothing in the site carries what that retail stock cost to buy, so front-of-shop margin falls straight to profit. " +
-        "The month's account names this as a caveat with the amount against it.",
+      how:
+        "The authority for accrual revenue; where it is loaded the claims are not added to it. Where it carries what the retail stock cost, that is booked as its own line; " +
+        "where it does not, front-of-shop margin falls straight to profit and the month's account says so, with the amount against it.",
+      gap: null,
       href: "/money/monthly",
     },
     {
@@ -458,8 +460,12 @@ export function feedsInTheBooks(): Feed[] {
        * A page that describes a method the code does not use is worse than one that says nothing:
        * somebody auditing the books would have checked payment dates that play no part in them.
        */
-      how: "Accrual: the purchases figure, for the stock comparison only — never as cost of goods. Cash: the cost of goods, at each invoice's own date.",
-      gap: "The invoice's date, not the day the money left the bank — which is what the pharmacy means by a September bill, and is not the same thing. Where no invoice arrived at all, PioneerRx's own record of receiving the delivery stands in, and the account says how much of the figure is on that footing.",
+      how:
+        "Accrual: the purchases figure, for the stock comparison only — never as cost of goods. Cash: where a bank statement is read, the bank line that paid the invoice is the cost, " +
+        "filed under the supplier; without one, the invoice at its own date.",
+      gap:
+        "An invoice that never reached the site is missing from the stock comparison too, where it reads as the shelf running down. On a month with no statement read, the invoice's " +
+        "date stands in for the day the money left the bank, and PioneerRx's own record of receiving a delivery stands in for an invoice that never came; the account says how much is on that footing.",
       href: "/inventory/invoices",
     },
     {
@@ -475,7 +481,7 @@ export function feedsInTheBooks(): Feed[] {
       carries: "Payroll and rent as a monthly amount, so a month in progress carries its share.",
       reaches: "both",
       how: "Accrued by the day on the accrual account; counted on the day it is paid on the cash one. Dropped where the real bill for the month is already filed.",
-      gap: "A standing cost with no day of the month it is paid cannot be placed on the cash account. It is left out and named, never guessed at.",
+      gap: "On a cash account built from the feeds, a standing cost with no day of the month it is paid cannot be placed; it is left out and named, never guessed at.",
       href: "/expenses",
     },
     {
@@ -490,42 +496,44 @@ export function feedsInTheBooks(): Feed[] {
       name: "Cash receipts",
       carries: "What reached the bank, typed by month and kind until the statement itself is read.",
       reaches: "cash",
-      how: "The whole of cash revenue. Without it a cash account has no revenue at all, and the month says so rather than printing nought.",
-      gap:
-        "The whole of it is typed. The patient's money is cash on the day it was collected and the site already knows that day — a fill carries the date it was picked up — " +
-        "so the copays could be placed on the cash account by themselves and are not. Today a month with nothing typed has no cash revenue even though every register " +
-        "transaction in it is on file.",
+      how:
+        "Without a statement, the whole of cash revenue; a month with nothing typed says so rather than printing nought. Where a statement is read, a typed receipt only names " +
+        "the bank line it matches, and one no bank line confirms sits beside the account, never in it.",
+      gap: null,
       href: "/money",
     },
     {
       name: "Payer payments and facilitator remittances",
       carries: "Deposits from the payment reports the site reads, by payer and deposit date.",
       reaches: "cash",
-      how: "The facilitator's stand in for a typed receipt where none exists for the month.",
-      gap:
-        "Only the facilitator's do. A plan remittance in this feed reaches the cash account solely if somebody also types it as a receipt, so cash revenue can be short by " +
-        "whatever the payment reports hold and nobody re-entered. This closes when the 835s arrive here.",
+      how:
+        "Where a statement is read this is the check on the bank, not a figure in it: a remittance paid here with no deposit on the statement is raised on the daily check. " +
+        "Without a statement, the facilitator's payments stand in for a typed receipt where none exists for the month.",
+      gap: null,
       href: "/money",
     },
     {
       name: "Bank lines",
       carries: "The bank statement itself: every deposit and every payment out, with its description.",
-      reaches: "none",
-      how: "Read and shown beside the books, and used to place a deposit against a receipt or a bill against an invoice. No figure on either account comes from it.",
-      gap:
-        "The bank is the truth on the cash side and the books do not yet draw from it. Until they do, cash revenue is what somebody typed rather than what landed, " +
-        "and a deposit nothing explains — or an 835 with no deposit — is not raised as a finding.",
+      reaches: "cash",
+      how:
+        "Where a statement is read this is the cash account: every line is named — to a receipt, an invoice, a bill, a transfer or a note — and the account equals the bank to " +
+        "the cent. A line nothing has named sits on the account as not yet named until somebody names it. A month with no statement read has no bank lines; its cash account is " +
+        "built from the feeds above, and the month says so.",
+      gap: null,
       href: "/money",
     },
     {
       name: "Remittance advice (835)",
       carries: "What each payer decided to pay, claim by claim, with its adjustments and the trace number of the payment.",
-      reaches: "none",
-      how: "Not yet received here. The reader exists and the enrolment requests are being built.",
+      reaches: "accrual",
+      how:
+        "The folder reader takes each file in and keeps it as a document before reading it, so a fix to the reader can read it again. Its provider-level adjustments — fees and " +
+        "recoupments, which belong to no single claim — are taken off revenue in the month the remittance was received.",
       gap:
-        "This is the missing half of the cash account. Until an 835 exists for a claim the payer's money is a receivable, and the books can show the period's receivable " +
-        "but not its age by payer. Provider-level adjustments — DIR, recoupments, fees — belong to no single claim and must still reach the books.",
-      href: "/payers/routing",
+        "835 files read before 1 October 2026 did not keep their provider-level adjustments, so the fees on those months come from the reconciliation service's adjustment report, " +
+        "or are not measured.",
+      href: "/remits",
     },
     {
       name: "On-hand counts",
@@ -533,6 +541,7 @@ export function feedsInTheBooks(): Feed[] {
       reaches: "none",
       how: "The independent check on cost of goods — opening stock plus purchases less closing stock uses nothing from the claims — and never a figure on the account itself.",
       gap: "Deliberate. The account's cost of goods comes from the claims, and this is what proves it; a check that fed the thing it checks would prove nothing.",
+      deliberate: true,
       href: "/inventory",
     },
     {
@@ -549,7 +558,18 @@ export function feedsInTheBooks(): Feed[] {
       reaches: "none",
       how: "The order is an email and carries no price; the vendor's invoice does, and lands as an ordinary bill on Spending.",
       gap: "Deliberate. Booking the order would be inventing a figure. The month's account names the orders it has left out.",
+      deliberate: true,
       href: "/purchasing/supplies",
+    },
+    {
+      name: "The reconciliation service's adjustment report",
+      carries: "The fees and adjustments payers took on remittances, by remittance and code.",
+      reaches: "accrual",
+      how:
+        "Read when it is filed, by the mailbox or by hand, and refused in words if its lines do not add to its own total. Taken off revenue in each remittance's month, and left out " +
+        "for any remittance whose 835 is on file with its adjustments, so a fee is never counted twice.",
+      gap: null,
+      href: "/remits",
     },
   ];
 }
@@ -597,7 +617,7 @@ export function booksBalance(pl: PeriodPL | MonthlyPL): { ok: boolean; checks: B
 
 /* ── Both bases, and the difference explained ───────────────────────────────────── */
 
-export type BasisPart = { what: string; cents: number; says: string };
+export type BasisPart = { key: "revenue" | "offsets" | "goods" | "bills"; what: string; cents: number; says: string };
 
 export type BasisDifference = {
   /** Accrual bottom line less cash bottom line. Positive: the month earned more than it banked. */
@@ -626,31 +646,41 @@ export type BasisDifference = {
  */
 export function basisDifference(accrual: PeriodPL | MonthlyPL, cash: PeriodPL | MonthlyPL): BasisDifference {
   const differenceCents = flat(accrual.netProfitCents - cash.netProfitCents);
+  const revenue = flat(accrual.revenueCents - cash.revenueCents);
+  const offsets = flat(-(sumLines(accrual.offsets) - sumLines(cash.offsets)));
+  const goods = flat(-(accrual.costOfGoodsCents - cash.costOfGoodsCents));
+  const bills = flat(-(accrual.operatingCents - cash.operatingCents));
+  /*
+   * Each part is the same subtraction whichever way it falls, but the words are not. "Goods dispensed and not yet paid
+   * for" is only true when accrual costs more than cash; on 2 October 2026 the September part read +$65,474.29 under
+   * that label while the bank had paid the wholesalers MORE than was dispensed — a label saying the opposite of the
+   * figure beside it, and a figure is the thing that gets read.
+   */
   const parts: BasisPart[] = [
+    revenue >= 0
+      ? { key: "revenue", what: "Revenue earned and not yet banked", cents: revenue, says: "The receivable. Prescriptions dispensed in the period whose plans pay two to four weeks later, plus anything on account." }
+      : { key: "revenue", what: "Revenue banked beyond what was earned in the period", cents: revenue, says: "Money that reached the bank this period for sales made before it, more than this period's own sales still waiting to be paid." },
     {
-      what: "Revenue earned and not yet banked",
-      cents: flat(accrual.revenueCents - cash.revenueCents),
-      says: "The receivable. Prescriptions dispensed in the period whose plans pay two to four weeks later, plus anything on account.",
-    },
-    {
+      key: "offsets",
       what: "Money taken back out of revenue",
-      cents: flat(-(sumLines(accrual.offsets) - sumLines(cash.offsets))),
-      says: "DIR fees and concessions counted against the period that earned the revenue rather than the period the plan took them.",
+      cents: offsets,
+      says:
+        offsets <= 0
+          ? "Fees and concessions the accrual account takes off revenue, more than the cash account shows taken in the same period."
+          : "The cash account took more off revenue than the accrual account charged to the period.",
     },
-    {
-      what: "Goods dispensed and not yet paid for",
-      cents: flat(-(accrual.costOfGoodsCents - cash.costOfGoodsCents)),
-      says: "The payable, and its opposite. Accrual costs what left the shelf; cash costs what left the bank, so a month of stocking up is worse on cash and a month of running the shelf down is better.",
-    },
-    {
-      what: "Bills incurred and not yet paid",
-      cents: flat(-(accrual.operatingCents - cash.operatingCents)),
-      says: "Overheads counted on the day they were incurred rather than the day the money went.",
-    },
+    goods >= 0
+      ? { key: "goods", what: "Paid to the wholesalers beyond what was dispensed", cents: goods, says: "Cash costs what left the bank and accrual costs what left the shelf. The bank paid the wholesalers more than the cost of what left the shelf: stock bought up, or earlier months' invoices settled in this one." }
+      : { key: "goods", what: "Goods dispensed and not yet paid for", cents: goods, says: "Cash costs what left the bank and accrual costs what left the shelf. The bank paid the wholesalers less than the cost of what left the shelf: invoices not yet paid, or the shelf run down." },
+    bills <= 0
+      ? { key: "bills", what: "Bills incurred and not yet paid", cents: bills, says: "Overheads counted on the day they were incurred rather than the day the money went." }
+      : { key: "bills", what: "Bills paid that were incurred earlier", cents: bills, says: "Overheads the bank paid in the period that were counted against an earlier one." },
   ];
   const total = flat(parts.reduce((n, p) => n + p.cents, 0));
   const adds = total === differenceCents;
   const ordered = [...parts].sort((a, b) => Math.abs(b.cents) - Math.abs(a.cents));
+  const big = ordered[0];
+  const largest = `The largest single part is ${big.what.toLowerCase()}, at ${dollars(Math.abs(big.cents))}${big.cents > 0 === differenceCents > 0 ? "" : ", and it pulls the other way"}.`;
   return {
     differenceCents,
     parts: ordered,
@@ -660,7 +690,7 @@ export function basisDifference(accrual: PeriodPL | MonthlyPL, cash: PeriodPL | 
       : differenceCents === 0
         ? "The two accounts agree on the bottom line this period, which is unusual and worth a look: it normally means one of them is short of a feed rather than that the money arrived the month it was earned."
         : differenceCents > 0
-          ? `The period earned ${dollars(differenceCents)} more than it banked. ${ordered[0].what.toLowerCase()} is the largest part of it, at ${dollars(Math.abs(ordered[0].cents))}.`
-          : `The period banked ${dollars(-differenceCents)} more than it earned. ${ordered[0].what.toLowerCase()} is the largest part of it, at ${dollars(Math.abs(ordered[0].cents))}.`,
+          ? `The period earned ${dollars(differenceCents)} more than it banked. ${largest}`
+          : `The period banked ${dollars(-differenceCents)} more than it earned. ${largest}`,
   };
 }

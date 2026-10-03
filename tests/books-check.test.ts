@@ -196,8 +196,42 @@ describe("adjudicated in one month, remitted in the next, deposited in the one a
     assert.equal(d.differenceCents, a.netProfitCents - c.netProfitCents);
     assert.equal(d.parts.reduce((n, p) => n + p.cents, 0), d.differenceCents);
     // July: earned $500 more than banked, and paid for the bottle it had not yet been paid for.
-    assert.equal(d.parts.find((p) => p.what === "Revenue earned and not yet banked")!.cents, REMIT);
-    assert.equal(d.parts.find((p) => p.what === "Goods dispensed and not yet paid for")!.cents, 0);
+    const revenue = d.parts.find((p) => p.key === "revenue")!;
+    assert.equal(revenue.cents, REMIT);
+    assert.equal(revenue.what, "Revenue earned and not yet banked");
+    assert.equal(d.parts.find((p) => p.key === "goods")!.cents, 0);
+  });
+
+  test("the words on each part follow its sign, so a label never says the opposite of the figure beside it", () => {
+    /*
+     * 2 October 2026: September's goods part was +$65,474.29 — the bank paid the wholesalers MORE than was dispensed — under
+     * the label "Goods dispensed and not yet paid for", which says the reverse. The same subtraction, the other sign.
+     */
+    const q = parsePeriod("2026-07")!;
+    const a = combineMonths(q, [july.accrual]);
+    const c = combineMonths(q, [july.cash]);
+    const bankedMore = basisDifference(
+      { ...a, revenueCents: 1_000_00, offsets: [], costOfGoodsCents: 400_00, operatingCents: 0, netProfitCents: 600_00 },
+      { ...c, revenueCents: 1_300_00, offsets: [], costOfGoodsCents: 1_050_00, operatingCents: 0, netProfitCents: 250_00 },
+    );
+    assert.equal(bankedMore.adds, true, bankedMore.says);
+    const rev = bankedMore.parts.find((p) => p.key === "revenue")!;
+    const goods = bankedMore.parts.find((p) => p.key === "goods")!;
+    assert.equal(rev.cents, -300_00);
+    assert.equal(rev.what, "Revenue banked beyond what was earned in the period");
+    assert.equal(goods.cents, 650_00);
+    assert.equal(goods.what, "Paid to the wholesalers beyond what was dispensed");
+    assert.match(bankedMore.says, /The period earned \$350\.00 more than it banked\. The largest single part is paid to the wholesalers beyond what was dispensed, at \$650\.00\./);
+
+    const unpaid = basisDifference(
+      { ...a, revenueCents: 1_000_00, offsets: [], costOfGoodsCents: 1_050_00, operatingCents: 0, netProfitCents: -50_00 },
+      { ...c, revenueCents: 1_000_00, offsets: [], costOfGoodsCents: 400_00, operatingCents: 0, netProfitCents: 600_00 },
+    );
+    assert.equal(unpaid.adds, true, unpaid.says);
+    const owed = unpaid.parts.find((p) => p.key === "goods")!;
+    assert.equal(owed.cents, -650_00);
+    assert.equal(owed.what, "Goods dispensed and not yet paid for");
+    assert.match(unpaid.says, /The period banked \$650\.00 more than it earned\./);
   });
 
   test("a decomposition that does not add up refuses to explain the gap", () => {
@@ -302,13 +336,19 @@ describe("which feeds are in the books, said out loud", () => {
     }
   });
 
-  test("the two feeds that would finish the cash side are named as missing", () => {
+  test("the bank statement and the 835s are on the list as feeds that land, in words that are no longer true of a missing feed", () => {
     const bank = feeds.find((f) => f.name === "Bank lines")!;
     const era = feeds.find((f) => f.name === "Remittance advice (835)")!;
-    assert.equal(bank.reaches, "none");
-    assert.equal(era.reaches, "none");
-    assert.match(bank.gap!, /truth on the cash side/);
-    assert.match(era.gap!, /receivable/);
+    assert.equal(bank.reaches, "cash");
+    assert.equal(era.reaches, "accrual");
+    for (const f of feeds) {
+      const said = `${f.how} ${f.gap ?? ""}`;
+      assert.doesNotMatch(said, /do not yet draw|No figure on either account|Not yet received|missing half|truth on the cash side/, f.name);
+    }
+  });
+
+  test("a feed that reaches neither account is kept off both on purpose, and says so", () => {
+    for (const f of feeds.filter((x) => x.reaches === "none")) assert.equal(f.deliberate, true, f.name);
   });
 
   test("no feed is listed twice, which would be its own kind of double count", () => {

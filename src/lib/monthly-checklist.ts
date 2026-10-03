@@ -200,25 +200,7 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
     cents: null,
   });
 
-  /* ── 3b. The adjustment report ───────────────────────────────── */
-  /*
-   * The reconciliation service's monthly list of the fees and adjustments payers took on remittances — the record of
-   * post-sale concessions while the 835s themselves are not on file. Expected monthly by email (the owner, 2 October
-   * 2026), read by adjustment-report.ts.
-   */
-  const adjustmentReports = await db.query.documents.findMany({
-    where: and(eq(schema.documents.category, "adjustment_report"), gte(schema.documents.effectiveOn, from), lte(schema.documents.effectiveOn, to)),
-    columns: { id: true, notes: true },
-  });
-  items.push({
-    key: "adjustment_report",
-    name: "Adjustment report from the reconciliation service",
-    why: "The fees and adjustments payers took on the month's remittances. Without it the month's payer fees read as none, which is not the same as measured.",
-    from: "The reconciliation service — emailed monthly as a CSV, read on arrival",
-    done: adjustmentReports.length > 0,
-    says: adjustmentReports.length > 0 ? (adjustmentReports[0].notes ?? "on file") : "not yet arrived; the month's payer fees are not measured",
-    cents: null,
-  });
+  /* No adjustment-report item: he does not send one, and a row nobody can satisfy is how a list stops being read. Payer fees come with the 835s. */
 
   /* ── 4. The till's own figure for the month ────────────────────── */
   const { salesMonths } = await import("./sales-store");

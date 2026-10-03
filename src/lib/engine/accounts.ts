@@ -98,7 +98,12 @@ export async function readStoredAccounts(
     account.caveats = [...(account.caveats ?? []), `Figures as the engine computed them ${when}; it recomputes the month in progress after every arriving file and every closed month overnight.`];
     out.months.push(account);
     out.inputs.push(JSON.parse(r.inputs) as PLInputs);
-    out.fills.push(...(JSON.parse(r.fills) as FillForScripts[]));
+    /*
+     * A month's stored list also carries the fills dated in an earlier month and collected in it, so a fill dated in
+     * September and collected in October sits in both rows. A script is counted in the month it was filled, once —
+     * taking each row whole put 179 of September's 6,913 in the table twice, beside a KPI that said 6,734.
+     */
+    out.fills.push(...(JSON.parse(r.fills) as FillForScripts[]).filter((f) => f.dateFilled.startsWith(m)));
   }
   return out;
 }

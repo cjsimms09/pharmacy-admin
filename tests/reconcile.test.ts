@@ -84,11 +84,12 @@ describe("cost of goods, from three sources answering three questions", () => {
 });
 
 describe("revenue, and which gaps mean something", () => {
-  test("claims ahead of the till is billed and not sold", () => {
+  test("claims ahead of the till is said plainly, with the cause not yet known", () => {
     const [rx] = reconcileRevenue({ claims: src(60_500_000), tillRx: src(60_000_000), banked: src(null) });
     assert.equal(rx.differenceCents, 500_000);
     assert.equal(rx.expected, false);
-    assert.match(rx.says, /billed and not sold/);
+    assert.match(rx.says, /ahead of the till/);
+    assert.match(rx.says, /cause is not yet known/);
   });
 
   test("till ahead of the claims is a missing day of the report", () => {

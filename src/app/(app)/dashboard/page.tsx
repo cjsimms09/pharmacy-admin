@@ -349,7 +349,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   if (health.failing > 0) {
     attention.push({
       what: health.failing === 1 ? "The morning check found something" : `The morning check found ${health.failing} things`,
-      detail: health.checks.filter((c) => !c.ok).map((c) => `${c.what.toLowerCase()} — ${c.observed}`).join("; "),
+      detail: health.checks
+        .filter((c) => !c.ok)
+        .map((c) => `Should be: ${c.what.charAt(0).toLowerCase()}${c.what.slice(1)}. Found: ${c.observed.replace(/\.$/, "")}.`)
+        .join(" · "),
       /* The morning check page is retired (2 October 2026); its finding is said here and the page it concerns is one press away. */
       href: /remit|payment|banked/i.test(health.checks.filter((c) => !c.ok).map((c) => c.what).join(" ")) ? "/remits" : "/money",
       action: "See it",

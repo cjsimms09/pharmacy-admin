@@ -82,6 +82,9 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const completeness = await claimsCompleteness();
   /* Whether the month can be closed, as the engine judged it: every bank line placed, the receipts gap named, the month over. */
   const status = period.kind === "month" ? await db.query.monthStatus.findFirst({ where: eq(schema.monthStatus.month, period.key) }).catch(() => null) : null;
+  /* Which of the months in the six-month table are closed, so its State row agrees with the badge above instead of calling a closed month "complete". */
+  const monthStates = await db.query.monthStatus.findMany().catch(() => []);
+  const closedAtByMonth = new Map(monthStates.filter((s) => s.closeState === "closed").map((s) => [s.month, s.closedAt ?? ""]));
   /*
    * The cash account is the bank statement, categorised (cash-from-bank.ts; the owner, 2 October 2026: "cash
    * accounting should match the bank"). Where every month of the period has its statement read, the cash column
@@ -190,12 +193,16 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
   const toCome = [...accrual.missing, ...accrual.caveats.filter((c) => !/as the engine computed them/.test(c))];
   const checksByMonth = accrual.months.map((m) => {
     const checks = [...m.reconciliation.cogs.checks, ...m.reconciliation.revenue];
-    return { month: m.month, checks, findings: checks.filter((c) => !c.expected && c.agrees === false).length, ties: checks.filter((c) => c.agrees === true).length };
+    const findingList = checks.filter((c) => !c.expected && c.agrees === false);
+    return { month: m.month, checks, findingList, findings: findingList.length, ties: checks.filter((c) => c.agrees === true).length };
   });
   const findings = checksByMonth.reduce((n, m) => n + m.findings, 0);
   const pairsDecided = countedOnce.filter((r) => r.bothPresent);
   const feedsOff = feeds.filter((f) => f.reaches === "none");
-  const feedsGap = feeds.filter((f) => f.reaches !== "none" && f.gap);
+  const feedsOffUnexplained = feedsOff.filter((f) => !f.deliberate);
+  /* A month whose only items are notes has nothing still to come: calling it "not complete" was the banner contradicting the State row beside it. */
+  const notesOnly = accrual.missing.length === 0;
+  const notes = toCome.length - accrual.missing.length;
 
   return (
     <>
@@ -266,13 +273,33 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
         him to type a figure the feeds will bring.
       */}
       {toCome.length > 0 && (
-        <details className={`mb-4 rounded-lg border px-3 py-2 text-sm ${isCurrent ? "border-line bg-surface" : "border-warn bg-warn-soft"}`}>
+        <details className={`mb-4 rounded-lg border px-3 py-2 text-sm ${isCurrent || notesOnly ? "border-line bg-surface" : "border-warn bg-warn-soft"}`}>
           <summary className="cursor-pointer">
-            <b>{isCurrent ? `${period.label} is in progress` : `${period.label} is not complete`}</b>
-            <span className="text-ink-2">
-              {" "}
-              — {toCome.length} thing{toCome.length === 1 ? "" : "s"} still to come{isCurrent ? "" : "; until then the bottom line reads high"}.
-            </span>
+            {isCurrent ? (
+              <>
+                <b>{period.label} is in progress</b>
+                <span className="text-ink-2">
+                  {" "}
+                  — {toCome.length} thing{toCome.length === 1 ? "" : "s"} still to come.
+                </span>
+              </>
+            ) : notesOnly ? (
+              <>
+                <b>{period.label}</b>
+                <span className="text-ink-2">
+                  {" "}
+                  — {toCome.length} note{toCome.length === 1 ? "" : "s"} on these figures; nothing is still to come.
+                </span>
+              </>
+            ) : (
+              <>
+                <b>{period.label} is not complete</b>
+                <span className="text-ink-2">
+                  {" "}
+                  — {accrual.missing.length} thing{accrual.missing.length === 1 ? "" : "s"} still to come{notes > 0 ? `, and ${notes} note${notes === 1 ? "" : "s"}` : ""}; until they arrive the figures are not final.
+                </span>
+              </>
+            )}
           </summary>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-ink-2">
             {toCome.map((m, i) => (
@@ -289,7 +316,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
         <Stat size="sm" value={formatCents(accrual.operatingCents)} label="Running costs" sub={pct(accrual.operatingCents) ?? "operating costs"} tone="muted" href={sources.expenses} delta={isCurrent ? null : d(accrual.operatingCents, previousInBooks?.pl.operatingCents)} upIsGood={false} history={hist((r) => r.pl.operatingCents)} />
         <Stat size="sm" value={formatCents(accrual.netProfitCents)} label={accrual.netProfitCents < 0 ? "Net loss" : "Net profit"} sub={isCurrent ? "so far" : "before tax"} tone={tone(accrual.netProfitCents)} delta={isCurrent ? null : d(accrual.netProfitCents, previousInBooks?.pl.netProfitCents)} history={hist((r) => r.pl.netProfitCents)} />
         <Stat size="sm" value={formatCents(cash.cashChangeCents ?? cash.netProfitCents)} label="Cash change" sub={onBank ? "the bank, to the cent" : "from the feeds; no statement yet"} tone={onBank ? "muted" : "warn"} href={`/money/bank-review?month=${lastMonth}`} />
-        <Stat size="sm" value={scripts.scripts.toLocaleString()} label="Scripts" sub={scripts.perDay !== null ? `${scripts.perDay} a day` : "none in the period"} tone="muted" href={sources.scripts} />
+        <Stat size="sm" value={scripts.scripts.toLocaleString()} label="Scripts filled" sub={scripts.perDay !== null ? `${scripts.perDay} a day` : "none in the period"} tone="muted" href={sources.scripts} />
       </div>
 
       {/* The account: both bases, and one sentence on the gap. The parts of the gap are a press away. */}
@@ -340,6 +367,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                 </li>
               ))}
             </ul>
+            <p className="mt-1.5 text-ink-3">A plus is where accrual is ahead of cash; a minus is where cash is ahead of accrual.</p>
           </div>
           {balances.accrual.ok && balances.cash.ok ? (
             <p className="mt-2 text-ink-3">Every total above is the sum of its own lines and every subtotal follows from the one before it, on both bases.</p>
@@ -359,7 +387,9 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           )}
           {accrual.stockMovementCents !== null && accrual.stockMovementCents !== 0 && (
             <p className="mt-1 text-ink-3">
-              {formatCents(Math.abs(accrual.stockMovementCents))} {accrual.stockMovementCents > 0 ? "went onto the shelf" : "came off the shelf"} in the period: bought against dispensed. Not profit.
+              {accrual.stockMovementCents > 0
+                ? `The invoices on file come to ${formatCents(accrual.stockMovementCents)} more than was dispensed, so the shelf grew by that much — unless an invoice is on file twice. Not profit.`
+                : `${formatCents(-accrual.stockMovementCents)} more was dispensed than the invoices on file come to. That is the shelf running down only if every invoice for the period is on file; one not yet entered looks exactly the same. Not profit either way.`}
             </p>
           )}
           {onBank && onBank.unconfirmedReceipts.length > 0 && (
@@ -558,7 +588,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             </thead>
             <tbody>
               <tr>
-                <td>Scripts</td>
+                <td>Scripts filled</td>
                 {recent.map((r) => (
                   <td key={r.month} className="num">
                     {r.pl.revenue.length ? r.scripts.toLocaleString() : "—"}
@@ -585,7 +615,15 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                 <td>State</td>
                 {recent.map((r) => (
                   <td key={r.month} className="num text-ink-3">
-                    {!r.pl.revenue.length ? "before the books" : r.month === today.slice(0, 7) ? "in progress" : r.pl.usable ? "complete" : `${r.pl.missing.length} to come`}
+                    {!r.pl.revenue.length
+                      ? "before the books"
+                      : r.month === today.slice(0, 7)
+                        ? "in progress"
+                        : closedAtByMonth.has(r.month)
+                          ? `closed${closedAtByMonth.get(r.month) ? ` ${fmt(closedAtByMonth.get(r.month)!.slice(0, 10))}` : ""}`
+                          : r.pl.usable
+                            ? "nothing missing"
+                            : `${r.pl.missing.length} to come`}
                   </td>
                 ))}
               </tr>
@@ -605,6 +643,15 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                   {m.findings > 0 ? <span className="badge badge-warn ml-2">{m.findings} to look at</span> : m.ties > 0 ? <span className="badge badge-ok ml-2">ties</span> : <span className="badge badge-muted ml-2">nothing to check yet</span>}
                 </div>
                 <p className="row-why">{m.checks.map((c) => c.what).join(" · ")}</p>
+                {m.findingList.length > 0 && (
+                  <ul className="mt-1 space-y-1 text-xs text-ink-2">
+                    {m.findingList.map((c) => (
+                      <li key={c.what}>
+                        <b>{c.what}.</b> {c.says}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </li>
           ))}
@@ -666,7 +713,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
                   {completeness.takenFromPioneer.payerGone > 0 && (
                     <>
                       {" "}
-                      {completeness.takenFromPioneer.payerGone} paid row{completeness.takenFromPioneer.payerGone === 1 ? "" : "s"}, {formatCents(completeness.takenFromPioneer.payerGoneCents)}, {completeness.takenFromPioneer.payerGone === 1 ? "has" : "have"} a payer PioneerRx no longer lists: left alone until read.
+                      {completeness.takenFromPioneer.payerGone} paid row{completeness.takenFromPioneer.payerGone === 1 ? "" : "s"}, {formatCents(completeness.takenFromPioneer.payerGoneCents)}, {completeness.takenFromPioneer.payerGone === 1 ? "sits" : "sit"} under a payer PioneerRx no longer lists on that fill, and PioneerRx holds no reversal for {completeness.takenFromPioneer.payerGone === 1 ? "it" : "them"}; {completeness.takenFromPioneer.payerGone === 1 ? "it stays" : "they stay"} counted as paid.
                     </>
                   )}
                 </p>
@@ -713,20 +760,21 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
             <div className="min-w-0">
               <div className="row-title">
                 Where each figure comes from
-                {feedsOff.length > 0 ? <span className="badge badge-warn ml-2">{feedsOff.length} reach neither account</span> : <span className="badge badge-ok ml-2">every feed lands</span>}
+                {feedsOffUnexplained.length > 0 ? <span className="badge badge-warn ml-2">{feedsOffUnexplained.length} reach neither account</span> : <span className="badge badge-ok ml-2">every feed accounted for</span>}
               </div>
               <p className="row-why">
                 {feeds.length} feeds carry money.{" "}
-                {feedsOff.length > 0 ? `${feedsOff.map((f) => f.name).join(", ")} ${feedsOff.length === 1 ? "reaches" : "reach"} neither account.` : "Every one lands on an account."}
-                {feedsGap.length > 0 ? ` ${feedsGap.length} land${feedsGap.length === 1 ? "s" : ""} with a gap noted.` : ""}
+                {feedsOff.length > 0
+                  ? `${feeds.length - feedsOff.length} land on an account; ${feedsOff.map((f) => f.name.toLowerCase()).join(" and ")} ${feedsOff.length === 1 ? "is" : "are"} kept off both${feedsOffUnexplained.length > 0 ? ", and nothing says why" : " on purpose, and each says why"}.`
+                  : "Every one lands on an account."}
               </p>
               <details className="mt-1 text-xs text-ink-2">
                 <summary className="cursor-pointer text-ink-3">each feed, and where it lands</summary>
                 <ul className="mt-1 space-y-1">
                   {feeds.map((f) => (
                     <li key={f.name}>
-                      <Link href={f.href} className="text-accent underline">{f.name}</Link> — {f.carries}, {f.reaches === "none" ? "on no account" : f.reaches === "both" ? "both bases" : f.reaches}. {f.how}
-                      {f.gap && <span className="text-warn"> {f.gap}</span>}
+                      <Link href={f.href} className="text-accent underline">{f.name}</Link> ({f.reaches === "none" ? "on neither account" : f.reaches === "both" ? "both bases" : f.reaches}) — {f.carries} {f.how}
+                      {f.gap && <span className={f.reaches === "none" && !f.deliberate ? "text-warn" : "text-ink-3"}> {f.gap}</span>}
                     </li>
                   ))}
                 </ul>

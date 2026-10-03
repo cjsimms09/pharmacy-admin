@@ -94,10 +94,10 @@ export function reconcileCogs(s: CogsSources): { checks: Check[]; impliedCogsCen
       stockMovementCents === null
         ? "One of the two is not held for this month, so nothing can be said."
         : stockMovementCents > TOLERANCE_CENTS
-          ? `${money(stockMovementCents)} more was bought than dispensed, so the shelf grew by that much. Not an error — it is cash converted into stock, and it belongs on the balance sheet rather than in the profit.`
+          ? `The invoices on file come to ${money(stockMovementCents)} more than was dispensed, so the shelf grew by that much — unless an invoice is on file twice. Not an error: it is cash converted into stock, and it belongs on the balance sheet rather than in the profit.`
           : stockMovementCents < -TOLERANCE_CENTS
-            ? `${money(stockMovementCents)} more was dispensed than bought, so the month ran the shelf down by that much and turned stock back into cash.`
-            : "The month bought almost exactly what it dispensed.",
+            ? `${money(stockMovementCents)} more was dispensed than the invoices on file come to, so the month ran the shelf down by that much and turned stock back into cash — unless invoices for the month are still to be entered, which looks exactly the same here.`
+            : "The invoices on file come to almost exactly what was dispensed.",
   });
 
   /*
@@ -160,7 +160,7 @@ export function reconcileRevenue(s: RevenueSources): Check[] {
           : Math.abs(rxGap) <= TOLERANCE_CENTS
             ? "What was adjudicated and what was rung up agree."
             : rxGap > 0
-              ? `The claims are ${money(rxGap)} ahead of the till. Something was billed and not sold — a fill still on the will-call shelf, or a claim that should have been reversed.`
+              ? `The dispensing record is ${money(rxGap)} ahead of the till for the fills collected this month. They are two reports of the same sales and should agree; the cause is not yet known.`
               : `The till is ${money(rxGap)} ahead of the claims. Something was sold that this site has no claim for — a missing day of the transaction report, most likely.`,
     },
     {

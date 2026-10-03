@@ -185,12 +185,14 @@ export default async function MonthlyPLPage({
       {pl.stockMovementCents !== null && pl.stockMovementCents !== 0 && (
         <Notice kind="ok">
           <b>
-            {formatCents(Math.abs(pl.stockMovementCents))} {pl.stockMovementCents > 0 ? "went onto the shelf" : "came off the shelf"} this
-            month.
+            {pl.stockMovementCents > 0
+              ? `The invoices on file come to ${formatCents(pl.stockMovementCents)} more than was dispensed.`
+              : `${formatCents(Math.abs(pl.stockMovementCents))} more was dispensed than the invoices on file come to.`}
           </b>{" "}
-          The wholesalers billed that much {pl.stockMovementCents > 0 ? "more" : "less"} than the cost of what was
-          actually dispensed. It is not profit and is not in the figures above — it is where the cash went, which is a
-          different question and the one a good month with an empty bank account is asking.
+          {pl.stockMovementCents > 0
+            ? "The shelf grew by that much — unless an invoice is on file twice."
+            : "That is the shelf running down only if every invoice for the month is on file; one not yet entered looks exactly the same."}{" "}
+          Not profit either way, and not in the figures above.
         </Notice>
       )}
 

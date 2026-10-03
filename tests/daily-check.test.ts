@@ -201,10 +201,21 @@ describe("money earned and money arriving", () => {
     );
     assert.equal(c.ok, false);
     assert.equal(c.kind, "money");
-    assert.match(c.observed, /9 remittances paid and not banked/);
+    assert.match(c.observed, /9 remittances advised as paid and not banked/);
     assert.match(c.observed, /\$99,238\.84/);
-    assert.match(c.difference!, /cash account does not know/);
+    assert.match(c.difference!, /nothing the site holds says it was deposited/, "says what is known, not that the money arrived");
+    assert.match(c.difference!, /or the payer has advised it and not yet paid it/, "names the cause that is not the site's gap");
     assert.match(c.difference!, /Payments export/, "names the file that fixes it");
+  });
+
+  test("one remittance is said as one, with no 'between them'", () => {
+    const c = check(
+      { remittancesNotBanked: 1, remittancesNotBankedCents: 200_800 },
+      "Money the payer says it has sent has reached the cash account",
+    );
+    assert.equal(c.ok, false);
+    assert.match(c.observed, /^1 remittance advised as paid and not banked, \$2,008\.00/);
+    assert.doesNotMatch(c.observed, /between them/);
   });
 
   test("an empty register with remittances posted is a failure, not a clean bill", () => {

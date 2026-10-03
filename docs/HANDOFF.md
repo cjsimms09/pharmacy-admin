@@ -8,6 +8,20 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, evening deploy: every sentence on the three pages read as him, and the ones that said more than the figure
+  beside them were fixed.** On /money (September): a closed month's banner said "not complete… the bottom line reads high"
+  with notes only; the bridge called +$65,474.29 "goods dispensed and not yet paid for" (it means the wholesalers were paid
+  more than was dispensed; labels now follow the sign, with a test); the State row said "complete" under a banner that
+  said otherwise; two feeds were said to reach neither account; the Checks card said "N to look at" and named none; the
+  stock-movement sentences read a shelf run-down off the invoices on file alone (an invoice not yet entered looks the
+  same; said so now, here and on the monthly page). On the dashboard, the check line ran two sentences together and said
+  money "has reached the bank" when nothing on file says so (now "Should be: … Found: …", and the check says what is
+  known). One the printouts could not show: the month checklist had an adjustment-report row he has said he will not
+  send; every month's close would have waited on it and "still to upload" would have fired on the 5th — removed, with a
+  test. **Open, and his:** are all of September's McKesson invoices on file ($452,470.74 captured against $637,509.54
+  paid in the month; the rebate estimate and "Bought against dispensed" both lean on the capture); the $14,646.88 the
+  record is above the till; the September 835 re-pull (his login); the OTC profit reader waits for its first sample.
+
 - **2 October, 17:20: the September 835s were here and their fees were lost.** 51 files read on 11 and 18 September through
   the folder reader, deleted after reading; provider-level segments stored only from 1 October. The reader now keeps
   every 835 as a document (category "remittance") before reading. September's 835s need the ProviderPay pull again
@@ -20,7 +34,8 @@ file is how they talk.
   The month now says it in a sentence and the Checks card says it (profit-and-loss.ts, books-check.ts); the reconciliation
   is day by day against sales_by_payment and is the first job tomorrow. Payer fees: the reconciliation service's
   adjustment report is read (adjustment-report.ts) and filed for September ($363.40); the mailbox files one on arrival
-  (he says he will not email it; harmless) and the month checklist expects it; the real source is the 835s in ProviderPay,
+  (he says he will not email it; harmless), and the month checklist does not ask for it (the row was removed that evening:
+  a file he will not send would have held every close); the real source is the 835s in ProviderPay,
   which need his login — the monthly pull. The "OTC profit" report he will email monthly is recognised by name and
   filed; build its reader on the first sample. Deploy at 19:07 by the session timer.
 

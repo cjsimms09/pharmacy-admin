@@ -415,14 +415,14 @@ export function runDailyCheck(f: Facts): Check[] {
           : `${f.remittancePaymentsPosted} payments came from a remittance and the register holds none of them, so nothing can be compared`
         : f.remittancesNotBanked === 0
           ? `all ${f.remittanceRegisterOwed} remittances with a payment number have their cash${unmatched(f)}${horizon(f)}`
-          : `${f.remittancesNotBanked} remittance${f.remittancesNotBanked === 1 ? "" : "s"} paid and not banked, ${money(f.remittancesNotBankedCents)} between them${horizon(f)}`,
+          : `${f.remittancesNotBanked} remittance${f.remittancesNotBanked === 1 ? "" : "s"} advised as paid and not banked, ${money(f.remittancesNotBankedCents)}${f.remittancesNotBanked === 1 ? "" : " between them"}${horizon(f)}`,
     ok: f.remittancesNotBanked === 0 && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
     difference:
       f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0
         ? "The register is empty while payments posted from remittances are on the books, so this check is measuring nothing. Re-read the Remit Summary export to fill it; until then neither this check nor the cash side can be trusted."
         : f.remittancesNotBanked === 0
           ? null
-          : `${money(f.remittancesNotBankedCents)} has reached the bank and the cash account does not know. Cash profit, and every figure drawn from it, is that much worse than the pharmacy's. The payer payment report for those dates has not been read — it is the Payments export on the ProviderPay portal, and reading it banks them under the payment numbers they already carry.`,
+          : `${money(f.remittancesNotBankedCents)} is advised as paid and nothing the site holds says it was deposited. Two causes look the same here: the deposit is on the bank statement or in the payer payment report and has not been tied to its payment number yet — the Payments export on the ProviderPay portal, read, ties it under the number it already carries — or the payer has advised it and not yet paid it. A deposit of that amount on the bank statement, on or after the advice date, settles which.`,
     kind: "money",
   });
 
