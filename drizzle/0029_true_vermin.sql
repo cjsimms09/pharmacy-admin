@@ -1,0 +1,1 @@
+ALTER TABLE `training_assignments` ADD `material_document_id` text;

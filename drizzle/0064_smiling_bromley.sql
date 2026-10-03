@@ -1,0 +1,1 @@
+ALTER TABLE `claims` ADD `on_account` integer DEFAULT false NOT NULL;

@@ -1,0 +1,15 @@
+-- Which source produced a proposal.
+--
+-- A proposal already carried the sentence it was read from. It did not carry which source produced
+-- that sentence or how good the source is, so a Part D plan named "Bc/bs Kansas Pdp" in PioneerRx's
+-- own plan file and a Part D read out of four letters of a PCN were stored identically and shown
+-- identically. Telling a fact from a guess is the entire job of this table, and the register's own
+-- proposals had quietly stopped doing it.
+--
+-- Values: payer_sheet | pioneer_plan_file | pioneer_pharmacy | pcn | bin_listing | payer_name.
+-- See EvidenceSource in src/lib/plan-evidence.ts, which is where they are decided.
+--
+-- The confidence column that belongs beside this one is 0101, not here, because this migration had
+-- already run by the time it was wanted and drizzle records an applied migration by its timestamp:
+-- a slot that has ever run is spent whatever the file afterwards says.
+alter table plan_groups add column proposed_source text;

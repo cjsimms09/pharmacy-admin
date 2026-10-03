@@ -1,0 +1,969 @@
+import { familyTabs } from "@/lib/families";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
+import { db, schema } from "@/db";
+import { requireUser, requireManager } from "@/lib/auth";
+import { audit } from "@/lib/audit";
+import { TRAINING_CADENCE, addMonths, trainingApplies, nextTrainingDue } from "@/lib/due";
+import { TRAINING_LABEL, TRAINING_SHORT, PERSON_ROLE_LABEL } from "@/lib/labels";
+import { type TrainingType } from "@/db/schema";
+import { todayIso, fmt, daysUntil } from "@/lib/dates";
+import { storeFile } from "@/lib/files";
+import { newId } from "@/lib/crypto";
+import { PageHeader, Notice, Empty, Card, Figure } from "@/components/ui";
+import {
+  assignTraining,
+  sendOutstanding,
+  openAssignments,
+  recordGroupTraining,
+  linkFor,
+  linkForItem,
+  parseMaterials,
+} from "@/lib/training-assignments";
+import { REPLY_PHRASE, awaitingQuestionsAndAnswers, attestQuestionsAndAnswers } from "@/lib/training-replies";
+import { courseFor, COURSES } from "@/lib/courses";
+import { canSend, sendTestEmail } from "@/lib/send-mail";
+import { mailHealth, linkHealth } from "@/lib/mail-health";
+import { PickControls, PickGroup } from "@/components/pick-controls";
+import { onSiteToday } from "@/lib/roster";
+import { getSettings } from "@/lib/settings";
+
+export const metadata = { title: "Training" };
+export const dynamic = "force-dynamic";
+
+/**
+ * One screen for the whole of training.
+ *
+ * The previous version was a register — it told you the state of the world and left you to go
+ * somewhere else to change it. That is the pattern that makes a compliance system take ten
+ * clicks and three guesses to do one thing. Here the grid that shows who owes what is the same
+ * grid you tick to send it, the outstanding list carries the buttons that chase or close it, and
+ * the certificates are on the same page as the completions they belong to.
+ */
+
+const REQUIRED = Object.keys(TRAINING_CADENCE) as TrainingType[];
+
+export default async function TrainingPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
+  const user = await requireUser();
+  const { ok, error } = await searchParams;
+  const [assignments, mailReady, people, trainings, settings, mail, qaQueue] = await Promise.all([
+    openAssignments(),
+    canSend(),
+    onSiteToday(),
+    db.query.trainings.findMany({ orderBy: (t, { desc }) => [desc(t.completedOn)] }),
+    getSettings(),
+    mailHealth(),
+    awaitingQuestionsAndAnswers(),
+  ]);
+  // Policy documents the pharmacy holds, so the acknowledgement can carry the actual manual
+  // rather than a link somebody has to be on the network to open.
+  const policies = await db.query.documents.findMany({
+    where: eq(schema.documents.category, "policy"),
+    orderBy: (d, { desc }) => [desc(d.uploadedAt)],
+  });
+  // The reply route only works if something is actually reading the mailbox. Sending the
+  // instruction while nothing collects the answer is worse than not offering it: staff do as
+  // they are asked, hear nothing back, and the record never appears.
+  const sweeping = settings.mail_enabled === "yes" && Boolean(settings.mail_user && settings.mail_password_enc);
+  const outstanding = assignments.filter((a) => !a.completedAt);
+  // Resolved up front: linkFor reads a setting, and awaiting inside the table would mean one
+  // lookup per row inside JSX, which is not allowed and would be wasteful if it were.
+  // The same link the email carries: the hosted course where no address is set, the token page otherwise.
+  const links = new Map(await Promise.all(outstanding.map(async (a) => [a.id, await linkForItem(a.type, a.token)] as const)));
+  const done = assignments.filter((a) => a.completedAt && a.trainingId);
+  const today = todayIso();
+
+  /**
+   * Where one person stands on one requirement.
+   *
+   * Four states, and the distinction that matters most is between "they owe this" and "they owe
+   * this and I have already sent it" — the whole question when looking at this grid is what is
+   * left to do, and a screen that cannot tell you what you already sent makes you send it twice.
+   */
+  const state = (personId: string, type: TrainingType) => {
+    const last = trainings.filter((x) => x.personId === personId && x.type === type)[0];
+    const open = outstanding.find((a) => a.personId === personId && a.type === type);
+    const sent = open
+      ? {
+          on: open.sentAt ? fmt(open.sentAt.slice(0, 10)) : null,
+          reminders: open.remindersSent,
+          error: open.sendError,
+          code: open.replyCode,
+        }
+      : null;
+
+    // The certificate is the evidence behind the badge, and the badge is where somebody looks.
+    const certificate = last ? `/certificates/${last.id}` : null;
+    if (!last) return { label: "never", tone: "badge-crit", due: true, sent, certificate };
+    const dueOn = nextTrainingDue(type, last);
+    /*
+     * A course completed once and never repeated. It is done, and it stays done.
+     *
+     * The date shown is the day it was completed rather than a deadline, because there is no
+     * deadline — and a green badge with no date on it invites somebody to go and check whether it
+     * is really covered.
+     */
+    if (dueOn === null) return { label: `done ${last.completedOn}`, tone: "badge-ok", due: false, sent, certificate };
+    const left = daysUntil(dueOn)!;
+    if (left < 0) return { label: `${-left}d late`, tone: "badge-crit", due: true, sent, certificate };
+    if (left <= 45) return { label: `due ${dueOn.slice(5)}`, tone: "badge-warn", due: true, sent, certificate };
+    return { label: dueOn.slice(5), tone: "badge-ok", due: false, sent, certificate };
+  };
+
+  /*
+   * Only the cells that mean something.
+   *
+   * The Kansas technician course applies to technicians; the immunization protocol review applies
+   * to immunizers. A grid that shows a cell for every person against every training implies a gap
+   * where none exists, and a red square nobody can ever clear is how a compliance screen stops
+   * being believed.
+   */
+  const cells = people.flatMap((p) =>
+    REQUIRED.filter((t) => trainingApplies(t, p)).map((t) => ({ p, t, st: state(p.id, t) })),
+  );
+  const owed = cells.filter((c) => c.st.due).length;
+  const awaiting = cells.filter((c) => c.st.sent).length;
+  const toSend = cells.filter((c) => c.st.due && !c.st.sent).length;
+  const noEmail = people.filter((p) => !p.email).length;
+
+  // ── actions ─────────────────────────────────────────────────────
+  async function send(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const picks = fd.getAll("pick").map(String).filter(Boolean);
+    if (picks.length === 0) {
+      redirect("/compliance/training?error=" + encodeURIComponent("Nothing was ticked."));
+    }
+    const dueOn = String(fd.get("dueOn") ?? "") || undefined;
+    const byType = new Map<TrainingType, string[]>();
+    for (const p of picks) {
+      const [personId, type] = p.split("|");
+      if (!personId || !type) continue;
+      byType.set(type as TrainingType, [...(byType.get(type as TrainingType) ?? []), personId]);
+    }
+    try {
+      let assigned = 0;
+      const problems: string[] = [];
+      // Create every assignment first, then send once per person. Otherwise somebody with three
+      // trainings gets three emails, and three emails is how all three get ignored.
+      for (const [type, ids] of byType) {
+          const r = await assignTraining(
+          ids,
+          type,
+          {
+            dueOn,
+            email: false,
+            // Only meaningful for the manual acknowledgement, and harmless elsewhere.
+            materialDocumentId: type === "policy_manual_acknowledgement" ? String(fd.get("policyDocId") ?? "") || null : null,
+          },
+          u,
+        );
+        assigned += r.assigned;
+        problems.push(...r.problems);
+      }
+      const everyone = [...new Set(picks.map((p) => p.split("|")[0]))];
+      const sent = await sendOutstanding(everyone);
+      problems.push(...sent.problems);
+      await audit({ action: "training.assign", userId: u.id, userName: u.name, details: `${picks.length} picks` });
+      revalidatePath("/compliance/training");
+      revalidatePath("/compliance");
+      revalidatePath("/");
+      const bits = [
+        `${assigned} assigned. ${sent.emailed} ${sent.emailed === 1 ? "person" : "people"} emailed — one email each, covering everything they owe.`,
+      ];
+      if (problems.length) bits.push(problems.join(" "));
+      redirect("/compliance/training?ok=" + encodeURIComponent(bits.join(" ")));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/compliance/training?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not send that."));
+    }
+  }
+
+  /**
+   * The trainer's half of an email-attested training.
+   *
+   * Several people at once, because that is how it happens: the pharmacist-in-charge goes through
+   * it on a quiet afternoon with whoever is in. Recording it person by person on separate screens
+   * would guarantee it is recorded for the first person and nobody else.
+   */
+  async function attestQa(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const picks = fd.getAll("qa").map(String).filter(Boolean);
+    try {
+      const r = await attestQuestionsAndAnswers(
+        picks,
+        {
+          on: String(fd.get("qaOn") ?? ""),
+          note: String(fd.get("qaNote") ?? ""),
+          typedName: String(fd.get("qaName") ?? ""),
+          intent: fd.get("qaIntent") === "yes",
+        },
+        u,
+      );
+      await audit({ action: "training.qa_attested", userId: u.id, userName: u.name, details: r.names.join(", ") });
+      revalidatePath("/compliance/training");
+      revalidatePath("/compliance/training/records");
+      revalidatePath("/");
+      redirect(
+        "/compliance/training?ok=" +
+          encodeURIComponent(
+            r.completed === 0
+              ? "Nothing changed — those were already recorded."
+              : `Recorded for ${r.names.join(", ")}. ${r.completed === 1 ? "Their certificate is" : "Their certificates are"} ready.`,
+          ),
+      );
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/compliance/training?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+    }
+  }
+
+  async function chase(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const personId = String(fd.get("personId") ?? "");
+    const r = await sendOutstanding(personId ? [personId] : undefined);
+    await audit({ action: "training.resend", userId: u.id, userName: u.name, details: personId || "everyone" });
+    revalidatePath("/compliance/training");
+    const msg = r.emailed > 0 ? `Sent again to ${r.emailed} ${r.emailed === 1 ? "person" : "people"}.` : "Nothing to send.";
+    redirect(`/compliance/training?${r.problems.length ? "error" : "ok"}=` + encodeURIComponent([msg, ...r.problems].join(" ")));
+  }
+
+  async function attestGroup(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const type = String(fd.get("type") ?? "") as TrainingType;
+    const ids = fd.getAll("personIds").map(String).filter(Boolean);
+    const completedOn = String(fd.get("completedOn") ?? "") || todayIso();
+    /*
+     * The paper, where there is paper.
+     *
+     * One sheet covers the session, and each person gets their own copy of it against their own
+     * record — a training file is read one person at a time, and a record pointing at a document
+     * filed under somebody else is not that person's evidence.
+     */
+    const sheet = fd.get("file");
+    const documents: Record<string, string> = {};
+    if (sheet instanceof File && sheet.size > 0) {
+      for (const person of ids) {
+        const stored = await storeFile(sheet, { allowReportTypes: true });
+        const documentId = newId();
+        await db.insert(schema.documents).values({
+          id: documentId,
+          category: "training_record",
+          title: `${TRAINING_LABEL[type]} — ${completedOn}`,
+          fileName: sheet.name,
+          mimeType: stored.mimeType,
+          sizeBytes: stored.sizeBytes,
+          sha256: stored.sha256,
+          storageKey: stored.storageKey,
+          personId: person,
+          effectiveOn: completedOn,
+          uploadedBy: u.id,
+        });
+        documents[person] = documentId;
+      }
+    }
+    try {
+      const r = await recordGroupTraining(ids, type, u, { how: String(fd.get("how") ?? ""), completedOn, documents });
+      await audit({ action: "training.attest", userId: u.id, userName: u.name, details: `${type} for ${r.recorded}` });
+      revalidatePath("/compliance/training");
+      revalidatePath("/compliance");
+      revalidatePath("/");
+      redirect("/compliance/training?ok=" + encodeURIComponent(`Recorded for ${r.names.join(", ")}.`));
+    } catch (e) {
+      if (e && typeof e === "object" && "digest" in e) throw e;
+      redirect("/compliance/training?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not record that."));
+    }
+  }
+
+  async function record(fd: FormData) {
+    "use server";
+    const u = await requireManager();
+    const type = String(fd.get("type") ?? "") as TrainingType;
+    const completedOn = String(fd.get("completedOn") ?? "") || todayIso();
+    const provider = String(fd.get("provider") ?? "").trim() || null;
+    if (!type) redirect("/compliance/training?error=" + encodeURIComponent("Pick which training it was."));
+    /*
+     * One document, everybody it covers.
+     *
+     * The owner: "need way to upload tech training document for techs who already completed". This
+     * took one person at a time, which for three technicians and seven required courses is
+     * twenty-one uploads of paperwork he already holds — and the control was folded shut behind
+     * the words "They did an outside course", which is not what somebody with a completed course
+     * in their hand goes looking for.
+     *
+     * Each person still gets their own document row and their own training record: a training file
+     * is read one person at a time by whoever is auditing it, and a record that points at somebody
+     * else's certificate is not that person's evidence.
+     */
+    const personIds = fd.getAll("personId").map(String).filter(Boolean);
+    if (personIds.length === 0) {
+      redirect("/compliance/training?error=" + encodeURIComponent("Nobody was ticked, so nothing was filed."));
+    }
+    const file = fd.get("file");
+    const hasFile = file instanceof File && file.size > 0;
+    const months = TRAINING_CADENCE[type]?.months;
+
+    for (const person of personIds) {
+      let documentId: string | null = null;
+      if (hasFile) {
+        const stored = await storeFile(file, { allowReportTypes: true });
+        documentId = newId();
+        await db.insert(schema.documents).values({
+          id: documentId,
+          category: "training_record",
+          title: `${TRAINING_LABEL[type]} — ${completedOn}`,
+          fileName: file.name,
+          mimeType: stored.mimeType,
+          sizeBytes: stored.sizeBytes,
+          sha256: stored.sha256,
+          storageKey: stored.storageKey,
+          personId: person,
+          effectiveOn: completedOn,
+          uploadedBy: u.id,
+        });
+      }
+      await db.insert(schema.trainings).values({
+        id: newId(),
+        personId: person,
+        type,
+        completedOn,
+        cycleYear: Number(completedOn.slice(0, 4)),
+        expiresOn: months ? addMonths(completedOn, months) : null,
+        provider,
+        documentId,
+        createdBy: u.name,
+      });
+    }
+    await audit({
+      action: "training.record",
+      userId: u.id,
+      userName: u.name,
+      details: `${type} on ${completedOn} for ${personIds.length} ${personIds.length === 1 ? "person" : "people"}${hasFile ? " with a document" : ", no document"}`,
+    });
+    revalidatePath("/compliance/training");
+    revalidatePath("/compliance");
+    revalidatePath("/");
+    redirect(
+      "/compliance/training?ok=" +
+        encodeURIComponent(
+          `Filed for ${personIds.length} ${personIds.length === 1 ? "person" : "people"}${hasFile ? "" : " — no document was attached, so the record says so"}.`,
+        ),
+    );
+  }
+
+  /**
+   * Proves sending works, from the screen that depends on it.
+   *
+   * It already existed under Settings → Email, which is exactly where somebody who has just
+   * pressed Send and is wondering whether anything happened will not go. The question "did that
+   * actually leave the building" belongs next to the button that was supposed to send it.
+   *
+   * Addressed to the pharmacy's own sending account: it is the one address certain to exist, it
+   * is a mailbox the PIC already reads, and a message that leaves and comes straight back proves
+   * both halves at once.
+   */
+  async function testSend() {
+    "use server";
+    const u = await requireManager();
+    const r = await sendTestEmail("");
+    await audit({ action: "mail.test", userId: u.id, userName: u.name, details: r.ok ? `via ${r.via}` : r.error });
+    revalidatePath("/compliance/training");
+    revalidatePath("/");
+    redirect(
+      `/compliance/training?${r.ok ? "ok" : "error"}=` +
+        encodeURIComponent(
+          r.ok
+            ? `Test message sent via ${r.via}, to the pharmacy's own address. If it arrives, training emails will too — if it does not, the problem is at the receiving end rather than here.`
+            : `The test could not be sent. ${r.error}`,
+        ),
+    );
+  }
+
+  if (people.length === 0) {
+    return (
+      <>
+        <PageHeader tabs={familyTabs("training", "/compliance/training")} title="Training" />
+        <Empty>No active staff. <Link href="/staff/new" className="underline">Add someone first.</Link></Empty>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        tabs={familyTabs("training", "/compliance/training")}
+        title="Training"
+        subtitle={
+          owed === 0
+            ? "Everyone is current on everything."
+            : `${owed} training${owed === 1 ? "" : "s"} due or overdue across ${people.length} ${people.length === 1 ? "person" : "people"}.`
+        }
+        actions={
+          <>
+            <Link href="/compliance/training/records" className="btn">Print the training file</Link>
+            <Link href="/compliance/training/handout" className="btn">Hand it over on paper</Link>
+            {outstanding.length > 0 && (
+              <form action={chase}>
+                <button className="btn">Chase all {outstanding.length} outstanding</button>
+              </form>
+            )}
+          </>
+        }
+      />
+
+      {ok && <Notice kind="ok">{ok}</Notice>}
+      {error && <Notice kind="crit">{error}</Notice>}
+      {mail.state !== "ok" && (
+        <Notice kind={mail.state === "unproven" ? "warn" : "crit"}>
+          <b>{mail.summary}</b>{" "}
+          {mail.failed.length > 0 && <>The last error was: <i>{mail.failed[0].error}</i>{" "}</>}
+          {!mail.configured ? (
+            <>
+              <Link href="/settings/email" className="underline">Set it up</Link> — until then the only route is
+              recording training you delivered yourself.
+            </>
+          ) : (
+            <>
+              <Link href="/settings/email" className="underline">Check the settings</Link>, or prove it from here with
+              the button below. A Gmail address needs an app password rather than the account password, which is the
+              usual reason a correct-looking setup sends nothing.
+            </>
+          )}
+        </Notice>
+      )}
+
+      {(() => {
+        /*
+         * Why it went to junk, and why the link did not work: one cause, two symptoms.
+         */
+        const lh = linkHealth(settings.public_base_url, {
+          hosted: parseMaterials(settings.training_materials ?? ""),
+          written: Object.keys(COURSES),
+        });
+        if (!lh.privateOnly && !lh.spamShaped) {
+          return lh.hostedAt ? (
+            <Notice kind="ok">
+              The training email links each written course to its page on <code>{lh.hostedAt}</code>, which opens
+              anywhere; the reply code in the email is the attestation. No address is set for this site, and none is
+              needed for that.
+            </Notice>
+          ) : null;
+        }
+        return (
+          <Notice kind="crit">
+            <b>The links in the training email are the reason it lands in junk, and the reason nobody can open it.</b>{" "}
+            {lh.base ? <>The address staff are sent is <code>{lh.base}</code>. </> : null}
+            <ul className="ml-5 mt-1 list-disc">
+              {lh.reasons.map((r) => <li key={r}>{r}</li>)}
+            </ul>
+            <p className="mt-1">
+              Until that address is a real name over https, the course PDF attached to the email is the training and
+              the reply code is how it is attested — both work with no link at all. See{" "}
+              <Link href="/settings/network" className="underline">Settings → Network</Link>.
+            </p>
+          </Notice>
+        );
+      })()}
+
+      {(() => {
+        /*
+         * The address that is also the mailbox this site reads.
+         *
+         * Emailing training to the same account the site sends from is the one case where
+         * everything reports success and nothing ever looks like it arrived: the message is
+         * threaded into the sender's own conversation by Gmail and Outlook, and it lands back in
+         * the swept mailbox rather than anywhere new. Worth naming, because it is invisible
+         * otherwise and it is usually the pharmacist-in-charge's own address.
+         */
+        const self = (settings.mail_user ?? "").trim().toLowerCase();
+        const clash = self ? people.filter((p) => (p.email ?? "").trim().toLowerCase() === self) : [];
+        if (clash.length === 0) return null;
+        return (
+          <Notice kind="warn">
+            <b>
+              {clash.map((p) => `${p.firstName} ${p.lastName}`).join(", ")} {clash.length === 1 ? "uses" : "use"} the
+              same address the site sends from ({self}).
+            </b>{" "}
+            Mail to yourself from yourself is the one case where everything reports success and nothing looks like it
+            arrived — Gmail and Outlook thread it into your own Sent conversation instead of showing it as new. Check
+            Sent rather than the inbox, or give that person a different address, before concluding the email failed.
+          </Notice>
+        );
+      })()}
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {mail.configured && (
+          <form action={testSend}>
+            <button className="btn btn-sm">Send a test to me, so I know it works</button>
+          </form>
+        )}
+        <Link href="/compliance/training/handout" className="btn btn-sm">
+          Hand it over on paper instead
+        </Link>
+        <span className="text-xs text-ink-3">
+          Email is the convenient route, not the only one — the link and the code work however the person gets them,
+          and the certificate is produced the same way.
+        </span>
+      </div>
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Figure value={toSend} label="Still to send" sub={toSend === 0 ? "Nothing waiting to go out" : "Ticked below and ready"} tone={toSend === 0 ? "ok" : "crit"} />
+        <Figure value={awaiting} label="Sent, not back" sub={awaiting === 0 ? "Nobody owes you a reply" : "Chased weekly on their own"} tone={awaiting === 0 ? "ok" : "warn"} />
+        <Figure value={done.length} label="Completed" sub="Each has a certificate" tone="ok" />
+        <Figure
+          value={noEmail}
+          label="Missing an email"
+          sub={noEmail === 0 ? "Everyone can be reached" : "They cannot be sent anything"}
+          tone={noEmail === 0 ? "ok" : "crit"}
+        />
+      </div>
+
+      {/* ── Tick and send. The grid that shows the gap is the grid that closes it. ── */}
+      <form action={send}>
+        <Card
+          title="Who needs what"
+          count={`${toSend} to send`}
+          subtitle="Nothing is ticked to start with — unticking twenty-eight boxes to send two is worse than ticking two. Use the buttons, or the “all” link on any row or column. Click a column heading to read the course itself and see exactly what gets attached to their email."
+          actions={<PickControls dueCount={toSend} />}
+          className="mb-6"
+        >
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Person</th>
+                  {REQUIRED.map((t) => (
+                    <th key={t} className="whitespace-nowrap" title={TRAINING_LABEL[t]}>
+                      <div>
+                        {courseFor(t) ? (
+                          <Link href={`/compliance/training/course/${t}`} className="text-accent hover:underline">
+                            {TRAINING_SHORT[t]}
+                          </Link>
+                        ) : (
+                          TRAINING_SHORT[t]
+                        )}
+                      </div>
+                      <PickGroup match={{ type: t }} label="all" />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {people.map((p) => (
+                  <tr key={p.id} className="align-top">
+                    <td className="whitespace-nowrap">
+                      <Link href={`/staff/${p.id}`} className="font-medium text-accent hover:underline">
+                        {p.firstName} {p.lastName}
+                      </Link>
+                      <div className="text-xs text-ink-3">
+                        {PERSON_ROLE_LABEL[p.role as keyof typeof PERSON_ROLE_LABEL] ?? p.role}
+                        {!p.email && <span className="text-crit"> · no email on file</span>}
+                        {" · "}
+                        <PickGroup match={{ person: p.id }} label="tick all" />
+                      </div>
+                    </td>
+                    {REQUIRED.map((t) => {
+                      // Not everybody owes every training; a cell that can never be cleared is
+                      // worse than no cell, so it renders as plainly not applicable.
+                      if (!trainingApplies(t, p)) {
+                        return (
+                          <td key={t} className="text-center text-xs text-ink-3">
+                            —
+                          </td>
+                        );
+                      }
+                      const st = state(p.id, t);
+                      // Three visually distinct states, because the only question asked of this
+                      // grid is what is left to do: current, owed and not yet sent, owed and
+                      // waiting on them.
+                      return (
+                        <td key={t}>
+                          {st.sent ? (
+                            <div>
+                              <span className="badge badge-muted">sent{st.sent.on ? ` ${st.sent.on}` : ""}</span>
+                              <div className="mt-1 text-[11px] leading-tight text-ink-3">
+                                {st.sent.error ? (
+                                  <span className="text-crit">{st.sent.error}</span>
+                                ) : (
+                                  <>
+                                    {st.sent.reminders > 0 ? `${st.sent.reminders} reminder${st.sent.reminders === 1 ? "" : "s"}` : "awaiting them"}
+                                    {st.sent.code && <span className="ml-1 font-mono">{st.sent.code}</span>}
+                                  </>
+                                )}
+                              </div>
+                              <label className="mt-1 flex items-center gap-1 text-[11px] text-ink-3">
+                                <input
+                                  type="checkbox"
+                                  name="pick"
+                                  value={`${p.id}|${t}`}
+                                  data-pick=""
+                                  data-person={p.id}
+                                  data-type={t}
+                                />{" "}
+                                resend
+                              </label>
+                            </div>
+                          ) : st.due ? (
+                            <label className="flex cursor-pointer items-center gap-1.5">
+                              <input
+                                type="checkbox"
+                                name="pick"
+                                value={`${p.id}|${t}`}
+                                data-pick=""
+                                data-person={p.id}
+                                data-type={t}
+                                data-due="1"
+                              />
+                              {st.certificate ? (
+                                <Link href={st.certificate} className={`badge ${st.tone} hover:underline`} title="Opens the certificate">{st.label}</Link>
+                              ) : (
+                                <span className={`badge ${st.tone}`}>{st.label}</span>
+                              )}
+                            </label>
+                          ) : st.certificate ? (
+                            <Link
+                              href={st.certificate}
+                              className={`badge ${st.tone} hover:underline`}
+                              title="Current — opens the certificate"
+                            >
+                              {st.label}
+                            </Link>
+                          ) : (
+                            <span className={`badge ${st.tone}`} title="Current — nothing to do">{st.label}</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-line pt-4">
+            <label className="text-sm">
+              Due by
+              <input type="date" name="dueOn" defaultValue={addMonths(today, 1)} className="field ml-2 w-auto" />
+            </label>
+            {policies.length > 0 && (
+              <label className="text-sm">
+                Manual to attach
+                <select name="policyDocId" className="field ml-2 w-auto" defaultValue={policies[0]?.id}>
+                  {policies.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+                </select>
+              </label>
+            )}
+            <button className="btn btn-primary" disabled={!mailReady}>Send what is ticked</button>
+            <p className="text-xs text-ink-3">
+              One email per person covering everything ticked for them, with the course attached — and the manual
+              itself attached where the policy acknowledgement is being sent. They complete it on their phone, or
+              reply to the email.
+            </p>
+          </div>
+        </Card>
+      </form>
+
+      {/* ── What is out and not back ── */}
+      {outstanding.length > 0 && (
+        <section className="card mb-6">
+          <h2 className="mb-3 font-semibold">Sent and waiting ({outstanding.length})</h2>
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr><th>Person</th><th>Training</th><th>Due</th><th>Sent</th><th>Reply code</th><th>Link</th></tr>
+              </thead>
+              <tbody>
+                {outstanding.map((a) => (
+                  <tr key={a.id}>
+                    <td className="whitespace-nowrap">{a.person ? `${a.person.firstName} ${a.person.lastName}` : "—"}</td>
+                    <td>{TRAINING_LABEL[a.type]}</td>
+                    <td className="whitespace-nowrap">
+                      {fmt(a.dueOn)}
+                      {a.dueOn < today && <span className="badge badge-crit ml-2">late</span>}
+                    </td>
+                    <td className="whitespace-nowrap text-xs text-ink-2">
+                      {a.sentAt ? fmt(a.sentAt.slice(0, 10)) : <span className="text-crit">not sent</span>}
+                      {a.remindersSent > 0 && ` · ${a.remindersSent} reminder${a.remindersSent === 1 ? "" : "s"}`}
+                      {a.sendError && <div className="text-crit">{a.sendError}</div>}
+                    </td>
+                    <td className="font-mono text-xs">{a.replyCode ?? "—"}</td>
+                    <td className="text-xs">
+                      <a href={links.get(a.id)} className="text-accent hover:underline" target="_blank" rel="noreferrer">open</a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-ink-3">
+            Reminders go out weekly on their own and stop after four, at which point you are emailed instead — another
+            email is not what is missing by then.
+          </p>
+        </section>
+      )}
+
+      {/* ── The two other ways it gets done ── */}
+      <section className="card mb-6">
+        <h2 className="font-semibold">If they did it another way</h2>
+        <div className="mt-3 grid gap-4 lg:grid-cols-2">
+          <details className="rounded-md border border-line bg-ground p-3">
+            <summary className="cursor-pointer text-sm font-medium">I trained them myself &mdash; on paper or in person</summary>
+            <form action={attestGroup} className="mt-3 space-y-3">
+              <label className="block text-sm">
+                Training
+                <select name="type" className="field mt-1">
+                  {REQUIRED.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
+                </select>
+              </label>
+              <fieldset className="text-sm">
+                <legend className="mb-1">Who was there</legend>
+                <div className="space-y-1">
+                  {people.map((p) => (
+                    <label key={p.id} className="flex items-center gap-2">
+                      <input type="checkbox" name="personIds" value={p.id} />
+                      {p.firstName} {p.lastName}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <input name="how" placeholder="How it was done — a staff meeting, one to one, the vendor's slides" className="field" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  Completed on
+                  <input type="date" name="completedOn" defaultValue={today} className="field mt-1" />
+                </label>
+                <label className="block text-sm">
+                  The paper, if you have it
+                  <input type="file" name="file" className="field mt-1" />
+                </label>
+              </div>
+              <p className="text-xs text-ink-3">
+                This records that you delivered it and that each of them understood it, in those words. Attach the
+                sheet they signed and the record says so and keeps a copy against each of them; leave it empty and
+                the record says plainly that they did not sign individually. An inspector can tell the two kinds
+                apart, which is what keeps both worth having &mdash; and why the stronger one should not be filed as
+                the weaker.
+              </p>
+              <button className="btn">Record it</button>
+            </form>
+          </details>
+
+          <div className="rounded-md border border-line bg-ground p-3">
+            <p className="text-sm font-medium">Already completed it? File the record here</p>
+            <p className="mt-0.5 text-xs text-ink-3">
+              For training done anywhere but this screen &mdash; an outside course, a class you ran before this
+              site existed, a certificate somebody brought in. Tick everybody the document covers and it is filed
+              against each of them.
+            </p>
+            <form action={record} className="mt-3 space-y-3">
+              <fieldset className="block text-sm">
+                <legend className="text-ink-3">Who completed it</legend>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                  {people.map((p) => (
+                    <label key={p.id} className="flex items-center gap-1.5 text-sm font-normal">
+                      <input type="checkbox" name="personId" value={p.id} />
+                      {p.firstName} {p.lastName}
+                      {p.role && <span className="text-xs text-ink-3">({p.role})</span>}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <label className="block text-sm">
+                Training
+                <select name="type" className="field mt-1">
+                  {REQUIRED.map((t) => <option key={t} value={t}>{TRAINING_LABEL[t]}</option>)}
+                </select>
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  Completed on
+                  <input type="date" name="completedOn" defaultValue={today} className="field mt-1" />
+                </label>
+                <label className="block text-sm">
+                  Provider
+                  <input name="provider" placeholder="CMS, the PSAO, a vendor" className="field mt-1" />
+                </label>
+              </div>
+              <label className="block text-sm">
+                The document
+                <input type="file" name="file" className="field mt-1" />
+                <span className="mt-0.5 block text-xs text-ink-3">
+                  A certificate, a sign-in sheet, a course completion &mdash; whatever you hold. One file, filed
+                  against each person ticked. Leave it empty to record the completion with no document; the file
+                  will say plainly that there is none.
+                </span>
+              </label>
+              <button className="btn btn-primary">File it</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      {/*
+        ── The half an email cannot carry ──
+
+        A course that requires live questions and answers is not complete when the person replies.
+        The reply proves the material reached them and that they say they read it; the standard
+        (29 CFR 1910.1030(g)(2)(vii)(N)) asks for an opportunity to ask questions of somebody who
+        knows the subject, and no email can show a conversation happened.
+
+        So the reply is kept — the request was to strengthen that route, not to remove it — and it
+        parks here until the pharmacist-in-charge records the few minutes. Nothing is asked of the
+        employee again: they were told, when they replied, that nothing else was needed from them.
+        Until this is done there is no training record and no certificate, which is the correct
+        state of affairs and is now visible instead of silent.
+      */}
+      {qaQueue.length > 0 && (
+        <Card
+          title="Waiting on a few minutes with you"
+          tone="warn"
+          className="mb-6"
+          count={qaQueue.length}
+        >
+          <p className="text-sm text-ink-2">
+            These people replied to say they read the material, and that is on file. The bloodborne pathogens
+            standard also asks for a chance to ask questions of somebody who knows the subject &mdash; go through it
+            with them, then tick them off here. The record will say both halves happened and on what dates, and their
+            certificates are produced at that point.
+          </p>
+          <form action={attestQa} className="mt-3 space-y-3">
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr><th className="w-8"></th><th>Person</th><th>Training</th><th>Replied</th></tr>
+                </thead>
+                <tbody>
+                  {qaQueue.map((q) => (
+                    <tr key={q.assignmentId}>
+                      <td>
+                        <input type="checkbox" name="qa" value={q.assignmentId} id={`qa-${q.assignmentId}`} defaultChecked />
+                      </td>
+                      <td className="whitespace-nowrap">
+                        <label htmlFor={`qa-${q.assignmentId}`}>{q.name}</label>
+                      </td>
+                      <td>{TRAINING_LABEL[q.type]}</td>
+                      <td className="whitespace-nowrap text-xs text-ink-2">{fmt(q.repliedOn)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm">
+                The day you went through it with them
+                <input type="date" name="qaOn" defaultValue={today} className="field mt-1" required />
+              </label>
+              <label className="block text-sm">
+                Anything worth noting <span className="text-ink-3">(optional)</span>
+                <input
+                  name="qaNote"
+                  placeholder="Went through sharps handling and the exposure steps at the bench."
+                  className="field mt-1"
+                />
+              </label>
+            </div>
+            {/*
+              Two deliberate acts, the same as everywhere else a record is signed here.
+
+              This is the trainer's half of a two-signature record and it is printed on the
+              certificate beside the employee's. A single button labelled "Record it" is something
+              people press meaning "next", which is exactly what the ESIGN Act's intent requirement
+              is there to exclude — so it is a box and a typed name.
+            */}
+            <div className="rounded-md border border-line bg-surface p-3">
+              <p className="text-sm italic leading-relaxed">
+                &ldquo;[Name] confirmed by email on [the day they replied], from their own address, that they had been
+                given and had read the material. On the date above I went through it with them and answered their
+                questions, as 29 CFR 1910.1030(g)(2)(vii)(N) requires.&rdquo;
+              </p>
+              <p className="mt-2 text-xs text-ink-3">
+                Written out in full, with the real names and dates, against each person you tick.
+              </p>
+              <label className="mt-3 flex items-start gap-2 text-sm">
+                <input type="checkbox" name="qaIntent" value="yes" className="mt-0.5" />
+                <span>I am signing this attestation, and I agree to the statement above.</span>
+              </label>
+              <label className="mt-2 block text-sm">
+                Type your full name, as you would sign it
+                <input name="qaName" defaultValue={user.name} className="field mt-1 max-w-sm" autoComplete="name" />
+              </label>
+            </div>
+            <p className="text-xs text-ink-3">
+              Your name, the time, and the address you are signing from are recorded with the statement, which makes
+              this the equal of ink under the ESIGN Act and the Kansas UETA. It prints on each person&rsquo;s
+              certificate beside their own signature.
+            </p>
+            <button className="btn btn-primary">Sign and record it</button>
+          </form>
+        </Card>
+      )}
+
+      {/* ── How the email reply route works, stated once, where it is relevant ── */}
+      <Card title="Replying by email counts" tone={sweeping ? undefined : "crit"} className="mb-6">
+        {!sweeping && (
+          <p className="mb-3 rounded-md bg-crit-soft px-3 py-2 text-sm font-medium text-crit">
+            Nothing is reading the mailbox, so replies will never be seen. Staff will do as they are asked, hear
+            nothing back, and the record will never appear.{" "}
+            <Link href="/settings/email" className="underline">Turn on automatic checking</Link> before you rely on
+            this route.
+          </p>
+        )}
+        <p className="text-sm text-ink-2">
+          Every training email carries a code. If someone replies from their own address with the words{" "}
+          <b>{REPLY_PHRASE}</b> and that code, the site files the reply as their attestation, records the training,
+          produces their certificate and emails it back to them — no action needed from you. One reply can close
+          several at once, because quoting the original brings all the codes with it.
+        </p>
+        <p className="mt-2 text-xs text-ink-3">
+          The link is the better record: it captures a typed signature, the time, the device, and that they answered
+          the questions correctly. A reply records that they told you they did it, and the certificate says so on its
+          face. Both are real; they are not identical, and a file where every record claims to be the stronger kind is
+          the one that gets picked apart.
+        </p>
+      </Card>
+
+      {/* ── Certificates ── */}
+      {done.length > 0 && (
+        <section className="card">
+          <h2 className="mb-3 font-semibold">Completed</h2>
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead><tr><th>Person</th><th>Training</th><th>Completed</th><th>How</th><th>Certificate</th></tr></thead>
+              <tbody>
+                {done.slice(0, 40).map((a) => (
+                  <tr key={a.id}>
+                    <td className="whitespace-nowrap">{a.person ? `${a.person.firstName} ${a.person.lastName}` : "—"}</td>
+                    <td>{TRAINING_LABEL[a.type]}</td>
+                    <td className="whitespace-nowrap">{fmt(a.completedAt!.slice(0, 10))}</td>
+                    <td className="text-xs text-ink-2">
+                      {a.completedVia === "email_reply"
+                        ? `Email reply${a.replyFromAddress ? ` from ${a.replyFromAddress}` : ""}`
+                        : a.completedVia === "pic_recorded"
+                          ? "Recorded by the PIC"
+                          : `Signed${a.quizTotal ? ` · ${a.quizCorrect}/${a.quizTotal} correct` : ""}`}
+                    </td>
+                    <td>
+                      <Link href={`/certificates/${a.trainingId}`} className="text-accent hover:underline">open</Link>
+                      {a.replyDocumentId && (
+                        <>
+                          {" · "}
+                          <a href={`/files/${a.replyDocumentId}`} className="text-accent hover:underline" target="_blank" rel="noreferrer">
+                            the reply
+                          </a>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </>
+  );
+}

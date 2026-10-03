@@ -1,0 +1,1 @@
+ALTER TABLE `supplier_invoices` ADD `paid_on` text;
