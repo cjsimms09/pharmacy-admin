@@ -200,8 +200,8 @@ export const CATEGORIES: Category[] = [
     key: "otc_profit",
     label: "The OTC profit report",
     handling: "Filed for the front-of-shop margin. The owner is having it emailed monthly (2 October 2026); its reader is built on the first one that arrives.",
-    fileNameHints: /otc[_s-]*profit/i,
-    subjectHints: /otcs*profit/i,
+    fileNameHints: /otc[\s_-]*profit/i,
+    subjectHints: /otc[\s_-]*profit/i,
   },
   {
     key: "adjustment_report",

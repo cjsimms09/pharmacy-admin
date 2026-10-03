@@ -352,3 +352,35 @@ describe("a report with no file extension is still a report", () => {
     assert.equal(r.mayFile, true);
   });
 });
+
+describe("the OTC profit report is offered by its name, however the name is spaced", () => {
+  const ask = (ev: Parameters<typeof recognise>[0]) =>
+    recognise({
+      fromAddress: "someone@example.com",
+      content: { verdict: "unrecognised", why: "A spreadsheet this does not recognise." },
+      ...ev,
+    });
+
+  for (const fileName of ["OTC Profit Report.xlsx", "otc_profit_2026-09.csv", "OTC-Profit.pdf"]) {
+    test("a file named " + JSON.stringify(fileName) + " is offered as the OTC profit report, and nothing is filed on the name", () => {
+      const r = ask({ fileName });
+      assert.equal(r.best?.category, "otc_profit");
+      assert.equal(r.mayFile, false);
+      assert.equal(r.needsOwner, true);
+    });
+  }
+
+  for (const subject of ["OTC Profit Report - September 2026", "OTC_Profit September", "otc profit"]) {
+    test("a subject of " + JSON.stringify(subject) + " is offered as the OTC profit report", () => {
+      const r = ask({ subject });
+      assert.equal(r.best?.category, "otc_profit");
+      assert.equal(r.mayFile, false);
+    });
+  }
+
+  test("a name that only shares a word with it is not offered as the OTC profit report", () => {
+    for (const subject of ["Profit sharing statement", "OTC order shipped", "Your October profit and loss"]) {
+      assert.notEqual(ask({ subject }).best?.category, "otc_profit", subject);
+    }
+  });
+});

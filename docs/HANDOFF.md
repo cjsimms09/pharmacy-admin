@@ -46,8 +46,9 @@ file is how they talk.
   adjustment report is read (adjustment-report.ts) and filed for September ($363.40); the mailbox files one on arrival
   (he says he will not email it; harmless), and the month checklist does not ask for it (the row was removed that evening:
   a file he will not send would have held every close); the real source is the 835s in ProviderPay,
-  which need his login — the monthly pull. The "OTC profit" report he will email monthly is recognised by name and
-  filed; build its reader on the first sample. Deploy at 19:07 by the session timer.
+  which need his login — the monthly pull. The "OTC profit" report he will email monthly is offered by name or subject and
+  the Inbox asks once (nothing files on a name; 3 October: the name match missed "OTC Profit" with a space, now fixed);
+  build its reader on the first sample. Deploy at 19:07 by the session timer.
 
 - **2 October, 16:10: "do it", and the pull is the record.** On his word the morning pull reads the PioneerRx copy from
   15 August and keeps a fill filled in the books or collected in them (343 late-August fills collected in September,
