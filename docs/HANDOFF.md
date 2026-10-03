@@ -8,6 +8,16 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, 20:24: second deploy, the morning-check screen, and what the first deploy's printouts could not show.**
+  The three pages were not rendered after the first deploy: the render logs in by writing a short-lived session row into
+  the live database, and this session's permission layer refused that. The sentences were read instead from the same
+  functions the pages call, run read-only with no login (bridge and feeds on /money, the invoice issues and the billed-
+  against-booked card, the dashboard Today line) and they read right on September's real numbers; the layout was last
+  seen on the printouts before the fixes. That reading found three more on the morning-check screen: its one-line summary
+  said the rule without its "Should be" ("1 of 10 failing: money the payer says it has sent has reached the cash account"),
+  its footnote printed the stamp as raw UTC (Friday evening read as 3 October), and the sweep said "0 hours ago" and "1
+  hours ago". Fixed with tests; the stored line keeps the old wording until the next day's pass rewrites it.
+
 - **2 October, evening deploy: every sentence on the three pages read as him, and the ones that said more than the figure
   beside them were fixed.** On /money (September): a closed month's banner said "not complete… the bottom line reads high"
   with notes only; the bridge called +$65,474.29 "goods dispensed and not yet paid for" (it means the wholesalers were paid

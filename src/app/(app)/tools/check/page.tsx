@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireManager } from "@/lib/auth";
 import { dailyCheck } from "@/lib/daily-check-store";
 import { getSettings } from "@/lib/settings";
+import { whenLocal } from "@/lib/dates";
 import { PageHeader, Card, Notice } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,7 @@ export default async function CheckPage() {
   await requireManager();
   const [r, settings] = await Promise.all([dailyCheck(), getSettings()]);
   const last = settings.daily_check_result ?? null;
+  const stamp = last?.match(/^(\S+Z): ([\s\S]*)$/) ?? null;
 
   return (
     <>
@@ -63,7 +65,11 @@ export default async function CheckPage() {
         ))}
       </div>
 
-      {last && <p className="mt-4 text-xs text-ink-3">Last recorded by the nightly pass — {last}</p>}
+      {last && (
+        <p className="mt-4 text-xs text-ink-3">
+          Last recorded by the nightly pass{stamp ? `, ${whenLocal(stamp[1])}` : ""} — {stamp ? stamp[2] : last}
+        </p>
+      )}
     </>
   );
 }

@@ -135,6 +135,11 @@ describe("the sweep, which is how nearly everything arrives", () => {
     assert.match(c.observed, /24 hours ago/);
   });
 
+  test("a sweep inside the hour is said so, and one hour is not 'hours'", () => {
+    assert.equal(check({ lastSweptAt: "2026-09-17T16:29:00.000Z" }, "The mailbox is being swept").observed, "last swept within the hour");
+    assert.equal(check({ lastSweptAt: "2026-09-17T16:00:00.000Z" }, "The mailbox is being swept").observed, "last swept 1 hour ago");
+  });
+
   test("never swept is said as never, not as zero", () => {
     const c = check({ lastSweptAt: null }, "The mailbox is being swept");
     assert.equal(c.ok, false);
@@ -157,7 +162,7 @@ describe("what it says when it cannot say", () => {
 
   test("summarise names what failed rather than counting silently", () => {
     const s = summarise(runDailyCheck({ ...wellRun, inboxRows: 1822, invoicesShort: 4, invoicesShortCents: 768 }));
-    assert.match(s, /2 of 10 failing/);
+    assert.match(s, /^2 of 10 failing\. Should be: /, "a rule said bare after 'failing:' reads as though it held");
     assert.match(s, /one inbox row per delivered attachment/);
   });
 });

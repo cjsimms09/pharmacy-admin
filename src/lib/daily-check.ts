@@ -267,7 +267,12 @@ export function runDailyCheck(f: Facts): Check[] {
     what: "The mailbox is being swept",
     shouldBe:
       "Every feed except PioneerRx arrives as email, so the sweep is the way almost all data reaches this site. It runs many times a day; more than six hours of silence means it is failing or being starved, and nothing else would say so.",
-    observed: f.lastSweptAt === null ? "never swept" : `last swept ${Math.round(hoursSinceSweep!)} hours ago`,
+    observed:
+      f.lastSweptAt === null
+        ? "never swept"
+        : hoursSinceSweep! < 1
+          ? "last swept within the hour"
+          : `last swept ${Math.round(hoursSinceSweep!)} hour${Math.round(hoursSinceSweep!) === 1 ? "" : "s"} ago`,
     ok: hoursSinceSweep !== null && hoursSinceSweep <= 6,
     difference:
       hoursSinceSweep !== null && hoursSinceSweep <= 6
@@ -433,5 +438,6 @@ export function runDailyCheck(f: Facts): Check[] {
 export function summarise(checks: Check[]): string {
   const bad = checks.filter((c) => !c.ok);
   if (bad.length === 0) return `All ${checks.length} checks pass.`;
-  return `${bad.length} of ${checks.length} failing: ${bad.map((c) => c.what.toLowerCase()).join("; ")}.`;
+  // `what` is the rule, not the finding: said bare after "failing:" it reads as though the rule held.
+  return `${bad.length} of ${checks.length} failing. Should be: ${bad.map((c) => c.what.charAt(0).toLowerCase() + c.what.slice(1)).join("; ")}.`;
 }
