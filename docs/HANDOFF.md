@@ -8,6 +8,13 @@ file is how they talk.
 
 ## Open items
 
+- **2 October, 17:20: the September 835s were here and their fees were lost.** 51 files read on 11 and 18 September through
+  the folder reader, deleted after reading; provider-level segments stored only from 1 October. The reader now keeps
+  every 835 as a document (category "remittance") before reading. September's 835s need the ProviderPay pull again
+  (his login) to recover their fees; the adjustment report he sent stands in and deduplicates against them. The
+  daily-rows reconciliation of the till was tried and does not map (OPEN-ITEMS); read the monthly summary's rows by
+  payment type against the record next.
+
 - **2 October, 18:30: accrual is not settled, and he knows it.** The record of what was collected in September is $14,646.88
   above the till; the account printed the till's revenue and the record's cost and kept its "NOT OK" check out of sight.
   The month now says it in a sentence and the Checks card says it (profit-and-loss.ts, books-check.ts); the reconciliation

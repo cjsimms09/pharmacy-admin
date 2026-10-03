@@ -937,7 +937,30 @@ export async function sweepRemittances(user: { id?: string; name: string }): Pro
 
       /* An 835 is known by its own claim segments, the same test an emailed one gets. */
       if (/\bCLP\b/.test(text)) {
-        const r = await importRemittance(text, c.name, user);
+        /*
+         * Kept as a document before it is read, so a parser fix can read it again. Fifty-one files read on 11 and
+         * 18 September 2026 were deleted after reading, and the provider-level segments on them — the fees the owner
+         * asked about on 2 October — only began to be stored on 1 October. Those are gone; this one is not.
+         */
+        const { storeFile } = await import("./files");
+        const { db, schema } = await import("@/db");
+        const { newId } = await import("./crypto");
+        const bare = c.name.split(" → ").pop() ?? c.name;
+        const stored = await storeFile(new File([new Uint8Array(c.buf)], bare), { allowReportTypes: true });
+        const documentId = newId();
+        await db.insert(schema.documents).values({
+          id: documentId,
+          category: "remittance",
+          title: `835 ${bare}`,
+          fileName: bare,
+          mimeType: stored.mimeType,
+          sizeBytes: stored.sizeBytes,
+          sha256: stored.sha256,
+          storageKey: stored.storageKey,
+          effectiveOn: todayIso(),
+          uploadedBy: user.id ?? user.name,
+        });
+        const r = await importRemittance(text, c.name, user, { documentId });
         out.read++;
         out.payments += r.payments;
         out.amountCents += r.amountCents;
