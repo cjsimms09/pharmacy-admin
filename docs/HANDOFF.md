@@ -35,7 +35,15 @@ file is how they talk.
   question, for his ProviderPay login). The check's closing sentence said a deposit of that amount on the statement "settles
   which" cause, which is wrong where two remittances share an amount: September's one $2,008.00 deposit, on the 24th, is
   carried by a receipt under another number. It now says a deposit settles it only if it does not already stand for another
-  remittance of that amount (`daily-check.ts`, pinned in `tests/daily-check.test.ts`).
+  remittance of that amount (`daily-check.ts`, pinned in `tests/daily-check.test.ts`). **And from the scan the same day:**
+  3,821 payments received since 1 September tie to no claim ($393,948.45 net). 3,637 are for fills before the claims feed
+  begins and are not a job; of the 184 inside it, 151 are payments on reversed claims, 19 fit more than one live claim, 12
+  are not fills and 2 are MTF. **No screen lists any payment that ties to no claim:** the morning list's "See the lines" and
+  "Look at them" go to `/claims`, which shows a count, and its card says "184 not yet matched to a claim", of which at most
+  2 are waiting for one. `reversed-fill-payments.ts` and `claimsView` (`engine/read.ts`) have no callers in `src/`, so do not
+  assume either is live. Anyone adding the listing should read `findClaim` and `laterPaymentSummary` (`claim-payments.ts`) first. Two
+  claims that were sold and then reversed, $1,072.74 paid and $1,182.07 unpaid, are a question to him (OPEN-ITEMS,
+  "Waiting on him").
 
 - **2 October, 20:24: second deploy, the morning-check screen, and what the first deploy's printouts could not show.**
   The three pages were not rendered after the first deploy: the render logs in by writing a short-lived session row into
