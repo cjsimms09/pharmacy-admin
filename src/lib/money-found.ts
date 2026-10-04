@@ -541,23 +541,29 @@ export async function computeMoneyFound(): Promise<MoneyFound> {
     const { facilitatorMoney } = await import("./claim-payments");
     const m = await facilitatorMoney("mtf");
     if (m.monthToDateCents > 0 || m.allTimeCents > 0) {
+      const { tiedSays, sourceToDo } = await import("./untied-payments");
+      const { fmt } = await import("./dates");
+      const tied = tiedSays(m.tiedPayments, m.allTimePayments);
       blocked.push({
+        /*
+         * The basis is stated ("since it started" said neither whose money nor from when), and so is what is true of each payment: that it is
+         * tied to the claim it paid or to none. "Already counted against the fills it paid" was false of the payments for fills from before
+         * the claims feed, which join no fill.
+         */
         says:
           `${money(m.monthToDateCents)} has come in from the Medicare Transaction Facilitator this month` +
-          (m.allTimeCents !== m.monthToDateCents ? `, ${money(m.allTimeCents)} since it started` : "") +
-          ". It is already counted against the fills it paid.",
+          (m.allTimeCents !== m.monthToDateCents ? `, ${money(m.allTimeCents)} received since ${fmt(m.booksFrom)}` : "") +
+          `.${tied ? ` ${tied}` : ""}`,
         /*
-         * "Load the days they belong to" was an instruction that could not be carried out: those
-         * prescriptions were dispensed before the daily feed begins, some of them in January, and
-         * no day exists to load. A job nobody can do is worse on a list than no job at all.
+         * Each group is the payments-with-no-claim page's own (causeInfo), so a line here is the same group there. "Load the days they belong
+         * to" was an instruction nobody could carry out: no day exists to load for a fill before the feed, and for a payment that fits two
+         * claims of a fill the site holds loading days changes nothing. A job nobody can do is worse on a list than no job at all.
          */
         todo:
-          m.unmatched > 0
-            ? `${m.unmatched} of those payments name a prescription this site has not loaded, so ${money(m.unmatchedCents)} is not yet against a claim. Load the days they belong to.`
-            : m.beforeTheFeed > 0
-              ? `Nothing to do. ${m.beforeTheFeed} of these were dispensed before the claims feed began, so they will never match a claim here — the money is collected and counted either way.`
-              : "Nothing to do — it is collected and posted. Shown here so a channel that is working is not mistaken for one that is silent.",
-        href: "/remits/mtf",
+          m.tiedToNone.length > 0
+            ? sourceToDo(m.tiedToNone, m.feedFrom)
+            : "Nothing to do — it is collected and posted. Shown here so a channel that is working is not mistaken for one that is silent.",
+        href: m.tiedToNone.some((r) => r.cause !== "before_feed") ? "/claims/no-claim" : "/remits/mtf",
       });
     }
   } catch {

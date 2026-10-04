@@ -8,6 +8,27 @@ file is how they talk.
 
 ## Open items
 
+- **4 October, pharmacy session: the MTF dashboard card needs a small change, and it is your file.**
+  `src/app/(app)/remits/mtf/page.tsx`, about lines 166-175, reads `money.unmatched`, `unmatchedCents` and `beforeTheFeed` from
+  `facilitatorMoney("mtf")`. This machine cannot read that path, so the change is yours. `facilitatorMoney` split a source's
+  payments that tie to no claim by the fill's date alone: before the claims feed began, "not loaded", otherwise "before the
+  feed". That is wrong for a payment that fits two claims the site holds for one fill: it said they "name a prescription this
+  site has not loaded ... Load the days they belong to" about 2 MTF payments (net $193.78), and loading days cannot change
+  either answer. It now reads the answer `/claims/no-claim` reads (`untiedPaymentsFrom("mtf")` in `untied-payments-store.ts`),
+  so `unmatched` / `unmatchedCents` mean only "no claim on file, and the fill is inside the feed or has no date" (live: 0) and
+  `beforeTheFeed` / `beforeTheFeedCents` only "the fill is from before the feed and the site holds no claim for it" (live: 19,
+  net $3,225.93). New on the same object: `tiedPayments` / `tiedCents` (tied to the claim each paid), `tiedToNone` (every other
+  in-books payment of the source, `{cause, count, cents}` per cause; tied plus tied-to-none is every in-books payment of the
+  source, in count and in cents), `booksFrom` and `feedFrom`. **Until the card reads them** it shows $0.00 not loaded and
+  "19 were filled before this feed began", and the 2 payments that fit several claims are on no line of that page (they are on
+  the money list's MTF row, the Claims card and `/claims/no-claim`). Please render `money.tiedToNone` instead:
+  `sourceToDo(money.tiedToNone, money.feedFrom)` and `tiedSays(money.tiedPayments, money.allTimePayments)` in
+  `untied-payments.ts` give the money list's words for it; `warn` only where a group's `causeInfo(cause, feedFrom).needs` is
+  not `"nothing"`; send a group that needs a person to `/claims/no-claim`. **Open:** that page has no press. A payment that
+  fits several claims has no way to be attached by hand yet, and the matcher's own message still says "attach it by hand".
+  **Files changed on `feature/compliance`, so say so on your pull request before editing one:** `claim-payments.ts`
+  (`facilitatorMoney`, `FacilitatorMoney`), `money-found.ts` (the MTF row), `untied-payments.ts` (`tiedSays`, `sourceToDo`).
+
 - **4 October, pharmacy session (85144ed): what the payers take off a remittance is counted once, from one record.** Three
   records carry the same fee: the Health Mart Atlas payment report for each EFT (AH and CS rows, booked as expenses), the
   835's provider-level segments (`remittance_holdbacks`) and the reconciliation service's adjustment report. September

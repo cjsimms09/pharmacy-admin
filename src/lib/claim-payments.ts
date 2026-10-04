@@ -1,5 +1,5 @@
 import { verdictOnPrescription } from "./match-remittance";
-import { claimsFeedStartsOn, claimsOnFile } from "./claims-on-file";
+import { claimsOnFile } from "./claims-on-file";
 import "server-only";
 import { originClass, legacyOrigin } from "./payment-origin";
 import nodePath from "node:path";
@@ -7,6 +7,7 @@ import { db, schema } from "@/db";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { newId } from "./crypto";
 import type { LaterPayment } from "./fills";
+import type { TallyRow } from "./untied-payments";
 import { formatCents } from "./money";
 import { todayIso } from "./dates";
 import { isOutOfBooks } from "./books-start";
@@ -1271,11 +1272,22 @@ export type FacilitatorMoney = {
   months: MoneyByMonth[];
   /** The largest payments this month, so the figure can be checked against a remittance. */
   thisMonth: { rxNumber: string; dateFilled: string | null; ndc11: string | null; itemName: string | null; amountCents: number; receivedOn: string | null; reference: string | null }[];
-  /** Payments naming a prescription this site has not loaded — money real but unattached. */
-  unmatchedCents: number;
-  /** Payments for prescriptions dispensed before the feed began: never matchable, so never pending. */
-  beforeTheFeed: number;
+  /** Payments naming a prescription the site holds no claim for, for a fill inside the claims feed or with no fill date: the claim is still to come. */
   unmatched: number;
+  unmatchedCents: number;
+  /** Payments for fills from before the claims feed that the site holds no claim for: no claim is coming. */
+  beforeTheFeed: number;
+  beforeTheFeedCents: number;
+  /** Payments tied to the claim each paid. */
+  tiedPayments: number;
+  tiedCents: number;
+  /**
+   * Every payment tied to no claim, by the matcher's answer on its prescription (untied-payments.ts). `unmatched` and `beforeTheFeed` are two of its
+   * groups, and a payment is in exactly one of `tiedPayments` and this. `booksFrom` and `feedFrom` are the days the words in it are said against.
+   */
+  tiedToNone: TallyRow[];
+  booksFrom: string;
+  feedFrom: string | null;
   /** Payments with no received date, which cannot be put in a month. */
   undatedCents: number;
 };
@@ -1293,13 +1305,7 @@ export async function facilitatorMoney(source = "mtf", today = new Date()): Prom
   const lastMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
 
   const by = new Map<string, MoneyByMonth>();
-  let unmatchedCents = 0;
-  let unmatched = 0;
   let undatedCents = 0;
-
-  /* The first day the claims feed covers. Read from the imports, which is what actually defines it. */
-  const earliest = await claimsFeedStartsOn();
-  let beforeTheFeed = 0;
   for (const r of rows) {
     const m = monthOf(r.receivedOn);
     if (m === null) undatedCents += r.amountCents;
@@ -1309,28 +1315,20 @@ export async function facilitatorMoney(source = "mtf", today = new Date()): Prom
       e.amountCents += r.amountCents;
       by.set(m, e);
     }
-    /*
-     * "Not yet" is the wrong tense for a payment there was never a claim for.
-     *
-     * The owner asked for this once already — "can we have it stop alerting if looking for a claim
-     * before 09/01?? this system will never get anything before 09/01" — and it was given to
-     * `laterPaymentSummary` alone. The dashboard, the MTF page and the money list read this figure
-     * instead, so all three went on saying "24 not yet matched to a claim" while /claims correctly
-     * reported none outstanding, over the very same rows. Money found even offered an instruction
-     * for it: "Load the days they belong to." There are no such days to load.
-     *
-     * Every one of the 24 is for a prescription dispensed before the daily claims feed begins, some
-     * as far back as January. They are counted apart, and the money is still shown.
-     */
-    if (!r.claimId) {
-      const older = earliest !== null && r.dateFilled !== null && r.dateFilled < earliest;
-      if (older) beforeTheFeed++;
-      else {
-        unmatched++;
-        unmatchedCents += r.amountCents;
-      }
-    }
   }
+
+  /*
+   * Which payments are tied to no claim, and why, is the matcher's answer on each prescription (untied-payments.ts) — the answer the Claims page
+   * and the payments-with-no-claim page give — and not the fill date's. This used to split them by the fill date alone, and said of a payment
+   * that fits two claims equally that it "names a prescription this site has not loaded", with the instruction to load the days it belongs to.
+   * The owner, asking that the site stop looking for claims from before the feed: "can we have it stop alerting if looking for a claim before
+   * 09/01?? this system will never get anything before 09/01.." The matcher's answer is what separates a fill the site holds no claim for from
+   * one it does.
+   */
+  const { untiedPaymentsFrom } = await import("./untied-payments-store");
+  const untied = await untiedPaymentsFrom(source);
+  const group = (cause: string) => untied.tally.find((t) => t.cause === cause) ?? { count: 0, cents: 0 };
+  const tied = rows.filter((r) => r.claimId !== null);
 
   const months = [...by.values()].sort((a, b) => b.month.localeCompare(a.month));
   const mtd = by.get(thisMonth) ?? { month: thisMonth, payments: 0, amountCents: 0 };
@@ -1342,8 +1340,6 @@ export async function facilitatorMoney(source = "mtf", today = new Date()): Prom
     lastMonthCents: by.get(lastMonth)?.amountCents ?? 0,
     allTimeCents: rows.reduce((n, r) => n + r.amountCents, 0),
     allTimePayments: rows.length,
-    /** Payments for prescriptions dispensed before the feed began. Never matchable, so never pending. */
-    beforeTheFeed,
     months,
     thisMonth: rows
       .filter((r) => monthOf(r.receivedOn) === thisMonth)
@@ -1358,8 +1354,15 @@ export async function facilitatorMoney(source = "mtf", today = new Date()): Prom
         receivedOn: r.receivedOn,
         reference: r.reference,
       })),
-    unmatchedCents,
-    unmatched,
+    unmatched: group("no_claim_yet").count,
+    unmatchedCents: group("no_claim_yet").cents,
+    beforeTheFeed: group("before_feed").count,
+    beforeTheFeedCents: group("before_feed").cents,
+    tiedPayments: tied.length,
+    tiedCents: tied.reduce((n, r) => n + r.amountCents, 0),
+    tiedToNone: untied.tally,
+    booksFrom: untied.booksFrom,
+    feedFrom: untied.feedFrom,
     undatedCents,
   };
 }

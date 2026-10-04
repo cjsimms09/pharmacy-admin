@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { CAUSES, causeInfo, classifyUntied, claimBesideSays, namesSays, needsPhrase, needsSays, sourceSays, tallyByNeeds, tallyUntied, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedPayment } from "../src/lib/untied-payments";
+import { CAUSES, causeInfo, classifyUntied, claimBesideSays, namesSays, needsPhrase, needsSays, sourceSays, sourceToDo, tallyByNeeds, tallyUntied, tiedSays, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedPayment } from "../src/lib/untied-payments";
 import type { ClaimOnFile } from "../src/lib/match-remittance";
 
 /*
@@ -310,5 +310,53 @@ describe("the line the Claims page shows", () => {
 
   test("is no line at all where every payment is tied", () => {
     assert.equal(untiedCardRow([], "2026-09-01", FEED), null);
+  });
+});
+
+describe("one source's payments, said on the money list", () => {
+  test("how many are tied to the claim each paid, in the words of a count", () => {
+    assert.equal(tiedSays(0, 0), "");
+    assert.equal(tiedSays(1, 1), "Its one payment is tied to the claim it paid.");
+    assert.equal(tiedSays(3_000, 3_000), "All 3,000 of its payments are tied to the claim each paid.");
+    assert.equal(tiedSays(0, 1), "Its one payment is tied to no claim.");
+    assert.equal(tiedSays(0, 4), "None of its 4 payments is tied to a claim.");
+    assert.equal(tiedSays(1, 5), "1 of its 5 payments is tied to the claim it paid.");
+    assert.equal(tiedSays(12, 33), "12 of its 33 payments are tied to the claim each paid.");
+  });
+
+  test("nothing is said where nothing is tied to none", () => {
+    assert.equal(sourceToDo([], FEED), "");
+  });
+
+  test("each group is worded as the page words it, in the page's order whatever order it was given, then what it asks", () => {
+    const rows: TallyRow[] = [
+      { cause: "before_feed", count: 7, cents: 81_240 },
+      { cause: "fits_several", count: 2, cents: 9_310 },
+    ];
+    assert.equal(
+      sourceToDo(rows, FEED),
+      "2 payments (net $93.10) that fit two or more claims equally. Attach each to the claim it paid. The site has no way to do that by hand yet. " +
+        "7 payments (net $812.40) for fills from before the claims feed begins on Sep 1, 2026, which the site holds no claim for. Needs nothing.",
+    );
+  });
+
+  test("where no group asks anything, says so once, first, and asks nothing of each", () => {
+    assert.equal(
+      sourceToDo([{ cause: "before_feed", count: 1, cents: 4_000 }], FEED),
+      "Nothing to do. 1 payment ($40.00) for a fill from before the claims feed begins on Sep 1, 2026, which the site holds no claim for.",
+    );
+    assert.equal(
+      sourceToDo([{ cause: "reversed_not_sold", count: 3, cents: 6_000 }, { cause: "before_feed", count: 1, cents: 4_000 }], FEED),
+      "Nothing to do. 3 payments (net $60.00) on claims that were reversed, none carrying a sale date. " +
+        "1 payment ($40.00) for a fill from before the claims feed begins on Sep 1, 2026, which the site holds no claim for.",
+    );
+  });
+
+  test("a group that only waits is not said as nothing to do: it says it clears by itself", () => {
+    assert.equal(sourceToDo([{ cause: "will_attach", count: 1, cents: 1_000 }], FEED), "1 payment ($10.00) whose claim is on file now. Nothing. It attaches by itself at the next claims load.");
+  });
+
+  test("none of it tells a person to load days: for no cause is that a thing that can be done", () => {
+    for (const cause of CAUSES) assert.doesNotMatch(sourceToDo([{ cause, count: 2, cents: 100 }], FEED), /load the days/i, cause);
   });
 });

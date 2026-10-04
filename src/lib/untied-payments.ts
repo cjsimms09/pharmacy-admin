@@ -305,3 +305,27 @@ export function untiedCardRow(rows: TallyRow[], booksFrom: string, feedFrom: str
     why,
   };
 }
+
+/** How many of one source's payments are tied to the claim each paid, said to follow that source's name: "Its" is the source. */
+export function tiedSays(tied: number, total: number): string {
+  if (total === 0) return "";
+  if (tied === total) return total === 1 ? "Its one payment is tied to the claim it paid." : `All ${count(total)} of its payments are tied to the claim each paid.`;
+  if (tied === 0) return total === 1 ? "Its one payment is tied to no claim." : `None of its ${count(total)} payments is tied to a claim.`;
+  return `${count(tied)} of its ${count(total)} payments ${tied === 1 ? "is" : "are"} tied to the claim ${tied === 1 ? "it" : "each"} paid.`;
+}
+
+/**
+ * What the money list says about one source's payments that are tied to no claim: each group in the page's order, as the page words it (its
+ * count and sum, then `causeInfo`'s short form), then what it asks of a person. Where no group asks anything the line says so once, first,
+ * and asks nothing of each. Empty where nothing is tied to none.
+ */
+export function sourceToDo(rows: TallyRow[], feedFrom: string | null): string {
+  if (rows.length === 0) return "";
+  const groups = [...rows].sort((a, b) => CAUSES.indexOf(a.cause) - CAUSES.indexOf(b.cause)).map((r) => ({ r, info: causeInfo(r.cause, feedFrom) }));
+  const idle = groups.every((g) => g.info.needs === "nothing");
+  const parts = groups.map(({ r, info }) => {
+    const group = `${payments(r.count)} (${sum(r.count, r.cents)}) ${info.short[r.count === 1 ? 0 : 1]}.`;
+    return idle ? group : `${group} ${info.needs === "nothing" ? "Needs nothing." : info.asks}`;
+  });
+  return `${idle ? "Nothing to do. " : ""}${parts.join(" ")}`;
+}
