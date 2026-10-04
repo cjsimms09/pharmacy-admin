@@ -45,6 +45,7 @@ import { standingLines } from "./standing-math";
 import { todayIso } from "./dates";
 import { formatCents } from "./money";
 import { SITE_STARTS_ON, monthIsOutOfBooks } from "./books-start";
+import type { MonthFees } from "./payer-fees";
 
 
 export type PLLine = {
@@ -246,8 +247,18 @@ export type PLInputs = {
    * "DIR fees and price concessions" by hand: "what??" — and he was right to ask: Part D price concessions have been
    * taken at the point of sale since 2024, inside the paid amounts, and anything taken after the sale is on the
    * remittance, which the site reads.
+   *
+   * Counted once per remittance, from the best record of it (payer-fees.ts): the Health Mart Atlas payment report's
+   * fees are expenses above and are not in this figure. Accrual only: a deposit is already net of every fee.
    */
   remitFeesCents?: number | null;
+  /**
+   * Fees a better record had already counted, which are kept out of remitFeesCents and not lost, and where two records
+   * give different totals for one remittance (differ). Said on the month so that a figure that moved can be explained.
+   */
+  remitFeesKept?: { cents: number; lines: number; differ: string } | null;
+  /** Lines of a remittance's provider-level adjustments that are not fees (a balance forward, a credit): on neither account. */
+  remitFeesHeld?: { cents: number; lines: number; says: string } | null;
   /** Billed by a supplier whose payments the site can see, and not taken yet. Owed, not spent. */
   notYetTakenCents?: number;
   /**
@@ -527,9 +538,18 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
   const revenueCents = sum(revenue);
 
   const offsets = byCategory(i.expenses, "revenue_offset");
-  /* What the payers took at provider level on the remittances, measured from the 835s, in the month they took it. */
-  if (i.remitFeesCents) {
-    offsets.push({ label: "Payer fees and recoupments taken on remittances", amountCents: i.remitFeesCents, note: "From the 835s' provider-level adjustments and the reconciliation service's adjustment report, by the remittance's month, in the month the payer took them." });
+  /*
+   * What the payers took at provider level on the remittances, measured, in the month they took it, one record per
+   * remittance (payer-fees.ts). Accrual only. A deposit is already net of what a payer took, so the cash account
+   * subtracting it again would count it twice; it carried this line until 4 October 2026, and carried a balance forward
+   * (money nobody had paid) as if it were income.
+   */
+  if (i.remitFeesCents && i.basis === "accrual") {
+    offsets.push({
+      label: "Payer fees and recoupments taken on remittances",
+      amountCents: i.remitFeesCents,
+      note: "From the 835s' provider-level adjustments and the reconciliation service's adjustment report, for remittances no Health Mart Atlas payment report already carries (those fees are counted above, once), in the remittance's month. Only an origination fee or a recoupment is a fee here.",
+    });
   }
   const netRevenueCents = revenueCents - sum(offsets);
 
@@ -808,10 +828,16 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * since 2024, inside the paid amounts; a fee a payer still takes after the sale arrives on the remittance, which the
    * site reads (remitFeesCents). So a month with none says so, as a measured fact, and asks nobody to type anything.
    */
-  if (!i.remitFeesCents && !i.expenses.some((e) => e.kind === "revenue_offset")) {
+  if (i.basis === "accrual" && !i.remitFeesCents && !i.expenses.some((e) => e.kind === "revenue_offset")) {
     caveats.push(
-      "Part D price concessions are taken at the point of sale, inside the paid amounts above. No fee or adjustment taken after the sale is on file for this month: none on an 835 the site holds, and no adjustment report from the reconciliation service covers it. File the month's adjustment report and the account takes them.",
+      "Part D price concessions are taken at the point of sale, inside the paid amounts above. No fee taken after the sale is on file for this month: no Health Mart Atlas payment report, no 835 and no adjustment report shows one. A remittance not yet read could still carry one; the ProviderPay pull and the payment reports bring them.",
     );
+  }
+  if (i.basis === "accrual" && i.remitFeesHeld && i.remitFeesHeld.lines > 0) {
+    caveats.push("Not counted as fees, and on neither account: " + i.remitFeesHeld.says + ".");
+  }
+  if (i.basis === "accrual" && i.remitFeesKept?.differ) {
+    caveats.push("Two records of one remittance disagree about its fees, and the better record is the one counted: " + i.remitFeesKept.differ + ".");
   }
 
   const stockMovementCents = i.purchasesCents !== null && i.dispensedCostCents !== null ? i.purchasesCents - i.dispensedCostCents : null;
@@ -1020,8 +1046,8 @@ export type SharedInputs = {
   paymentAllocations: { invoiceId: string; paidOn: string; amountCents: number }[];
   /** By month: the bank's debits placed as "predates the books", in cents, positive. See PLInputs.beforeBooksPaidCents. */
   beforeBooksPaid: Map<string, number>;
-  /** By month received: provider-level adjustments on the 835s (remittance_holdbacks), in cents, positive where the payer took money. */
-  holdbacks: Map<string, number>;
+  /** By the remittance's month: what the payers took off the remittances, counted once from the best record of each (payer-fees.ts). */
+  payerFees: Map<string, MonthFees>;
 };
 
 export async function loadShared(months: string[], basis: "accrual" | "cash"): Promise<SharedInputs> {
@@ -1155,21 +1181,18 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
   );
   const beforeBooksRows = (await db.all(sql`select substr("on", 1, 7) month, coalesce(sum(-amount_cents), 0) cents from bank_lines where placed_as = 'before_books' and amount_cents < 0 group by 1`)) as { month: string; cents: number }[];
   /*
-   * Unproven until the first PLB arrives: no remittance on file has carried one (checked 2 October 2026, 0 rows), so the
-   * sign convention of amount_cents is taken from the reader's own comment and must be checked against the first real
-   * file. Positive here means money the payer took.
+   * What the payers took off the remittances: the Health Mart Atlas payment reports' fees (already expenses), the 835s'
+   * provider-level segments and the reconciliation service's adjustment report, one record per remittance
+   * (payer-fees.ts, read in payer-fees-store.ts). The 835 sign convention is the reader's own, "a positive amount
+   * reduces what the payer sent", and was held against the first real PLB, RedSail's of 1 October 2026: a balance
+   * forward of -$46.95 on a $0.00 remittance, which is not a fee.
    */
-  const holdbackRows = (await db.all(sql`select substr(received_on, 1, 7) month, coalesce(sum(amount_cents), 0) cents from remittance_holdbacks where out_of_books = 0 group by 1`)) as { month: string; cents: number }[];
-  /* And the reconciliation service's adjustment report, where one is on file: the fees taken on remittances the site holds no 835 for (adjustment-report.ts). */
-  const holdbacks = new Map(holdbackRows.map((r) => [r.month, Number(r.cents)]));
-  const { adjustmentsByMonth } = await import("./adjustment-report");
-  const traced = (await db.all(sql`select distinct coalesce(trace_number, '') t, coalesce(reference, '') r from remittance_holdbacks`)) as { t: string; r: string }[];
-  const remittancesWith835 = new Set(traced.flatMap((x) => [x.t, x.r]).filter(Boolean));
-  for (const [month, cents] of await adjustmentsByMonth(remittancesWith835)) holdbacks.set(month, (holdbacks.get(month) ?? 0) + cents);
+  const { payerFeesByMonth } = await import("./payer-fees-store");
+  const payerFees = await payerFeesByMonth();
   return {
     basis,
     beforeBooksPaid: new Map(beforeBooksRows.map((r) => [r.month, Number(r.cents)])),
-    holdbacks,
+    payerFees,
     sales,
     cats,
     fills,
@@ -1185,6 +1208,15 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
     statementLines,
     paymentAllocations,
     today: todayIso(),
+  };
+}
+
+/** The fee inputs of one month, from what payer-fees.ts counted. */
+function feeInputs(f: MonthFees | undefined): Pick<PLInputs, "remitFeesCents" | "remitFeesKept" | "remitFeesHeld"> {
+  return {
+    remitFeesCents: f?.countedCents ?? 0,
+    remitFeesKept: f && (f.keptOutLines > 0 || f.differ) ? { cents: f.keptOutCents, lines: f.keptOutLines, differ: f.differ } : null,
+    remitFeesHeld: f && f.heldLines > 0 ? { cents: f.heldCents, lines: f.heldLines, says: f.heldSays } : null,
   };
 }
 
@@ -1415,7 +1447,7 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     uninvoicedPurchasesCents,
     cashCogsSays: cash.says,
     beforeBooksPaidCents: basis === "cash" ? (shared.beforeBooksPaid.get(month) ?? 0) : null,
-    remitFeesCents: shared.holdbacks.get(month) ?? 0,
+    ...feeInputs(shared.payerFees.get(month)),
     cashCountedTwice,
     notYetTakenCents: cash.notYetTakenCents,
     uninvoicedPurchases: uninvoiced.length,

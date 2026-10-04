@@ -332,6 +332,39 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
   });
 
   /*
+   * What the payers took off the remittances after the sale. The Health Mart Atlas payment report, the 835 and the
+   * reconciliation service's adjustment report can each carry the same fee, and one remittance is counted from one of them.
+   */
+  const feeKept = i.remitFeesKept ?? null;
+  const feeHeld = i.remitFeesHeld ?? null;
+  const feeCounted = i.remitFeesCents ?? 0;
+  const feeSaid = [
+    feeKept && feeKept.lines > 0 ? `${feeKept.lines} fee line${feeKept.lines === 1 ? "" : "s"}, ${dollars(feeKept.cents)}, already counted from a better record and not taken again` : null,
+    feeCounted !== 0 ? `${dollars(feeCounted)} counted from the 835 or the adjustment report, because no payment report carries those remittances` : null,
+    feeHeld && feeHeld.lines > 0 ? `held on neither account: ${feeHeld.says}` : null,
+    feeKept?.differ ? `two records disagree: ${feeKept.differ}` : null,
+  ].filter((x): x is string => x !== null);
+  out.push({
+    what: "Payer fees taken on remittances",
+    routes: [
+      "The Health Mart Atlas payment report, which itemises each EFT's adjustments",
+      "The 835 and the reconciliation service's adjustment report, which list the same fees by remittance",
+    ],
+    rule:
+      "One remittance is counted from one record: the payment report first, because it closes to the EFT's total, then the 835, then the adjustment report, which stands in for a remittance neither has read. " +
+      "Only an origination fee and a recoupment are fees. A balance forward moves no money, a credit from the payer reverses something the report does not show, and any other code waits, on neither account, until its meaning is settled. " +
+      "Where two records give one remittance different fees the better record is counted and the difference is said.",
+    bothPresent: i.basis === "accrual" && (feeKept?.lines ?? 0) > 0,
+    keptOutCents: i.basis === "accrual" && feeKept && feeKept.lines > 0 ? feeKept.cents : null,
+    says:
+      i.basis === "cash"
+        ? "Not a cash-account question: a deposit is already net of what the payer took, so no fee is taken off it a second time."
+        : feeSaid.length > 0
+          ? feeSaid.join("; ") + "."
+          : "No fee taken after the sale is on file for this month: no payment report, no 835 and no adjustment report shows one.",
+  });
+
+  /*
    * Postage, which arrives as a confirmation email and again as a card purchase on the statement.
    */
   out.push({
@@ -528,8 +561,9 @@ export function feedsInTheBooks(): Feed[] {
       carries: "What each payer decided to pay, claim by claim, with its adjustments and the trace number of the payment.",
       reaches: "accrual",
       how:
-        "The folder reader takes each file in and keeps it as a document before reading it, so a fix to the reader can read it again. Its provider-level adjustments — fees and " +
-        "recoupments, which belong to no single claim — are taken off revenue in the month the remittance was received.",
+        "The folder reader takes each file in and keeps it as a document before reading it, so a fix to the reader can read it again. Its provider-level adjustments, which belong to no single claim, " +
+        "are sorted by what they are: an origination fee or a recoupment is a fee, taken off revenue once in the month the remittance was received (never again where the Health Mart Atlas " +
+        "payment report for that EFT already carries it); a balance forward, a credit and any code not yet understood are held on neither account and named on the month.",
       gap:
         "835 files read before 1 October 2026 did not keep their provider-level adjustments, so the fees on those months come from the reconciliation service's adjustment report, " +
         "or are not measured.",
@@ -566,8 +600,9 @@ export function feedsInTheBooks(): Feed[] {
       carries: "The fees and adjustments payers took on remittances, by remittance and code.",
       reaches: "accrual",
       how:
-        "Read when it is filed, by the mailbox or by hand, and refused in words if its lines do not add to its own total. Taken off revenue in each remittance's month, and left out " +
-        "for any remittance whose 835 is on file with its adjustments, so a fee is never counted twice.",
+        "Read when it is filed, by the mailbox or by hand, and refused in words if its lines do not add to its own total. A remittance is counted from the best record of it — the Health Mart " +
+        "Atlas payment report, then the 835, then this report — so a fee is never counted twice: one already counted from a better record is kept out and said, only an origination fee or a " +
+        "recoupment is taken off revenue (in the remittance's month), and a credit or any other code is held on neither account.",
       gap: null,
       href: "/remits",
     },

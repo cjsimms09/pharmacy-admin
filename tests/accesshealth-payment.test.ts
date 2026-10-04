@@ -152,6 +152,32 @@ describe("the report's remittance-level adjustments", () => {
     ]);
   });
 
+  /* OutcomesMTM's section of EFT-99930001 (30 September 2026) carried a "Fee" row; the reader refused the whole EFT over it. */
+  const withWordFee = REPORT.replace(
+    "12/31/26Adj-CS1234567         0.00        -0.33         0.00         0.00         0.00        -0.33",
+    [
+      "12/31/26Adj-CS1234567         0.00        -0.33         0.00         0.00         0.00        -0.33",
+      "12/31/26Adj-Fee         0.00        -9.00         0.00         0.00         0.00        -9.00",
+    ].join("\n"),
+  );
+
+  test("an adjustment whose code is a word is read, counted in its section, and held rather than booked", () => {
+    const r = readAccessHealthPayment(withWordFee.replace("Paid claims: 4Paid Amount: $84.67", "Paid claims: 5Paid Amount: $75.67").replace("Total Paid: $118.77", "Total Paid: $109.77"));
+    assert.ok(r.ok, r.ok ? "" : r.why);
+    assert.deepEqual(r.report.sections[0].adjustments.map((a) => [a.code, a.reference, a.amountCents]), [["CS", "1234567", -33], ["Fee", null, -900]]);
+    assert.equal(r.report.claimRows, 5);
+    assert.equal(r.report.adjustmentCents, -933);
+    const { post, held } = adjustmentPostings(r.report);
+    assert.deepEqual(post.map((a) => a.key), ["AHADJ|EFT-12345678|CS|1234567"]);
+    assert.deepEqual(held, [{ code: "Fee", plan: "PLAN ONE", reference: null, amountCents: -900 }]);
+  });
+
+  test("the word-coded row still has to close: left out of the section's total, the report is refused", () => {
+    const r = readAccessHealthPayment(withWordFee);
+    assert.equal(r.ok, false);
+    assert.match(r.ok ? "" : r.why, /PLAN ONE section's rows come to \$75\.67 against its Paid Amount of \$84\.67/);
+  });
+
   test("the same report read twice produces the same keys, which is what makes the second read book nothing", () => {
     const a = readAccessHealthPayment(withFees);
     const b = readAccessHealthPayment(withFees);

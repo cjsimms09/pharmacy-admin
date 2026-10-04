@@ -179,16 +179,6 @@ export function takenByMonth(lines: AdjustmentLine[]): Map<string, number> {
   return out;
 }
 
-/**
- * By month, leaving out any remittance whose 835 is on file with its provider-level segments read (remittance_holdbacks):
- * the 835 is the primary record and the report must not count the same fee twice once it arrives.
- */
-export async function adjustmentsByMonth(remittancesWith835: Set<string> = new Set()): Promise<Map<string, number>> {
-  const { lines } = await adjustmentLinesOnFile();
-  const on835 = (n: string) => n !== "" && [...remittancesWith835].some((t) => t !== "" && (t.includes(n) || n.includes(t)));
-  return takenByMonth(lines.filter((l) => !on835(l.remittanceNumber)));
-}
-
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /**
@@ -211,5 +201,5 @@ export async function fileAdjustmentReport(docId: string, text: string, fileName
     .set({ category: "adjustment_report", title: `Adjustment report, ${monthName}`, ...(r.periodTo ? { effectiveOn: r.periodTo } : {}), notes: r.says })
     .where(eq(schema.documents.id, docId));
   await audit({ action: "adjustment_report.read", userId: null, userName: by, entity: "document", entityId: docId, details: `${monthName}: ${r.says}` });
-  return { ok: true, says: `Adjustment report, ${monthName}: ${r.says}. Taken off revenue in each remittance's month.` };
+  return { ok: true, says: `Adjustment report, ${monthName}: ${r.says}. Taken off revenue in each remittance's month, except where the Health Mart Atlas payment report or the 835 for that remittance already carries it (payer-fees.ts).` };
 }

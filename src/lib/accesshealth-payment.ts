@@ -15,6 +15,7 @@
  *   08/05/26000000       647.93       510.69         0.00         0.00        40.00       470.69
  *   08/07/26000000      1461.88         0.00         0.00         0.00         0.00         0.0070        ← rejection code 70
  *   12/31/26Adj-CS0000000         0.00        -0.33         0.00         0.00         0.00        -0.33 ← an adjustment
+ *   12/31/26Adj-Fee               0.00        -9.00         0.00         0.00         0.00        -9.00 ← one whose code is a word
  *   Paid claims: 223Paid Amount: $7477.51
  *
  * The text layer runs fields together. The fill date's two-digit year is followed directly by the prescription number,
@@ -34,6 +35,8 @@
  * Pure.
  */
 
+import { isSettledPayerFee } from "./payer-fees";
+
 export type AhClaimRow = {
   fillDate: string;
   rxNumber: string;
@@ -51,7 +54,7 @@ export type AhClaimRow = {
 export type AhAdjustment = {
   /** As printed. The reports print 12/31 of the year for every one seen. */
   on: string;
-  /** The two-character code the report's own glossary names (AH, CS, WU, …). */
+  /** The two-character code the report's own glossary names (AH, CS, WU, …), or a word where a plan prints one ("Fee" on an OutcomesMTM row). */
   code: string;
   /** Anything after the code: a sub-code ("-02") and the plan's reference. */
   reference: string | null;
@@ -83,7 +86,7 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const COLUMNS = /^Fill Date\s*Rx Number\s*Billed\s*Allowed\s*Disp\.?\s*Fee\s*Tax\s*Co-?Pay\s*Amount\s*Rej\.?$/i;
 const M = String.raw`(-?[\d,]*\d\.\d{2})`;
 const CLAIM = new RegExp(String.raw`^(\d{2})\/(\d{2})\/(\d{2})(\d{4,9})\s+${M}\s+${M}\s+${M}\s+${M}\s+${M}\s+(-?[\d,]*\d\.\d{2})(\S*)$`);
-const ADJUSTMENT = new RegExp(String.raw`^(\d{2})\/(\d{2})\/(\d{2})Adj-([A-Z0-9]{2})(\S*)\s+${M}\s+${M}\s+${M}\s+${M}\s+${M}\s+${M}$`);
+const ADJUSTMENT = new RegExp(String.raw`^(\d{2})\/(\d{2})\/(\d{2})Adj-(?:([A-Z0-9]{2})(\S*)|([A-Z][a-z]+)(\S*))\s+${M}\s+${M}\s+${M}\s+${M}\s+${M}\s+${M}$`);
 const FOOTER = /^Paid claims:\s*(\d+)\s*Paid Amount:\s*(-?)\$?(-?)([\d,]+\.\d{2})$/i;
 const PAGE = /Page \d+ of$/i;
 
@@ -134,7 +137,8 @@ export function adjustmentPostings(report: AccessHealthPayment): { post: AhPosti
   const seen = new Map<string, number>();
   for (const s of report.sections) {
     for (const a of s.adjustments) {
-      const booked = a.code === "AH" || (a.code === "CS" && a.amountCents < 0);
+      /* The same rule as the 835 and the adjustment report (payer-fees.ts), so a fee is a fee whichever record carries it. */
+      const booked = isSettledPayerFee(a.code, -a.amountCents, a.reference);
       if (!booked) {
         held.push({ code: a.code, plan: s.plan, reference: a.reference, amountCents: a.amountCents });
         continue;
@@ -233,7 +237,7 @@ export function readAccessHealthPayment(text: string, ownNcpdp: string | null = 
         problems.push("an adjustment appears outside any plan section");
         continue;
       }
-      current.adjustments.push({ on: `20${m[3]}-${m[1]}-${m[2]}`, code: m[4], reference: m[5] || null, amountCents: cents(m[11]) });
+      current.adjustments.push({ on: `20${m[3]}-${m[1]}-${m[2]}`, code: m[4] ?? m[6], reference: (m[4] ? m[5] : m[7]) || null, amountCents: cents(m[13]) });
     } else if (FOOTER.test(line)) {
       const m = FOOTER.exec(line)!;
       if (!current || current.closed) {

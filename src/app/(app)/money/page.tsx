@@ -213,7 +213,7 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           <>
             <p><b>Cost of goods is what was dispensed, not what was bought.</b> PioneerRx prints the acquisition cost of every fill, so the cost of what sold is known per bottle.</p>
             <p><b>Rebates reduce cost; they are never revenue.</b> Earned in the month that earned them on the accrual basis; received in the month the bank got them on the cash basis.</p>
-            <p><b>Payer fees come out of revenue,</b> measured from the remittances, so the dispensing margin is not flattered.</p>
+            <p><b>Payer fees come out of revenue on the accrual account,</b> measured from the remittances and counted once each, so the dispensing margin is not flattered. A deposit is already net of them, so the cash account takes nothing off a second time.</p>
             <p><b>Cash and accrual are both true.</b> A prescription dispensed on the 30th is this month&rsquo;s earnings and next month&rsquo;s money. The cash account is the bank statement, categorised, and equals the bank to the cent.</p>
             <p><b>Every figure links to its rows.</b> A wrong figure is corrected on the linked page, never here.</p>
           </>
