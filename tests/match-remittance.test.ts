@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { chooseClaimForRemittance, type ClaimCandidate } from "../src/lib/match-remittance";
+import { chooseClaimForRemittance, claimsOfThisFill, verdictOnPrescription, type ClaimCandidate, type ClaimOnFile } from "../src/lib/match-remittance";
 
 /**
  * The owner: "We will be able to match remits with 835s?"
@@ -118,5 +118,63 @@ describe("a payment never settles a different fill of the same prescription", ()
   test("a remittance a day or two off the fill date still finds its claim", () => {
     const c = chooseClaimForRemittance([claim("sep", "2026-09-10")], { fillNumber: null, dateFilled: "2026-09-11", ndc11: null, amountCents: 1_000, bin: null });
     assert.equal(c.claim?.id, "sep");
+  });
+});
+
+describe("what the site makes of a payment, given every claim it holds for the prescription", () => {
+  const held = (id: string, status: "paid" | "reversed", dateFilled: string, o: Partial<ClaimOnFile> = {}): ClaimOnFile => ({
+    id, status, fillNumber: 1, dateFilled, ndc11: "00000000001", bin: "610011", remitCents: 1_000, soldOn: null, ...o,
+  });
+  const pays = { fillNumber: 1, dateFilled: "2026-09-10", ndc11: "00000000001", amountCents: 1_000, bin: null };
+
+  test("a prescription the site holds nothing for", () => {
+    assert.deepEqual(verdictOnPrescription([], pays), { kind: "no_claim_on_file" });
+  });
+
+  test("a paid claim for the fill ties it, and is returned whole", () => {
+    const v = verdictOnPrescription([held("a", "paid", "2026-09-10", { soldOn: "2026-09-10" })], pays);
+    assert.equal(v.kind, "tied");
+    assert.equal(v.kind === "tied" && v.claim.soldOn, "2026-09-10");
+  });
+
+  test("only reversed claims: the verdict names those that are for this fill", () => {
+    const v = verdictOnPrescription([held("this", "reversed", "2026-09-10"), held("other", "reversed", "2026-08-10", { fillNumber: 0 })], pays);
+    assert.equal(v.kind, "only_reversed");
+    assert.deepEqual(v.kind === "only_reversed" ? v.fill.map((c) => c.id) : null, ["this"]);
+  });
+
+  test("only reversed claims, all for other fills: none is for this one", () => {
+    const v = verdictOnPrescription([held("other", "reversed", "2026-08-10", { fillNumber: 0 })], pays);
+    assert.deepEqual(v.kind === "only_reversed" ? v.fill : null, []);
+  });
+
+  test("a reversed claim for this fill beside a paid claim for another is no fit, and the verdict still names the reversed one", () => {
+    const v = verdictOnPrescription([held("this", "reversed", "2026-09-10"), held("refill", "paid", "2026-10-10", { fillNumber: 2 })], pays);
+    assert.equal(v.kind, "no_fit");
+    assert.deepEqual(v.kind === "no_fit" ? v.reversedFill.map((c) => c.id) : null, ["this"]);
+  });
+
+  test("paid claims for other fills only: no fit, and no reversed claim for this fill", () => {
+    const v = verdictOnPrescription([held("refill", "paid", "2026-10-10", { fillNumber: 2 })], pays);
+    assert.deepEqual(v, { kind: "no_fit", reversedFill: [] });
+  });
+
+  test("two paid claims fitting equally are ambiguous, and say how many", () => {
+    const v = verdictOnPrescription([held("a", "paid", "2026-09-10", { bin: "610011", remitCents: 500 }), held("b", "paid", "2026-09-10", { bin: "004336", remitCents: 700 })], pays);
+    assert.equal(v.kind, "ambiguous");
+    assert.equal(v.kind === "ambiguous" && v.count, 2);
+  });
+
+  test("a reversed twin is not offered, so it does not make a paid claim ambiguous", () => {
+    const v = verdictOnPrescription([held("paid", "paid", "2026-09-10"), held("gone", "reversed", "2026-09-10")], pays);
+    assert.equal(v.kind === "tied" && v.claim.id, "paid");
+  });
+
+  test("the claims of a fill are those at the strictest level that finds any", () => {
+    const same = held("same", "reversed", "2026-09-10");
+    const near = held("near", "reversed", "2026-09-12", { fillNumber: 7 });
+    assert.deepEqual(claimsOfThisFill([same, near], pays).map((c) => c.id), ["same"]);
+    assert.deepEqual(claimsOfThisFill([near], pays).map((c) => c.id), ["near"]);
+    assert.deepEqual(claimsOfThisFill([held("month", "reversed", "2026-10-10")], pays), []);
   });
 });

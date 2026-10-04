@@ -126,6 +126,11 @@ export function isProgrammePayer(payer: string | null | undefined): boolean {
   return /redsail|veridikal/.test(n);
 }
 
+/** Whether a payment is a voucher programme's money: one test for attaching a payment to a claim and for saying why one is not attached. */
+export function isProgrammePayment(p: { source: string; payer?: string | null }): boolean {
+  return p.source === "copay_card" || isProgrammePayer(p.payer);
+}
+
 export function claimShares(c: VoucherFields): ClaimShares {
   const remit = c.remitCents ?? 0;
   const paid = Math.max(0, c.evoucherCents ?? 0);

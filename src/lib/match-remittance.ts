@@ -76,14 +76,10 @@ export type Choice = {
 const digits = (v: string | null | undefined): string => (v ?? "").replace(/\D/g, "");
 
 /**
- * The claim a remittance line settles, or nothing and the reason.
- *
- * `candidates` is every *paid* claim on the prescription. Reversed rows are not offered here: a
- * payment against a claim that was reversed is a different problem, and the caller reports it.
+ * The conditions a claim has to meet to be the fill a line is paying, from the strictest to the loosest.
+ * One place, so that choosing the claim and saying which claims a payment was for cannot come to different answers.
  */
-export function chooseClaimForRemittance(candidates: ClaimCandidate[], line: RemittanceLine): Choice {
-  if (candidates.length === 0) return { claim: null, ambiguous: null };
-
+function levelsFor(line: RemittanceLine): ((r: ClaimCandidate) => boolean)[] {
   /*
    * The most specific match that still identifies one claim, loosening one condition at a time.
    *
@@ -109,8 +105,19 @@ export function chooseClaimForRemittance(candidates: ClaimCandidate[], line: Rem
     (r) => nearDate(r) && (line.ndc11 === null || r.ndc11 === line.ndc11),
     (r) => nearDate(r),
   ];
+  return levels;
+}
 
-  for (const fits of levels) {
+/**
+ * The claim a remittance line settles, or nothing and the reason.
+ *
+ * `candidates` is every *paid* claim on the prescription. Reversed rows are not offered here: a
+ * payment against a claim that was reversed is a different problem, and the caller reports it.
+ */
+export function chooseClaimForRemittance(candidates: ClaimCandidate[], line: RemittanceLine): Choice {
+  if (candidates.length === 0) return { claim: null, ambiguous: null };
+
+  for (const fits of levelsFor(line)) {
     const hits = candidates.filter(fits);
     if (hits.length === 0) continue;
     if (hits.length === 1) return { claim: hits[0], ambiguous: null };
@@ -149,4 +156,45 @@ export function chooseClaimForRemittance(candidates: ClaimCandidate[], line: Rem
   }
 
   return { claim: null, ambiguous: null };
+}
+
+/** The claims of `candidates` that are for the fill a line is paying, at the strictest level that finds any; none where none is. */
+export function claimsOfThisFill<T extends ClaimCandidate>(candidates: T[], line: RemittanceLine): T[] {
+  for (const fits of levelsFor(line)) {
+    const hits = candidates.filter(fits);
+    if (hits.length > 0) return hits;
+  }
+  return [];
+}
+
+/** A claim row on the prescription as the site holds it, paid or reversed. */
+export type ClaimOnFile = ClaimCandidate & {
+  status: "paid" | "reversed";
+  /** The day the prescription was completed (sold), from the export; null where it never was. */
+  soldOn: string | null;
+};
+
+/**
+ * What the site makes of one payment, given every claim it holds for the prescription: the answer `findClaim` acts on,
+ * with the reason where the answer is no claim. Pure, so that the screen which explains an unattached payment and the
+ * matcher which left it unattached read the same claims the same way.
+ */
+export type Verdict =
+  | { kind: "tied"; claim: ClaimOnFile }
+  | { kind: "no_claim_on_file" }
+  /** The site holds claims for the prescription and not one is paid. `fill` is those of them that are for this fill: none, where they are all for other fills. */
+  | { kind: "only_reversed"; fill: ClaimOnFile[] }
+  | { kind: "ambiguous"; count: number; why: string }
+  /** The site holds paid claims for the prescription and none fits this fill. `reversedFill` is the reversed claims that do, if any. */
+  | { kind: "no_fit"; reversedFill: ClaimOnFile[] };
+
+export function verdictOnPrescription(onFile: ClaimOnFile[], line: RemittanceLine): Verdict {
+  if (onFile.length === 0) return { kind: "no_claim_on_file" };
+  const paid = onFile.filter((r) => r.status === "paid");
+  if (paid.length === 0) return { kind: "only_reversed", fill: claimsOfThisFill(onFile, line) };
+  const chosen = chooseClaimForRemittance(paid, line);
+  const claim = chosen.claim ? paid.find((r) => r.id === chosen.claim!.id) : undefined;
+  if (claim) return { kind: "tied", claim };
+  if (chosen.ambiguous) return { kind: "ambiguous", ...chosen.ambiguous };
+  return { kind: "no_fit", reversedFill: claimsOfThisFill(onFile.filter((r) => r.status === "reversed"), line) };
 }

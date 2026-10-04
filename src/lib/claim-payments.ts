@@ -1,4 +1,5 @@
-import { chooseClaimForRemittance } from "./match-remittance";
+import { verdictOnPrescription } from "./match-remittance";
+import { claimsFeedStartsOn, claimsOnFile } from "./claims-on-file";
 import "server-only";
 import { originClass, legacyOrigin } from "./payment-origin";
 import nodePath from "node:path";
@@ -9,7 +10,7 @@ import type { LaterPayment } from "./fills";
 import { formatCents } from "./money";
 import { todayIso } from "./dates";
 import { isOutOfBooks } from "./books-start";
-import { isProgrammePayer } from "./payer-owed";
+import { isProgrammePayment } from "./payer-owed";
 import { gateFile } from "./phi-gate";
 import { looksLikeRemitSummary } from "./mck-remit-csv";
 
@@ -86,7 +87,7 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
   if (!rx) throw new Error("A payment has to name the prescription it is for.");
   if (!Number.isFinite(p.amountCents) || p.amountCents === 0) throw new Error("Give the amount received.");
 
-  const { claim, onlyReversed, ambiguous } = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null, Math.round(p.amountCents), p.bin ?? null, p.source === "copay_card" || isProgrammePayer(p.payer));
+  const { claim, onlyReversed, ambiguous } = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null, Math.round(p.amountCents), p.bin ?? null, isProgrammePayment(p));
 
   /*
    * The same money through another kind of document is one payment.
@@ -215,27 +216,12 @@ async function findClaim(
   /* True where the money is a voucher programme's, which narrows a coordinated fill to the row carrying the voucher. */
   fromProgramme: boolean,
 ): Promise<{ claim: { id: string; fillNumber: number | null; dateFilled: string; ndc11: string | null } | null; onlyReversed: boolean; ambiguous: { count: number; why: string } | null }> {
-  const all = await db.query.claims.findMany({
-    where: eq(schema.claims.rxNumber, rxNumber),
-    columns: { id: true, fillNumber: true, dateFilled: true, ndc11: true, status: true, bin: true, remitCents: true, evoucherCents: true, evoucherMessageCents: true },
-  });
-  if (all.length === 0) return { claim: null, onlyReversed: false, ambiguous: null };
-  const rows = all.filter((r) => r.status === "paid");
-  if (rows.length === 0) return { claim: null, onlyReversed: true, ambiguous: null };
-  const chosen = chooseClaimForRemittance(
-    rows.map((r) => ({
-      id: r.id,
-      fillNumber: r.fillNumber,
-      dateFilled: r.dateFilled,
-      ndc11: r.ndc11,
-      bin: r.bin,
-      remitCents: r.remitCents,
-      /* Which of a coordinated fill's two rows a manufacturer programme could be paying. */
-      carriesVoucher: (r.evoucherCents ?? 0) > 0 || (r.evoucherMessageCents ?? 0) > 0,
-    })),
-    { fillNumber, dateFilled, ndc11, amountCents, bin, fromProgramme },
-  );
-  return { claim: chosen.claim, onlyReversed: false, ambiguous: chosen.ambiguous };
+  const onFile = (await claimsOnFile([rxNumber])).get(rxNumber) ?? [];
+  const v = verdictOnPrescription(onFile, { fillNumber, dateFilled, ndc11, amountCents, bin, fromProgramme });
+  if (v.kind === "tied") return { claim: v.claim, onlyReversed: false, ambiguous: null };
+  if (v.kind === "only_reversed") return { claim: null, onlyReversed: true, ambiguous: null };
+  if (v.kind === "ambiguous") return { claim: null, onlyReversed: false, ambiguous: { count: v.count, why: v.why } };
+  return { claim: null, onlyReversed: false, ambiguous: null };
 }
 
 /**
@@ -320,7 +306,7 @@ export async function rematchMisattachedPayments(): Promise<{ looked: number; de
   let detached = 0;
   let moved = 0;
   for (const p of far) {
-    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.paidDate, p.ndc11, p.amountCents, null, p.source === "copay_card" || isProgrammePayer(p.payer));
+    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.paidDate, p.ndc11, p.amountCents, null, isProgrammePayment(p));
     const next = claim?.id ?? null;
     if (next === p.claimId) continue;
     await db.update(schema.claimPayments).set({ claimId: next }).where(eq(schema.claimPayments.id, p.id));
@@ -350,7 +336,7 @@ export async function matchOrphanPayments(): Promise<{ matched: number }> {
   for (const p of orphans) {
     // A payment waiting for its claim attaches to a paid one or keeps waiting; it never attaches to
     // a reversed claim, which would take the money out of every figure the moment it landed.
-    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11, p.amountCents, null, p.source === "copay_card" || isProgrammePayer(p.payer));
+    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11, p.amountCents, null, isProgrammePayment(p));
     if (!claim) continue;
     await db.update(schema.claimPayments).set({ claimId: claim.id }).where(eq(schema.claimPayments.id, p.id));
     matched++;
@@ -383,10 +369,7 @@ export async function laterPaymentSummary(): Promise<
    * The first day the claims feed covers. Read from the claims themselves rather than set as a
    * date in the code, so it stays true if an earlier month is ever loaded.
    */
-  const covered = (await db.query.claimImports.findMany({ columns: { periodFrom: true } }))
-    .map((i) => i.periodFrom)
-    .filter((d): d is string => !!d)
-    .sort()[0] ?? null;
+  const covered = await claimsFeedStartsOn();
   /*
    * The earliest fill this site holds is not the same question and was the wrong answer.
    *
@@ -1347,11 +1330,7 @@ export async function facilitatorMoney(source = "mtf", today = new Date()): Prom
   let undatedCents = 0;
 
   /* The first day the claims feed covers. Read from the imports, which is what actually defines it. */
-  const earliest =
-    (await db.query.claimImports.findMany({ columns: { periodFrom: true } }))
-      .map((i) => i.periodFrom)
-      .filter((d): d is string => !!d)
-      .sort()[0] ?? null;
+  const earliest = await claimsFeedStartsOn();
   let beforeTheFeed = 0;
   for (const r of rows) {
     const m = monthOf(r.receivedOn);
