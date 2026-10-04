@@ -36,6 +36,8 @@
  */
 
 import { isSettledPayerFee } from "./payer-fees";
+import { formatCents } from "./money";
+import { groupsSay, tallyUntied, type UntiedCause } from "./untied-payments";
 
 export type AhClaimRow = {
   fillDate: string;
@@ -293,41 +295,40 @@ export function readAccessHealthPayment(text: string, ownNcpdp: string | null = 
   };
 }
 
-/** One claim payment under an EFT, as far as saying what it is needs. */
-export type EftPaymentState = { amountCents: number; matched: boolean; filledBeforeBooks: boolean; onReversedClaim: boolean };
+/** One claim payment under an EFT, as far as saying what it is needs: `cause` is null where it is tied to a claim, and where it is not, the matcher's reason (untied-payments.ts). */
+export type EftPaymentState = { amountCents: number; cause: UntiedCause | null; outOfBooks: boolean };
 
 /**
- * What an EFT's claim payments are, in the three kinds that matter, for the inbox line.
+ * What an EFT's claim payments are, for the inbox line.
  *
  * The owner read "$164,026.13 across 2135 payments, 80 matched to a claim" as 2,055 payments that had failed. They had
- * not: most pay for prescriptions filled before the site's books start, which it holds no claims for by design, and a
- * few are a plan paying and taking back a fill the pharmacy itself reversed. So the line counts each kind apart:
+ * not: most pay for prescriptions filled before the claims feed begins, which the site holds no claims for. So the line
+ * says what each payment that ties to no claim is, in the words every other screen uses (untied-payments.ts), and not in
+ * words of its own.
  *
- *   settle a claim on this site                                  matched
- *   filled before the books start: nothing to match, nothing owed
- *   paid and taken back on a claim the pharmacy reversed
- *   a fill from the books' own period with no claim here yet      the only kind worth a look
+ * It used to sort them by the fill's date and by a reversed claim of the same day, and call every other one "for fills
+ * since 1 September with no claim on this site yet". Read on 4 October 2026, 70 payments under two EFTs said that of
+ * lines that name no drug and no fill, which no claim is ever coming for; and a payment that fits two claims is not
+ * waiting for one either. The matcher's answer tells them apart. `feedFrom` is the first day the claims feed covers, or
+ * null where no claim has been loaded.
+ *
+ * The page it points to lists a payment received since the books begin, and counts without listing those for fills from
+ * before the feed, so the pointer says how many it lists and not that it lists each.
  *
  * Pure.
  */
-export function describeEftPayments(rows: EftPaymentState[], booksStartOn: string): string {
-  const money = (c: number) => `${c < 0 ? "-" : ""}$${(Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const n = (k: number) => k.toLocaleString("en-US");
-  const kinds = { matched: [] as number[], before: [] as number[], reversed: [] as number[], waiting: [] as number[] };
-  for (const r of rows) {
-    if (r.matched) kinds.matched.push(r.amountCents);
-    else if (r.filledBeforeBooks) kinds.before.push(r.amountCents);
-    else if (r.onReversedClaim) kinds.reversed.push(r.amountCents);
-    else kinds.waiting.push(r.amountCents);
-  }
-  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
-  const start = new Date(`${booksStartOn}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
-  const parts = [
-    kinds.matched.length ? `${n(kinds.matched.length)} (${money(sum(kinds.matched))}) settle claims on this site` : "",
-    kinds.before.length ? `${n(kinds.before.length)} (${money(sum(kinds.before))}) pay for prescriptions filled before the books start on ${start}: nothing to match, nothing owed` : "",
-    kinds.reversed.length ? `${n(kinds.reversed.length)} (net ${money(sum(kinds.reversed))}) are paid and taken back on claims the pharmacy reversed` : "",
-    kinds.waiting.length ? `${n(kinds.waiting.length)} (${money(sum(kinds.waiting))}) are for fills since ${start} with no claim on this site yet` : "",
-  ].filter(Boolean);
+export function describeEftPayments(rows: EftPaymentState[], feedFrom: string | null): string {
   if (rows.length === 0) return "";
-  return `Of the ${n(rows.length)} claim payment${rows.length === 1 ? "" : "s"} under this EFT (${money(sum(rows.map((r) => r.amountCents)))}): ${parts.join("; ")}.`;
+  const n = (k: number) => k.toLocaleString("en-US");
+  const sum = (xs: { amountCents: number }[]) => xs.reduce((a, b) => a + b.amountCents, 0);
+  const net = (xs: { amountCents: number }[]) => `${xs.length === 1 ? "" : "net "}${formatCents(sum(xs))}`;
+  const tied = rows.filter((r) => r.cause === null);
+  const tally = tallyUntied(rows.flatMap((r) => (r.cause === null ? [] : [{ cause: r.cause, amountCents: r.amountCents }])));
+  const parts = [
+    tied.length ? `${n(tied.length)} (${net(tied)}) ${tied.length === 1 ? "settles a claim" : "settle claims"} on this site` : "",
+    tally.length ? `tied to no claim: ${groupsSay(tally, feedFrom)}` : "",
+  ].filter(Boolean);
+  const listed = rows.filter((r) => r.cause !== null && r.cause !== "before_feed" && !r.outOfBooks).length;
+  const pointer = listed ? ` Claims, Payments with no claim, lists ${n(listed)} of them, each with its reason.` : "";
+  return `Of the ${n(rows.length)} claim payment${rows.length === 1 ? "" : "s"} under this EFT (${formatCents(sum(rows))}): ${parts.join("; ")}.${pointer}`;
 }

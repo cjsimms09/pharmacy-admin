@@ -14,6 +14,7 @@ import { classifyDocument, describeError, hasApiKey } from "@/lib/ai";
 import { addDays, todayIso } from "@/lib/dates";
 import { readBusinessDocument, looksLikeX12Remittance, matchParty, duplicateBill, type BusinessDocT, BUSINESS_KINDS } from "@/lib/business-docs";
 import { parseCents } from "@/lib/money";
+import { remittanceKindsSay } from "@/lib/remittance-counts";
 // A "use server" module may export only async functions, so the list and its type live beside it.
 import type { IntakeHint } from "./kinds";
 
@@ -110,7 +111,7 @@ export async function readIntoIntake(
             kind: "report",
             routedAs: "remittance",
             summary:
-              `${r.payments} payments from ${r.payer ?? "the payer"} totalling ${money(r.amountCents)}, ${r.matched} matched to a claim, ${r.unmatched} waiting for theirs` +
+              `${r.payments} payments from ${r.payer ?? "the payer"} totalling ${money(r.amountCents)}, ${remittanceKindsSay(r)}` +
               (r.alreadyHeld ? `, ${r.alreadyHeld} already held` : "") +
               (r.banked ? `; ${money(r.amountCents)} banked against ${r.paidOn?.slice(0, 7)}` : "") +
               (r.settles ? ". A plan's own remittance settles what the claims already carry, so nothing is counted as revenue twice." : "."),

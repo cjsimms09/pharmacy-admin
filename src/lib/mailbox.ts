@@ -18,6 +18,7 @@ import { decryptText, encryptText, newId } from "./crypto";
 import { storeFile, ALLOWED_MIME, EXCEL_MIME, MAX_FILE_BYTES } from "./files";
 import { classify, parseSupplierRules, supplierFor, unknownSenderInvoiceReason, type RouteKind } from "./autoroute";
 import { importClaims } from "./claims";
+import { remittanceKindsSay } from "./remittance-counts";
 import { importPioneerCatalog } from "./suppliers";
 import { importRxTransactions, describeTransactionImport } from "./claims";
 import { describeFileName } from "./pioneer-catalog";
@@ -1642,7 +1643,7 @@ export async function importRecognised(
          * is the sentence that will be printed next month when a September payment really does fail,
          * and it will look the same. So the two are counted and said apart.
          */
-        : `${r.payer ?? "Remittance"}${r.paidOn ? ` paid ${r.paidOn}` : ""}: ${r.payments} payments (${money(r.amountCents)}) — ${r.matched} matched to a claim${r.beforeTheStart ? `, ${r.beforeTheStart} for fills older than any claim on file, which cannot match and are not a fault` : ""}, ${r.unmatched} held unmatched${r.paidAReversedFill ? `, ${r.paidAReversedFill} paid against a fill this pharmacy had reversed` : ""}, ${r.alreadyHeld} already held${r.banked ? ", banked" : ""}${r.problems.length ? `; ${r.problems.slice(0, 2).join("; ")}` : ""}`;
+        : `${r.payer ?? "Remittance"}${r.paidOn ? ` paid ${r.paidOn}` : ""}: ${r.payments} payments (${money(r.amountCents)}) — ${remittanceKindsSay(r)}, ${r.alreadyHeld} already held${r.banked ? ", banked" : ""}${r.problems.length ? `; ${r.problems.slice(0, 2).join("; ")}` : ""}`;
       imported = !gate && r.payments > 0;
     } else if (cls.kind === "copay_remit") {
       /*

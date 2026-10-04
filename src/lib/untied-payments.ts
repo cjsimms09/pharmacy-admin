@@ -259,6 +259,11 @@ function groupPart(r: TallyRow, feedFrom: string | null): string {
   return `${payments(r.count)} (${sum(r.count, r.cents)}) ${causeInfo(r.cause, feedFrom).short[r.count === 1 ? 0 : 1]}`;
 }
 
+/** Every group of a tally in `groupPart`'s words, in the order of CAUSES, for a sentence that has to say them all. */
+export function groupsSay(rows: TallyRow[], feedFrom: string | null): string {
+  return [...rows].sort((a, b) => CAUSES.indexOf(a.cause) - CAUSES.indexOf(b.cause)).map((r) => groupPart(r, feedFrom)).join("; ");
+}
+
 /**
  * Everything tied to no claim, every figure beside what it is, so the sentence reads without the page behind it. The payments
  * that can matter come first and the fills from before the claims feed that the site holds no claim for after, because they

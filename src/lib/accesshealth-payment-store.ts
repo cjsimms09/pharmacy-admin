@@ -1,11 +1,11 @@
 import "server-only";
-import { and, eq, inArray, like } from "drizzle-orm";
-import { SITE_STARTS_ON } from "./books-start";
+import { and, eq, like } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { audit } from "./audit";
 import { getSettings } from "./settings";
 import { AH_FEE_CATEGORY, CS_RECOUPMENT_CATEGORY, adjustmentPostings, describeEftPayments, readAccessHealthPayment, type AccessHealthPayment } from "./accesshealth-payment";
 import { newId } from "./crypto";
+import { causesOf } from "./untied-payments-store";
 
 /** The openings of every adjustments paragraph this reader has written, so a re-read replaces its own and no one else's. */
 const READER_NOTE = /^(Remittance-level adjustments, kept as data|Origination fees of |Recoupments of |Held as data, on neither account)/;
@@ -177,22 +177,12 @@ export async function fileAccessHealthPayment(
    */
   const onFile = await db.query.claimPayments.findMany({
     where: and(eq(schema.claimPayments.source, "plan"), like(schema.claimPayments.reference, `${p.eftNumber}/%`)),
-    columns: { amountCents: true, claimId: true, rxNumber: true, dateFilled: true },
+    columns: { id: true, source: true, payer: true, receivedOn: true, amountCents: true, rxNumber: true, fillNumber: true, dateFilled: true, ndc11: true, reference: true, claimId: true, outOfBooks: true },
   });
-  const loose = onFile.filter((r) => !r.claimId && r.dateFilled && r.dateFilled >= SITE_STARTS_ON);
-  const reversedFills = new Set(
-    loose.length
-      ? (await db.query.claims.findMany({ where: and(inArray(schema.claims.rxNumber, [...new Set(loose.map((r) => r.rxNumber))]), eq(schema.claims.status, "reversed")), columns: { rxNumber: true, dateFilled: true } })).map((c) => `${c.rxNumber}|${c.dateFilled}`)
-      : [],
-  );
+  const { feedFrom, causes } = await causesOf(onFile.filter((r) => r.claimId === null));
   const kinds = describeEftPayments(
-    onFile.map((r) => ({
-      amountCents: r.amountCents,
-      matched: r.claimId !== null,
-      filledBeforeBooks: !!r.dateFilled && r.dateFilled < SITE_STARTS_ON,
-      onReversedClaim: reversedFills.has(`${r.rxNumber}|${r.dateFilled}`),
-    })),
-    SITE_STARTS_ON,
+    onFile.map((r) => ({ amountCents: r.amountCents, cause: r.claimId === null ? causes.get(r.id)! : null, outOfBooks: r.outOfBooks })),
+    feedFrom,
   );
 
   const says = [

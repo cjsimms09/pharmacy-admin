@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { adjustmentPostings, describeEftPayments, looksLikeAccessHealthPayment, readAccessHealthPayment } from "../src/lib/accesshealth-payment";
+import { adjustmentPostings, describeEftPayments, looksLikeAccessHealthPayment, readAccessHealthPayment, type EftPaymentState } from "../src/lib/accesshealth-payment";
 
 /*
  * The shape of a Health Mart Atlas AccessHealth payment report as `pdfText` returns it. Line order, spellings and the
@@ -193,22 +193,43 @@ describe("the report's remittance-level adjustments", () => {
 });
 
 describe("what an EFT's claim payments are, on the inbox line", () => {
-  test("each kind is counted apart, so payments for fills before the books start never read as failures to match", () => {
-    const rows = [
-      { amountCents: 4000, matched: true, filledBeforeBooks: false, onReversedClaim: false },
-      { amountCents: 10000, matched: false, filledBeforeBooks: true, onReversedClaim: false },
-      { amountCents: 2500, matched: false, filledBeforeBooks: true, onReversedClaim: false },
-      { amountCents: 700, matched: false, filledBeforeBooks: false, onReversedClaim: true },
-      { amountCents: -735, matched: false, filledBeforeBooks: false, onReversedClaim: true },
-    ];
+  const row = (amountCents: number, cause: EftPaymentState["cause"], outOfBooks = false): EftPaymentState => ({ amountCents, cause, outOfBooks });
+
+  test("each group is said in the words the other screens use, and the sums tie to the EFT", () => {
+    const rows = [row(4000, null), row(10000, "before_feed"), row(2500, "before_feed"), row(700, "reversed_not_sold"), row(-735, "reversed_not_sold")];
     assert.equal(
       describeEftPayments(rows, "2026-09-01"),
-      "Of the 5 claim payments under this EFT ($164.65): 1 ($40.00) settle claims on this site; 2 ($125.00) pay for prescriptions filled before the books start on 1 September: nothing to match, nothing owed; 2 (net -$0.35) are paid and taken back on claims the pharmacy reversed.",
+      "Of the 5 claim payments under this EFT ($164.65): 1 ($40.00) settles a claim on this site; tied to no claim: 2 payments (net -$0.35) on claims that were reversed, none carrying a sale date; 2 payments (net $125.00) for fills from before the claims feed begins on Sep 1, 2026, which the site holds no claim for. Claims, Payments with no claim, lists 2 of them, each with its reason.",
     );
   });
 
-  test("a fill from the books' own period with no claim here is the one kind named as waiting", () => {
-    const s = describeEftPayments([{ amountCents: 1234, matched: false, filledBeforeBooks: false, onReversedClaim: false }], "2026-09-01");
-    assert.match(s, /1 \(\$12\.34\) are for fills since 1 September with no claim on this site yet/);
+  test("payments that name no drug and no fill are not called payments waiting for a claim", () => {
+    const s = describeEftPayments([row(1000, "not_a_fill"), row(1000, "not_a_fill"), row(1000, null)], "2026-09-01");
+    assert.equal(
+      s,
+      "Of the 3 claim payments under this EFT ($30.00): 1 ($10.00) settles a claim on this site; tied to no claim: 2 payments (net $20.00) that name no drug and no fill. Claims, Payments with no claim, lists 2 of them, each with its reason.",
+    );
+    assert.doesNotMatch(s, /yet|waiting/);
+  });
+
+  test("a payment that fits two claims says so, and only one for a prescription with no claim on file says that", () => {
+    assert.equal(
+      describeEftPayments([row(500, "fits_several"), row(1234, "no_claim_yet")], "2026-09-01"),
+      "Of the 2 claim payments under this EFT ($17.34): tied to no claim: 1 payment ($5.00) that fits two or more claims equally; 1 payment ($12.34) for a prescription with no claim on file. Claims, Payments with no claim, lists 2 of them, each with its reason.",
+    );
+  });
+
+  test("the pointer counts only what that page lists: not money received before the books begin, not fills from before the feed", () => {
+    const s = describeEftPayments([row(100, "not_a_fill", true), row(100, "not_a_fill", true), row(100, "not_a_fill"), row(900, "before_feed")], "2026-09-01");
+    assert.match(s, /lists 1 of them, each with its reason\.$/);
+  });
+
+  test("an EFT with nothing for a person to look at points nowhere", () => {
+    assert.equal(
+      describeEftPayments([row(2500, null), row(2500, null)], "2026-09-01"),
+      "Of the 2 claim payments under this EFT ($50.00): 2 (net $50.00) settle claims on this site.",
+    );
+    assert.doesNotMatch(describeEftPayments([row(900, "before_feed", true), row(900, "before_feed")], "2026-09-01"), /Payments with no claim/);
+    assert.equal(describeEftPayments([], "2026-09-01"), "");
   });
 });

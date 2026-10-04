@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { CAUSES, causeInfo, classifyUntied, claimBesideSays, namesSays, needsPhrase, needsSays, sourceSays, sourceToDo, tallyByNeeds, tallyUntied, tiedSays, unattachedSays, unattachedTail, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedPayment } from "../src/lib/untied-payments";
+import { CAUSES, causeInfo, classifyUntied, claimBesideSays, groupsSay, namesSays, needsPhrase, needsSays, sourceSays, sourceToDo, tallyByNeeds, tallyUntied, tiedSays, unattachedSays, unattachedTail, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedPayment } from "../src/lib/untied-payments";
 import type { ClaimOnFile } from "../src/lib/match-remittance";
 
 /*
@@ -429,5 +429,18 @@ describe("what the balance screens say of the payments tied to no claim", () => 
         assert.doesNotMatch(said, /not an error|nothing to fix|real money|not a defect|does not hold/i, `${cause}: ${said}`);
       }
     }
+  });
+
+  test("every group of a tally is said in the words of the card and in the order of the causes, so no line can say one differently", () => {
+    const rows: TallyRow[] = [
+      { cause: "before_feed", count: 7, cents: 81_240 },
+      { cause: "fits_several", count: 1, cents: -3_000 },
+      { cause: "not_a_fill", count: 2, cents: 2_000 },
+    ];
+    assert.equal(
+      groupsSay(rows, FEED),
+      "1 payment (-$30.00) that fits two or more claims equally; 2 payments (net $20.00) that name no drug and no fill; 7 payments (net $812.40) for fills from before the claims feed begins on Sep 1, 2026, which the site holds no claim for",
+    );
+    assert.equal(groupsSay([], FEED), "");
   });
 });
