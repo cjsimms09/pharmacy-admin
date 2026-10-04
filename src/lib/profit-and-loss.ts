@@ -257,8 +257,12 @@ export type PLInputs = {
    * give different totals for one remittance (differ). Said on the month so that a figure that moved can be explained.
    */
   remitFeesKept?: { cents: number; lines: number; differ: string } | null;
-  /** Lines of a remittance's provider-level adjustments that are not fees (a balance forward, a credit): on neither account. */
+  /** Lines the rule cannot place (a credit from the payer, a code nobody has explained): on neither account until a person counts them or leaves them out. */
   remitFeesHeld?: { cents: number; lines: number; says: string } | null;
+  /** Lines the rule is certain are not fees (a balance forward): on neither account, and nothing for anybody to decide. */
+  remitFeesNotFees?: { cents: number; lines: number; says: string } | null;
+  /** Where a person's decision moved the month's fee figure from what the rule alone gives, in words (payer-fees.ts). Empty or absent where none did. */
+  remitFeesDecided?: string | null;
   /** Billed by a supplier whose payments the site can see, and not taken yet. Owed, not spent. */
   notYetTakenCents?: number;
   /**
@@ -828,13 +832,19 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * since 2024, inside the paid amounts; a fee a payer still takes after the sale arrives on the remittance, which the
    * site reads (remitFeesCents). So a month with none says so, as a measured fact, and asks nobody to type anything.
    */
-  if (i.basis === "accrual" && !i.remitFeesCents && !i.expenses.some((e) => e.kind === "revenue_offset")) {
+  if (i.basis === "accrual" && !i.remitFeesCents && !i.remitFeesDecided && !i.expenses.some((e) => e.kind === "revenue_offset")) {
     caveats.push(
       "Part D price concessions are taken at the point of sale, inside the paid amounts above. No fee taken after the sale is on file for this month: no Health Mart Atlas payment report, no 835 and no adjustment report shows one. A remittance not yet read could still carry one; the ProviderPay pull and the payment reports bring them.",
     );
   }
   if (i.basis === "accrual" && i.remitFeesHeld && i.remitFeesHeld.lines > 0) {
-    caveats.push("Not counted as fees, and on neither account: " + i.remitFeesHeld.says + ".");
+    caveats.push("Waiting for you, and on neither account until you decide: " + i.remitFeesHeld.says + ". Count it or leave it out on the Money page.");
+  }
+  if (i.basis === "accrual" && i.remitFeesNotFees && i.remitFeesNotFees.lines > 0) {
+    caveats.push("On neither account, and nothing for you to decide: " + i.remitFeesNotFees.says + ".");
+  }
+  if (i.basis === "accrual" && i.remitFeesDecided) {
+    caveats.push("Your decision changes this month's payer fees from what the rule gives: " + i.remitFeesDecided + ". The Money page lists each one, with a press to undo it.");
   }
   if (i.basis === "accrual" && i.remitFeesKept?.differ) {
     caveats.push("Two records of one remittance disagree about its fees, and the better record is the one counted: " + i.remitFeesKept.differ + ".");
@@ -1212,11 +1222,13 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
 }
 
 /** The fee inputs of one month, from what payer-fees.ts counted. */
-function feeInputs(f: MonthFees | undefined): Pick<PLInputs, "remitFeesCents" | "remitFeesKept" | "remitFeesHeld"> {
+function feeInputs(f: MonthFees | undefined): Pick<PLInputs, "remitFeesCents" | "remitFeesKept" | "remitFeesHeld" | "remitFeesNotFees" | "remitFeesDecided"> {
   return {
     remitFeesCents: f?.countedCents ?? 0,
     remitFeesKept: f && (f.keptOutLines > 0 || f.differ) ? { cents: f.keptOutCents, lines: f.keptOutLines, differ: f.differ } : null,
     remitFeesHeld: f && f.heldLines > 0 ? { cents: f.heldCents, lines: f.heldLines, says: f.heldSays } : null,
+    remitFeesNotFees: f && f.notFeesLines > 0 ? { cents: f.notFeesCents, lines: f.notFeesLines, says: f.notFeesSays } : null,
+    remitFeesDecided: f?.decidedSays || null,
   };
 }
 

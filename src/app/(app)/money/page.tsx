@@ -18,6 +18,8 @@ import { closeMonthFromBooks } from "./close-month";
 import { PageHeader, Card, Notice } from "@/components/ui";
 import { Bars } from "@/components/bars";
 import { Stat, deltaOf } from "@/components/kit";
+import { loadPayerFees } from "@/lib/payer-fees-store";
+import { PayerFeesCard } from "./payer-fees-card";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Money" };
@@ -70,13 +72,14 @@ async function uploadPayments(fd: FormData): Promise<never> {
 }
 
 export default async function MoneyPage({ searchParams }: { searchParams: Promise<{ period?: string; ok?: string; error?: string; scan?: string }> }) {
-  await requireUser();
+  const viewer = await requireUser();
+  const canDecide = viewer.role === "owner" || viewer.role === "pic";
   const { period: periodParam, ok, error, scan } = await searchParams;
   /* A scanned bank statement waiting on a person: the stretches its balances could not prove. See scanned-bank-solve.ts. */
   const scanReview = scan ? await scannedStatementReview(scan).catch(() => null) : null;
   const today = todayIso();
   const period = (periodParam && parsePeriod(periodParam)) || periodOf("month", today.slice(0, 7));
-  const [books, recent, banked, bankLines] = await Promise.all([booksFor(period, today), recentMonths(6, today), cashReceiptsFor(period.months), lastStatementLines(period.months)]);
+  const [books, recent, banked, bankLines, payerFees] = await Promise.all([booksFor(period, today), recentMonths(6, today), cashReceiptsFor(period.months), lastStatementLines(period.months), loadPayerFees().catch(() => null)]);
   const { accrual, cash, scripts, gap, pace, sources, countedOnce, feeds, difference, balances } = books;
   /* Read back from the last pull, so this can never disagree with the feed that computed it. */
   const completeness = await claimsCompleteness();
@@ -399,6 +402,13 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           )}
         </details>
       </Card>
+
+      {/* What the payers took off the remittances, line by line, each with a press to count it, leave it out or undo that. The account's row of the same name is this card's counted lines. */}
+      {payerFees ? (
+        <PayerFeesCard fees={payerFees} period={period} canDecide={canDecide} />
+      ) : (
+        <p className="mt-4 text-xs text-warn">The payer-fee lines could not be read just now, so this page cannot show which are counted. Reload to try again.</p>
+      )}
 
       {/* At the bank: one line on where the cash side stands; the tools for money the feeds did not see are behind a press. */}
       <Card

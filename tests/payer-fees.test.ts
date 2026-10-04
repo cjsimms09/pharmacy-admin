@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { classifyFee, isSettledPayerFee, sameRemittance, countPayerFees, feesByMonth, type FeeLine } from "../src/lib/payer-fees";
+import { classifyFee, isSettledPayerFee, sameRemittance, countPayerFees, feesByMonth, feeKey, readFeeKey, lineSays, type FeeDecision, type FeeLine } from "../src/lib/payer-fees";
 import { monthlyPL, type PLInputs } from "../src/lib/profit-and-loss";
 import { countedTwice } from "../src/lib/books-check";
 
@@ -40,6 +40,17 @@ describe("which provider-level lines are fees", () => {
       assert.equal(k.fee, false, code);
       assert.match(k.fee ? "" : k.why, new RegExp(`"${code.toUpperCase()}" line, whose meaning is not settled`));
     }
+  });
+  test("only a balance forward is certain: a credit and an unexplained code are left for a person", () => {
+    const byRule = (l: Parameters<typeof classifyFee>[0]) => {
+      const k = classifyFee(l);
+      return k.fee ? null : k.byRule;
+    };
+    assert.equal(byRule({ code: "CS", reference: "balance forward", takenCents: -46_95 }), true);
+    assert.equal(byRule({ code: "FB", takenCents: 1_00 }), true);
+    assert.equal(byRule({ code: "CS", takenCents: -84 }), false);
+    assert.equal(byRule({ code: "WO", takenCents: 3_00 }), false);
+    assert.equal(byRule({ code: "AH", takenCents: 3_00 }), null, "a fee is not in the question");
   });
   test("the predicate the payment-report reader books by is this one", () => {
     assert.equal(isSettledPayerFee("AH", 1_00), true);
@@ -91,14 +102,17 @@ describe("one remittance, counted from one record", () => {
       assert.equal(onTheAccount, 10_00, `records present: ${mask.toString(2).padStart(3, "0")}`);
     }
   });
-  test("a balance forward is held and counted nowhere", () => {
+  test("a balance forward is counted nowhere, and nobody is asked about it", () => {
     const r = countPayerFees({ paymentReports: [], from835: [line({ remittance: "TRN-70000001", month: "2026-10", code: "CS", reference: "balance forward", takenCents: -46_95, payer: "Example Claims Co" })], fromAdjustmentReport: [] });
     assert.equal(r.counted.length, 0);
-    assert.equal(r.held.length, 1);
+    assert.equal(r.held.length, 0, "the rule is certain, so there is nothing for him to decide");
+    assert.equal(r.notFees.length, 1);
     const oct = feesByMonth(r).get("2026-10")!;
     assert.equal(oct.countedCents, 0);
-    assert.equal(oct.heldCents, -46_95);
-    assert.match(oct.heldSays, /Example Claims Co CS "balance forward" \$46\.95 added to the remittance, on TRN-70000001: a balance carried to a later remittance/);
+    assert.equal(oct.heldLines, 0);
+    assert.equal(oct.notFeesCents, -46_95);
+    assert.equal(oct.notFeesLines, 1);
+    assert.match(oct.notFeesSays, /Example Claims Co CS "balance forward" \$46\.95 added to the remittance, on TRN-70000001: a balance carried to a later remittance/);
   });
   test("a credit from the payer is held; it is not netted against the fees beside it", () => {
     const r = countPayerFees({ paymentReports: [], from835: [], fromAdjustmentReport: [line({ remittance: "EFT-9000004", code: "CS", takenCents: 6_00 }), line({ remittance: "EFT-9000005", code: "CS", takenCents: -84 })] });
@@ -151,7 +165,137 @@ describe("by month", () => {
     const r = countPayerFees({ paymentReports: [], from835: [line({ remittance: "", code: "WO", takenCents: 3_00, payer: "" })], fromAdjustmentReport: [] });
     const says = feesByMonth(r).get("2026-09")!.heldSays;
     assert.doesNotMatch(says, /, on :|, on /);
-    assert.match(says, /^A payer WO \$3\.00 taken from it: /);
+    assert.match(says, /^A payer WO \$3\.00 taken from the remittance: /);
+  });
+});
+
+const said = (l: FeeLine, decision: FeeDecision["decision"], on = "2026-10-04T15:00:00.000Z", by = "the owner"): FeeDecision => ({ key: feeKey(l), decision, by, on });
+const nothingElse = { paymentReports: [], from835: [], fromAdjustmentReport: [] };
+
+describe("what a line is keyed on", () => {
+  test("the remittance, the code and the amount, and it reads back the same way", () => {
+    const k = feeKey(line({ remittance: "EFT-9000001", code: " cs ", takenCents: -84 }));
+    assert.equal(k, "EFT-9000001|CS|-84");
+    assert.deepEqual(readFeeKey(k), { remittance: "EFT-9000001", code: "CS", takenCents: -84 });
+    assert.equal(readFeeKey("nothing like a key"), null);
+    assert.equal(readFeeKey("EFT-9000001|CS|1.5"), null);
+  });
+  test("not the reference, which a better record of the same line may spell differently", () => {
+    assert.equal(feeKey(line({ reference: "as one record spells it" })), feeKey(line({ reference: "as another does" })));
+  });
+  test("a remittance with no number is told apart by its month, and a stray bar cannot break the key", () => {
+    assert.equal(feeKey(line({ remittance: "", month: "2026-09" })), "no remittance number, 2026-09|AH|1000");
+    assert.notEqual(feeKey(line({ remittance: "", month: "2026-09" })), feeKey(line({ remittance: "", month: "2026-10" })));
+    assert.ok(readFeeKey(feeKey(line({ remittance: "", month: "2026-09" }))));
+    assert.equal(feeKey(line({ remittance: "EFT | 9000001 " })), "EFT 9000001|AH|1000");
+  });
+  test("a line in words says which payer, which code, how much, which way and on which remittance", () => {
+    assert.equal(lineSays(line({ payer: "Example Atlas", code: "CS", reference: "balance forward", takenCents: -46_95, remittance: "TRN-70000001" })), 'Example Atlas CS "balance forward" $46.95 added to the remittance, on TRN-70000001');
+    assert.equal(lineSays(line({ payer: "", code: "WO", takenCents: 3_00, remittance: "" })), "A payer WO $3.00 taken from the remittance");
+  });
+});
+
+describe("a decision of his", () => {
+  const credit = line({ remittance: "EFT-9000004", code: "CS", takenCents: -84 });
+  const unexplained = line({ remittance: "EFT-9000006", code: "WO", takenCents: 3_00 });
+  const fee = line({ remittance: "EFT-9000003", takenCents: 4_00 });
+
+  test("a line waiting for him is counted when he says it is a fee, and the month says the figure moved", () => {
+    const r = countPayerFees({ ...nothingElse, fromAdjustmentReport: [credit], decisions: [said(credit, "count")] });
+    assert.equal(r.held.length, 0);
+    assert.equal(r.counted.length, 1);
+    assert.deepEqual(r.counted[0].decided, { decision: "count", by: "the owner", on: "2026-10-04T15:00:00.000Z", ruleCounted: false });
+    const sep = feesByMonth(r).get("2026-09")!;
+    assert.equal(sep.heldLines, 0);
+    assert.equal(sep.countedCents, -84, "a credit he counts as a fee takes the month's fees down by what it gave back");
+    assert.equal(sep.decidedSays, "1 line counted that the rule would not have (-$0.84)");
+  });
+  test("a line waiting for him is left out when he says it is not a fee, and no longer waits", () => {
+    const r = countPayerFees({ ...nothingElse, fromAdjustmentReport: [unexplained], decisions: [said(unexplained, "leave_out")] });
+    assert.equal(r.held.length, 0);
+    assert.equal(r.counted.length, 0);
+    assert.equal(r.leftOut.length, 1);
+    assert.equal(r.leftOut[0].ruleSaid, 'a "WO" line, whose meaning is not settled');
+    const sep = feesByMonth(r).get("2026-09")!;
+    assert.equal(sep.heldLines, 0);
+    assert.equal(sep.leftOutLines, 1);
+    assert.equal(sep.leftOutCents, 3_00);
+    assert.equal(sep.decidedSays, "", "the rule would not have counted it either, so the figure is what it would have been");
+  });
+  test("a fee the rule counts is left out when he says so, and the month says the figure moved", () => {
+    const r = countPayerFees({ ...nothingElse, from835: [fee], decisions: [said(fee, "leave_out")] });
+    assert.equal(r.counted.length, 0);
+    assert.equal(r.leftOut.length, 1);
+    assert.equal(r.leftOut[0].ruleSaid, "a fee, which the rule counts");
+    const sep = feesByMonth(r).get("2026-09")!;
+    assert.equal(sep.countedCents, 0);
+    assert.equal(sep.decidedSays, "1 line the rule would have counted left out ($4.00)");
+  });
+  test("counting a fee the rule already counts changes nothing, and says nothing", () => {
+    const r = countPayerFees({ ...nothingElse, from835: [fee], decisions: [said(fee, "count")] });
+    assert.equal(r.counted.length, 1);
+    assert.equal(r.counted[0].decided?.ruleCounted, true);
+    assert.equal(feesByMonth(r).get("2026-09")!.countedCents, 4_00);
+    assert.equal(feesByMonth(r).get("2026-09")!.decidedSays, "");
+  });
+  test("a decision moves only its own line", () => {
+    const r = countPayerFees({ ...nothingElse, fromAdjustmentReport: [credit, unexplained, fee], decisions: [said(unexplained, "count")] });
+    assert.deepEqual(r.held.map((l) => l.code), ["CS"]);
+    assert.deepEqual(r.counted.map((l) => l.code).sort(), ["AH", "WO"]);
+    assert.equal(feesByMonth(r).get("2026-09")!.countedCents, 7_00);
+  });
+  test("a line a better record carries is not his to decide: the figure counts it once, there", () => {
+    const dup = line({ remittance: "9000001", takenCents: 10_00 });
+    const r = countPayerFees({ paymentReports: [paid("EFT-9000001", 10_00)], from835: [], fromAdjustmentReport: [dup], decisions: [said(dup, "leave_out")] });
+    assert.equal(r.keptOut.length, 1);
+    assert.equal(r.leftOut.length, 0);
+    assert.equal(r.counted.length, 0);
+  });
+  test("a decision survives a better record of the same line arriving, under another spelling and another reference", () => {
+    const first = line({ remittance: "EFT-9000006", code: "WO", takenCents: 3_00, reference: "as the adjustment report spells it" });
+    const later = line({ remittance: "TRN*1*9000006", code: "WO", takenCents: 3_00, reference: "as the 835 spells it" });
+    const r = countPayerFees({ ...nothingElse, from835: [later], fromAdjustmentReport: [first], decisions: [said(first, "count")] });
+    assert.equal(r.held.length, 0, "he has already said what it is");
+    assert.deepEqual(r.counted.map((l) => l.from), ["the 835"]);
+    assert.equal(feesByMonth(r).get("2026-09")!.countedCents, 3_00, "once, from the better record");
+  });
+  test("the latest word on a line stands, whichever spelling of its remittance it was said under", () => {
+    const a = line({ remittance: "EFT-9000006", code: "WO", takenCents: 3_00 });
+    const b = line({ remittance: "TRN*1*9000006", code: "WO", takenCents: 3_00 });
+    const counted = said(a, "count", "2026-10-04T15:00:00.000Z");
+    const undone = countPayerFees({ ...nothingElse, from835: [b], decisions: [counted, said(b, "reopen", "2026-10-05T09:00:00.000Z")] });
+    assert.equal(undone.counted.length, 0);
+    assert.equal(undone.held.length, 1, "back to the rule, which cannot place it");
+    const changed = countPayerFees({ ...nothingElse, from835: [b], decisions: [counted, said(b, "leave_out", "2026-10-06T09:00:00.000Z")] });
+    assert.equal(changed.leftOut.length, 1);
+    assert.equal(changed.counted.length, 0);
+    const stale = countPayerFees({ ...nothingElse, from835: [b], decisions: [said(b, "reopen", "2026-10-03T09:00:00.000Z"), counted] });
+    assert.equal(stale.counted.length, 1, "an older undo does not beat a newer count, wherever it sits in the list");
+  });
+  test("two lines of one remittance with the same code and amount are decided together", () => {
+    const a = line({ remittance: "EFT-9000007", code: "WO", takenCents: 2_00, reference: "first" });
+    const b = line({ remittance: "EFT-9000007", code: "WO", takenCents: 2_00, reference: "second" });
+    const r = countPayerFees({ ...nothingElse, fromAdjustmentReport: [a, b], decisions: [said(a, "count")] });
+    assert.equal(r.counted.length, 2);
+    assert.equal(feesByMonth(r).get("2026-09")!.countedCents, 4_00);
+  });
+  test("a line with no remittance number is decided with its own month only", () => {
+    const sep = line({ remittance: "", month: "2026-09", code: "WO", takenCents: 3_00 });
+    const oct = line({ remittance: "", month: "2026-10", code: "WO", takenCents: 3_00 });
+    const r = countPayerFees({ ...nothingElse, from835: [sep, oct], decisions: [said(sep, "count")] });
+    assert.deepEqual(r.counted.map((l) => l.month), ["2026-09"]);
+    assert.deepEqual(r.held.map((l) => l.month), ["2026-10"]);
+  });
+  test("a decision on one line does not hide that two records disagree about the remittance", () => {
+    const wo = line({ remittance: "EFT-9000002", code: "WO", takenCents: 3_00 });
+    const r = countPayerFees({
+      paymentReports: [],
+      from835: [line({ remittance: "EFT-9000002", takenCents: 10_00 }), wo],
+      fromAdjustmentReport: [line({ remittance: "9000002", takenCents: 12_00 })],
+      decisions: [said(wo, "count")],
+    });
+    assert.equal(r.disagree.length, 1);
+    assert.match(feesByMonth(r).get("2026-09")!.differ, /9000002: the 835 says \$10\.00 and the adjustment report says \$12\.00/);
   });
 });
 
@@ -184,15 +328,26 @@ describe("on the two accounts", () => {
     assert.equal(pl.revenueCents - pl.netRevenueCents, 17_26);
   });
   test("the cash account takes no fee line and does not claim there were none: the deposit is already net", () => {
-    const pl = monthlyPL(account("cash", { remitFeesCents: 3_26, remitFeesHeld: { cents: -46_95, lines: 1, says: "a balance forward" } }));
+    const pl = monthlyPL(account("cash", { remitFeesCents: 3_26, remitFeesHeld: { cents: -84, lines: 1, says: "a credit" }, remitFeesNotFees: { cents: -46_95, lines: 1, says: "a balance forward" }, remitFeesDecided: "1 line counted that the rule would not have (-$0.84)" }));
     assert.equal(pl.offsets.some((l) => FEE_LINE.test(l.label)), false);
-    assert.equal(pl.caveats.some((c) => /Not counted as fees|No fee taken after the sale/.test(c)), false);
+    assert.equal(pl.caveats.some((c) => /Waiting for you|On neither account|Your decision changes|No fee taken after the sale/.test(c)), false);
   });
-  test("a month whose only line was held says so, and does not pretend a fee was counted", () => {
-    const pl = monthlyPL(account("accrual", { remitFeesCents: 0, remitFeesHeld: { cents: -46_95, lines: 1, says: "a balance forward of $46.95" } }));
+  test("a month whose only line is waiting for him says so, and does not pretend a fee was counted", () => {
+    const pl = monthlyPL(account("accrual", { remitFeesCents: 0, remitFeesHeld: { cents: -84, lines: 1, says: "a credit of $0.84" } }));
     assert.equal(pl.offsets.some((l) => FEE_LINE.test(l.label)), false);
-    assert.ok(pl.caveats.some((c) => /Not counted as fees, and on neither account: a balance forward of \$46\.95\./.test(c)));
+    assert.ok(pl.caveats.some((c) => c === "Waiting for you, and on neither account until you decide: a credit of $0.84. Count it or leave it out on the Money page."));
     assert.ok(pl.caveats.some((c) => /No fee taken after the sale is on file/.test(c)));
+  });
+  test("a balance forward is said, with nothing asked of him", () => {
+    const pl = monthlyPL(account("accrual", { remitFeesCents: 0, remitFeesNotFees: { cents: -46_95, lines: 1, says: "a balance forward of $46.95" } }));
+    assert.ok(pl.caveats.some((c) => c === "On neither account, and nothing for you to decide: a balance forward of $46.95."));
+    assert.equal(pl.caveats.some((c) => /Waiting for you/.test(c)), false);
+  });
+  test("a decision that moved the figure is said, and the month does not then claim no fee is on file", () => {
+    const moved = "1 line the rule would have counted left out ($4.00)";
+    const pl = monthlyPL(account("accrual", { remitFeesCents: 0, remitFeesDecided: moved }));
+    assert.ok(pl.caveats.some((c) => c === "Your decision changes this month's payer fees from what the rule gives: " + moved + ". The Money page lists each one, with a press to undo it."));
+    assert.equal(pl.caveats.some((c) => /No fee taken after the sale is on file/.test(c)), false, "a fee line IS on file; he left it out");
   });
   test("two records that disagree about a remittance are said on the month", () => {
     const differ = "9000002: the Health Mart Atlas payment report says $10.00 and the adjustment report says $12.00";
@@ -208,6 +363,13 @@ describe("the register entry for payer fees", () => {
     assert.equal(e.bothPresent, true);
     assert.equal(e.keptOutCents, 17_50);
     assert.match(e.says, /3 fee lines, \$17\.50, already counted from a better record and not taken again; \$4\.00 counted from the 835 or the adjustment report/);
+  });
+  test("says what waits for him, what is not a fee and what his decision changed, and that a decision stays", () => {
+    const e = entry(account("accrual", { remitFeesCents: 0, remitFeesHeld: { cents: -84, lines: 1, says: "a credit" }, remitFeesNotFees: { cents: -46_95, lines: 1, says: "a balance forward" }, remitFeesDecided: "1 line the rule would have counted left out ($4.00)" }));
+    assert.match(e.says, /awaiting your decision, on neither account: a credit/);
+    assert.match(e.says, /not a fee, on neither account: a balance forward/);
+    assert.match(e.says, /your decision changes it: 1 line the rule would have counted left out \(\$4\.00\)/);
+    assert.match(e.rule, /until a person counts it as a fee or leaves it out, and that stays decided across every import/);
   });
   test("says what it measured where there is nothing to keep out, and is not a cash-account question", () => {
     const none = entry(account("accrual", { remitFeesCents: 0 }));

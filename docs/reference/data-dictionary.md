@@ -119,6 +119,8 @@ gives units.
 13. **One payer fee in three records.** A fee a payer takes from a remittance is printed on the EFT's payment report (its
     AH and CS rows), on the 835 (a provider-level segment) and in the reconciliation service's adjustment report. It comes
     off revenue once, from the best record of that remittance, on the accrual account only (section 9); proved in tests/payer-fees.test.ts.
+    A person's word on one line (count it, leave it out, undo that) is kept across every import, and is the only way a held line
+    (a credit, an unsettled code) enters the figure.
 
 ## 9. What a payer takes off a remittance (EFT payment report, 835 provider-level segments, adjustment report)
 
@@ -129,3 +131,4 @@ gives units.
 | Credit (CS where the payer gave money back) | cents | Money returned for something the report does not itemise. | a note on the month; held until its meaning is settled | netting against fees |
 | Any other provider-level code | cents | Meaning not settled. | held on neither account and said on the month | either account until the owner says what it is |
 | The sign | — | An 835 provider-level amount in `remittance_holdbacks.amount_cents` is positive where the payer took money; the adjustment report's amount is negative where the payer took money. | converted once, in `payer-fees-store.ts` | comparing the two records without converting |
+| A person's word on a fee line | — | "Count it", "leave it out" or "undo", from the Money page's "Payer fees on remittances" card, on one line of an 835 or the adjustment report. Written as an audit event (`payer_fee.counted`, `payer_fee.left_out`, `payer_fee.reopened`) keyed on remittance, code and amount (`feeKey` in `payer-fees.ts`), so it survives every import and a better record of the same line arriving. The latest word under any spelling of the remittance stands. A line a better record already counts, and a balance forward, take none. | which 835 and adjustment-report lines `payerFeesByMonth()` counts; the card's presses | the payment report's own AH and CS rows (they are expenses in their own right); a line with no date in any month's figure (it is shown in every period and moves none) |

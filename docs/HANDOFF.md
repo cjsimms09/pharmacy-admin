@@ -21,10 +21,16 @@ file is how they talk.
   `accesshealth-payment.ts` (word-coded adjustment rows are read), the Money page's help paragraph, and the data
   dictionary (trap 13, section 9). The remits page was not touched (its path is read-denied on this machine): if it
   shows fees it should call `payerFeesByMonth()`, not sum the holdbacks or the adjustment report, or the same fee is
-  counted twice again. **Open:** whether OutcomesMTM's $9.00 "Adj-Fee" is a fee or something else (his call); held fee
-  lines ($0.84, $46.95, $9.00) have no one-press "settled / override" yet (rule 4 of the gate, needs a table and a
-  control); the Health Mart Atlas 835 re-pull needs his login. Stored month accounts recompute on the engine's next pass
-  after the deploy, so a page read in the first minutes can still show the old figure.
+  counted twice again. **Then, the same day:** the Money page has a "Payer fees on remittances" card under "The account":
+  every 835 and adjustment-report fee line with its source, who decided it and when, and one press to count it, leave it
+  out or undo that, kept across every import (audit events `payer_fee.*`; `decideFee` in `payer-fees-store.ts`). New:
+  `src/lib/payer-fees-view.ts` (the card's words, tested), `src/app/(app)/money/fee-decisions.ts` (the server action) and
+  `payer-fees-card.tsx`; changed: the Money `page.tsx` (loads the lines, renders the card), `payer-fees.ts` (decisions,
+  `feeKey`, `lineSays`), `books-check.ts` and `profit-and-loss.ts` (caveats for waiting, not-a-fee and decided lines).
+  **Open:** whether OutcomesMTM's $9.00 "Adj-Fee" is a fee or something else (his call; it sits in a payment report's
+  notes, so it has no press until payment-report adjustment rows have a table); the Health Mart Atlas 835 re-pull needs
+  his login. Stored month accounts recompute on the engine's next pass after the deploy or after a press, so a page read in
+  the first minutes can still show the old figure.
 
 - **2 October, 20:24: second deploy, the morning-check screen, and what the first deploy's printouts could not show.**
   The three pages were not rendered after the first deploy: the render logs in by writing a short-lived session row into

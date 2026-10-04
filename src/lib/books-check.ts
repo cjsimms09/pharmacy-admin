@@ -337,11 +337,14 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
    */
   const feeKept = i.remitFeesKept ?? null;
   const feeHeld = i.remitFeesHeld ?? null;
+  const feeNot = i.remitFeesNotFees ?? null;
   const feeCounted = i.remitFeesCents ?? 0;
   const feeSaid = [
     feeKept && feeKept.lines > 0 ? `${feeKept.lines} fee line${feeKept.lines === 1 ? "" : "s"}, ${dollars(feeKept.cents)}, already counted from a better record and not taken again` : null,
     feeCounted !== 0 ? `${dollars(feeCounted)} counted from the 835 or the adjustment report, because no payment report carries those remittances` : null,
-    feeHeld && feeHeld.lines > 0 ? `held on neither account: ${feeHeld.says}` : null,
+    feeHeld && feeHeld.lines > 0 ? `awaiting your decision, on neither account: ${feeHeld.says}` : null,
+    feeNot && feeNot.lines > 0 ? `not a fee, on neither account: ${feeNot.says}` : null,
+    i.remitFeesDecided ? `your decision changes it: ${i.remitFeesDecided}` : null,
     feeKept?.differ ? `two records disagree: ${feeKept.differ}` : null,
   ].filter((x): x is string => x !== null);
   out.push({
@@ -352,7 +355,7 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
     ],
     rule:
       "One remittance is counted from one record: the payment report first, because it closes to the EFT's total, then the 835, then the adjustment report, which stands in for a remittance neither has read. " +
-      "Only an origination fee and a recoupment are fees. A balance forward moves no money, a credit from the payer reverses something the report does not show, and any other code waits, on neither account, until its meaning is settled. " +
+      "Only an origination fee and a recoupment are fees. A balance forward moves no money, so nothing is asked about it. A credit from the payer reverses something the report does not show, and any other code is unexplained: each waits, on neither account, until a person counts it as a fee or leaves it out, and that stays decided across every import. " +
       "Where two records give one remittance different fees the better record is counted and the difference is said.",
     bothPresent: i.basis === "accrual" && (feeKept?.lines ?? 0) > 0,
     keptOutCents: i.basis === "accrual" && feeKept && feeKept.lines > 0 ? feeKept.cents : null,
