@@ -29,7 +29,7 @@ file is how they talk.
   **Files changed on `feature/compliance`, so say so on your pull request before editing one:** `claim-payments.ts`
   (`facilitatorMoney`, `FacilitatorMoney`), `money-found.ts` (the MTF row), `untied-payments.ts` (`tiedSays`, `sourceToDo`).
 
-- **4 October, pharmacy session (61cd493 to 20e671a): every payment that ties to no claim has a page that says why, and every
+- **4 October, pharmacy session (61cd493 to 6aae103): every payment that ties to no claim has a page that says why, and every
   screen that spoke of them now reads the same classifier.** The first reading of these payments (in the next item) split them by
   the fill's date alone and said no screen listed any; both are superseded. A fill from before the claims feed can have a claim
   on file (one arrived in a later report), so "before the feed" is the matcher's own answer on the prescription
@@ -42,12 +42,19 @@ file is how they talk.
   data dictionary's section 10 and trap 14 define the words. **Files changed on `feature/compliance`, so say so on your pull
   request before editing one:** `claim-payments.ts`, `match-remittance.ts` (`verdictOnPrescription`, `claimsOfThisFill`,
   `ClaimOnFile`), `alerts.ts`, `money-found.ts`, `payer-owed.ts`, `payer-owed-store.ts`, `ar-report.ts`, `ar-report-store.ts`,
-  `claims/page.tsx`, `payers/owed/page.tsx` and `payers/ar/page.tsx`. What it corrected: the Claims card said all $584,973.81 of
+  `claims/page.tsx`, `payers/owed/page.tsx`, `payers/ar/page.tsx`, `accesshealth-payment.ts`, `accesshealth-payment-store.ts`,
+  `mailbox.ts` and `intake/actions.ts` (the 835 lines) and, new, `remittance-counts.ts`. What it corrected: the Claims card said
+  all $584,973.81 of
   payments in the books "has reached these claims" when $393,948.45 of it is tied to none; the owed pages, the AR page and the
   printed month-end AR report called every payment tied to no claim "fills from before its records begin" and "nothing to
   fix", true of 3,597 of the 3,821; the MTF row on the money list told him to load days for 2 payments that fit two claims of a
-  fill the site already holds. **Open:** the page has no press (the 33 payments that need a decision, net $2,017.47, cannot be
-  attached by hand yet, and the matcher's own message still says "attach it by hand"); what a sale date on a reversed claim
+  fill the site already holds; the Atlas payment-report line called 70 payments (net $690.00) that name no drug and no fill "for
+  fills since 1 September with no claim on this site yet", and the 835 lines called unmatched payments "waiting for theirs" and
+  left out three of the five kinds the importer counts (they now say the matcher's own cause, in the page's words, and every
+  kind). **Open:** the page has no press (the 33 payments that need a decision, net $2,017.47, cannot be
+  attached by hand yet, and the matcher's own message still says "attach it by hand"; of the 23 that fit several claims, 14 are
+  seven payment and take-back pairs netting $0.00 and 6 are take-backs each equal to one candidate claim's remit, which the
+  matcher's amount rule cannot see because it compares signed amounts: OPEN-ITEMS); what a sale date on a reversed claim
   means is his call (OPEN-ITEMS, "Waiting on him"); the nightly proof `remit_to_claim` (`engine/proofs.ts`) counts every plan
   payment with no claim and a fill date from 1 September as "unmatched" and passes only at zero, so it fails every month, and
   its needs-you row (`engine/needs-you.ts`) links to `/v2/claims?tab=unmatched`, which is not a route here: left alone; and
