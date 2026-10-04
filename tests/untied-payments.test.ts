@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { CAUSES, causeInfo, classifyUntied, claimBesideSays, namesSays, needsPhrase, needsSays, sourceSays, sourceToDo, tallyByNeeds, tallyUntied, tiedSays, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedPayment } from "../src/lib/untied-payments";
+import { CAUSES, causeInfo, classifyUntied, claimBesideSays, namesSays, needsPhrase, needsSays, sourceSays, sourceToDo, tallyByNeeds, tallyUntied, tiedSays, unattachedSays, unattachedTail, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedPayment } from "../src/lib/untied-payments";
 import type { ClaimOnFile } from "../src/lib/match-remittance";
 
 /*
@@ -358,5 +358,76 @@ describe("one source's payments, said on the money list", () => {
 
   test("none of it tells a person to load days: for no cause is that a thing that can be done", () => {
     for (const cause of CAUSES) assert.doesNotMatch(sourceToDo([{ cause, count: 2, cents: 100 }], FEED), /load the days/i, cause);
+  });
+});
+
+describe("what the balance screens say of the payments tied to no claim", () => {
+  const total = (rows: TallyRow[]) => ({ count: rows.reduce((n, r) => n + r.count, 0), cents: rows.reduce((n, r) => n + r.cents, 0) });
+  const mixed: TallyRow[] = [
+    { cause: "before_feed", count: 7, cents: 81_240 },
+    { cause: "fits_several", count: 2, cents: 9_310 },
+    { cause: "reversed_not_sold", count: 1, cents: -240 },
+  ];
+
+  test("says nothing where nothing is tied to none", () => {
+    assert.equal(unattachedSays({ count: 0, cents: 0 }, [], FEED, FEED), "");
+    assert.equal(unattachedTail({ count: 0, cents: 0 }, [], FEED), "");
+  });
+
+  test("says that none of it is in any payer's balance, and why, group by group in the page's order, with the one thing that can leave a claim showing too much", () => {
+    assert.equal(
+      unattachedSays(total(mixed), mixed, FEED, FEED),
+      "10 payments (net $903.10) received since Sep 1, 2026 are tied to no claim, so they are in no payer's balance: " +
+        "2 payments (net $93.10) that fit two or more claims equally; 1 payment (-$2.40) on claims that were reversed, none carrying a sale date; " +
+        "7 payments (net $812.40) for fills from before the claims feed begins on Sep 1, 2026, which the site holds no claim for. " +
+        "Until each payment that fits claims on file is attached, the claims it could settle show a balance without it.",
+    );
+  });
+
+  test("words each group as the Claims page does, so that no two screens can say it differently", () => {
+    for (const cause of CAUSES) {
+      const one: TallyRow[] = [{ cause, count: 2, cents: 2_000 }];
+      assert.ok(unattachedSays(total(one), one, FEED, FEED).includes(causeInfo(cause, FEED).short[1]), cause);
+    }
+  });
+
+  test("a payment that leaves a claim showing a balance without it is the only reason to say so", () => {
+    for (const cause of CAUSES) {
+      const one: TallyRow[] = [{ cause, count: 1, cents: 1_000 }];
+      const leaves = cause === "fits_several" || cause === "will_attach";
+      assert.equal(/show a balance without it/.test(unattachedSays(total(one), one, FEED, FEED)), leaves, cause);
+    }
+  });
+
+  test("where the reasons are not known, says only what is: it is tied to no claim and in no balance", () => {
+    assert.equal(unattachedSays({ count: 5, cents: 580_833 }, null, FEED, FEED), "5 payments (net $5,808.33) received since Sep 1, 2026 are tied to no claim, so they are in no payer's balance.");
+    assert.equal(unattachedSays({ count: 1, cents: 4_500 }, null, FEED, FEED), "1 payment ($45.00) received since Sep 1, 2026 is tied to no claim, so it is in no payer's balance.");
+    assert.equal(unattachedTail({ count: 5, cents: 580_833 }, null, FEED), " Separately, 5 payments (net $5,808.33) are tied to no claim, so they are in no payer's balance.");
+  });
+
+  test("the sentence under the page's title gives how much is for fills from before the feed and points to the card for the rest", () => {
+    assert.equal(
+      unattachedTail(total(mixed), mixed, FEED),
+      " Separately, 10 payments (net $903.10) are tied to no claim, so they are in no payer's balance. " +
+        "7 of them are for fills from before the claims feed begins on Sep 1, 2026, which the site holds no claim for. The card below says why for the other 3.",
+    );
+    const early: TallyRow[] = [{ cause: "before_feed", count: 7, cents: 81_240 }];
+    assert.equal(
+      unattachedTail(total(early), early, FEED),
+      " Separately, 7 payments (net $812.40) are tied to no claim, so they are in no payer's balance. All of them are for fills from before the claims feed begins on Sep 1, 2026, which the site holds no claim for.",
+    );
+    const one: TallyRow[] = [{ cause: "before_feed", count: 1, cents: 4_000 }, { cause: "reversed_sold", count: 1, cents: 1_000 }];
+    assert.match(unattachedTail(total(one), one, FEED), /1 of them is for a fill from before the claims feed begins on Sep 1, 2026, which the site holds no claim for\. The card below says why for the other one\.$/);
+    const rest: TallyRow[] = [{ cause: "not_a_fill", count: 3, cents: 9_000 }];
+    assert.equal(unattachedTail(total(rest), rest, FEED), " Separately, 3 payments (net $90.00) are tied to no claim, so they are in no payer's balance. The card below says why.");
+  });
+
+  test("never calls the money real, says it is not an error, or says there is nothing to fix: having no claim does not show that", () => {
+    for (const cause of CAUSES) {
+      const one: TallyRow[] = [{ cause, count: 2, cents: 2_000 }];
+      for (const said of [unattachedSays(total(one), one, FEED, FEED), unattachedTail(total(one), one, FEED)]) {
+        assert.doesNotMatch(said, /not an error|nothing to fix|real money|not a defect|does not hold/i, `${cause}: ${said}`);
+      }
+    }
   });
 });

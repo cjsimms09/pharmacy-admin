@@ -58,7 +58,7 @@ export async function arReportFor(month: string, today = todayIso()): Promise<{ 
    * has to mean 41 days on 30 September, or the same document says something different every time
    * it is opened and the copy in the accountant's file stops matching the copy on the screen.
    */
-  const summary = owedByPayer(receivables, received, window.asAt);
+  const summary = owedByPayer(receivables, received, window.asAt, rows.feedFrom);
   const report = arReport(month, window, summary);
   report.ageing = ageOutstanding(receivables, summary, window.asAt);
   return { report, why: "" };

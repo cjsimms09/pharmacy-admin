@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, gte, isNull, or } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { SITE_STARTS_ON } from "./books-start";
-import { claimsFeedStartsOn, claimsOnFile } from "./claims-on-file";
+import { claimsFeedStartsOn, claimsOnFile, type ClaimHeld } from "./claims-on-file";
 import { isProgrammePayment } from "./payer-owed";
 import { CAUSES, classifyUntied, tallyUntied, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedCause, type UntiedPayment } from "./untied-payments";
 
@@ -33,15 +33,19 @@ const COLUMNS = { id: true, source: true, payer: true, receivedOn: true, amountC
 const byNewest = (a: UntiedLine, b: UntiedLine): number =>
   CAUSES.indexOf(a.cause) - CAUSES.indexOf(b.cause) || (b.receivedOn ?? "").localeCompare(a.receivedOn ?? "") || a.id.localeCompare(b.id);
 
-/** Each payment read by the claims the site holds for its prescription, early fills' claims included: one can have come in a later report. */
+/** One payment read by the claims the site holds for its prescription, early fills' claims included: one can have come in a later report. */
+function classifyOne(p: UntiedPayment, onFile: Map<string, ClaimHeld[]>, feedFrom: string | null) {
+  const held = onFile.get(p.rxNumber) ?? [];
+  return { held, ...classifyUntied(p, held, feedFrom, isProgrammePayment(p)) };
+}
+
 async function classifyAll(rows: UntiedPayment[], feedFrom: string | null) {
   const onFile = await claimsOnFile(rows.map((p) => p.rxNumber));
   const lines: UntiedLine[] = [];
   const classified: { cause: UntiedCause; amountCents: number }[] = [];
   const before = new Map<string, BeforeFeedRow>();
   for (const p of rows) {
-    const held = onFile.get(p.rxNumber) ?? [];
-    const { cause, claimIds } = classifyUntied(p, held, feedFrom, isProgrammePayment(p));
+    const { held, cause, claimIds } = classifyOne(p, onFile, feedFrom);
     classified.push({ cause, amountCents: p.amountCents });
     if (cause === "before_feed") {
       const b = before.get(p.source) ?? { source: p.source, count: 0, cents: 0 };
@@ -57,6 +61,13 @@ async function classifyAll(rows: UntiedPayment[], feedFrom: string | null) {
     lines.push({ ...p, cause, claims });
   }
   return { lines: lines.sort(byNewest), classified, before };
+}
+
+/** The cause of each of these payments, read the way the payments-with-no-claim page reads them, so a page that counts them names the same causes. */
+export async function causesOf(rows: UntiedPayment[]): Promise<{ feedFrom: string | null; causes: Map<string, UntiedCause> }> {
+  const feedFrom = await claimsFeedStartsOn();
+  const onFile = await claimsOnFile(rows.map((p) => p.rxNumber));
+  return { feedFrom, causes: new Map(rows.map((p) => [p.id, classifyOne(p, onFile, feedFrom).cause])) };
 }
 
 async function readUntied(source: string | null): Promise<UntiedReading> {

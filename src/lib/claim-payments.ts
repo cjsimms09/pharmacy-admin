@@ -255,7 +255,7 @@ export async function laterPayments(): Promise<LaterPayment[]> {
    * The envelope name is kept as the fallback rather than discarded. Where a payment has no claim
    * behind it there is nothing to resolve through, and "ProviderPay" is then the only true thing
    * that can be said about it — the alternative is a blank, which reads as missing data rather than
-   * as money whose prescription this site does not hold.
+   * as money tied to no claim.
    */
   const claimIds = [...new Set(rows.map((r) => r.claimId).filter((id): id is string => id !== null))];
   const payerOfClaim = new Map<string, string | null>();

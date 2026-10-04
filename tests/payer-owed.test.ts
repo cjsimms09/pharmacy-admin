@@ -101,20 +101,50 @@ describe("the day nothing has arrived, which is every day so far", () => {
   });
 });
 
-describe("money that belongs to no claim here", () => {
-  test("payments matching nothing are counted apart, and named as not an error", () => {
+describe("payments tied to no claim", () => {
+  const FEED = "2026-09-01";
+
+  test("are counted apart and settle no payer's balance, and the page says why, group by group", () => {
     /*
-     * The 24 facilitator payments on file, $5,808.33, for fills between January and August. The
-     * claim history starts on 1 September, so they will never match. Counting them against a
-     * payer's balance would settle a September debt with an August payment.
+     * Counting one against a payer's balance would settle a debt with money nobody can say is for it. They are not all one
+     * thing: this one fits two claims on file and leaves them showing a balance, that one is for a fill from before the claims feed.
      */
-    const s = owedByPayer([bill({ cents: 100_00 })], [paid({ cents: 580_833, matched: false })], TODAY);
-    assert.equal(s.unattached.count, 1);
-    assert.equal(s.unattached.cents, 580_833);
+    const s = owedByPayer(
+      [bill({ cents: 100_00 })],
+      [paid({ cents: 93_10, matched: false, cause: "fits_several" }), paid({ cents: 812_40, matched: false, cause: "before_feed" })],
+      TODAY,
+      FEED,
+    );
+    assert.equal(s.unattached.count, 2);
+    assert.equal(s.unattached.cents, 905_50);
     assert.equal(s.lines[0].receivedCents, 0, "it must not settle anything");
     assert.equal(s.lines[0].outstandingCents, 100_00);
-    assert.match(s.says, /this site does not hold/);
-    assert.match(s.says, /counted nowhere on this page/);
+    assert.match(s.unattachedSays, /^2 payments \(net \$905\.50\) received since Sep 1, 2026 are tied to no claim, so they are in no payer's balance: /);
+    assert.match(s.unattachedSays, /that fits two or more claims equally/);
+    assert.match(s.unattachedSays, /for a fill from before the claims feed begins on Sep 1, 2026/);
+    assert.match(s.unattachedSays, /show a balance without it\.$/, "the one consequence for a balance is said, because a payment that fits claims on file leaves them owing it");
+    assert.match(s.says, /Separately, 2 payments \(net \$905\.50\) are tied to no claim, so they are in no payer's balance\. 1 of them is for a fill from before the claims feed/);
+  });
+
+  test("where the reasons are not known, only what is known is said", () => {
+    const s = owedByPayer([bill({ cents: 100_00 })], [paid({ cents: 580_833, matched: false })], TODAY);
+    assert.equal(s.unattached.count, 1);
+    assert.equal(s.unattachedSays, "1 payment ($5,808.33) received since Sep 1, 2026 is tied to no claim, so it is in no payer's balance.");
+    assert.match(s.says, /Separately, 1 payment \(\$5,808\.33\) is tied to no claim, so it is in no payer's balance\.$/);
+    assert.doesNotMatch(`${s.says} ${s.unattachedSays}`, /not an error|nothing to fix|real money|does not hold/i);
+  });
+
+  test("a reason known for some of them only is not said for all", () => {
+    const s = owedByPayer([bill()], [paid({ cents: 500, matched: false, cause: "not_a_fill" }), paid({ cents: 700, matched: false })], TODAY, FEED);
+    assert.equal(s.unattached.count, 2);
+    assert.doesNotMatch(s.unattachedSays, /names no drug/);
+  });
+
+  test("where no payment has settled any claim, that is said of the claims, not of the pharmacy's mail", () => {
+    const s = owedByPayer([bill()], [paid({ cents: 812_40, matched: false, cause: "before_feed" })], TODAY, FEED);
+    assert.equal(s.nothingHasArrived, true);
+    assert.match(s.says, /nothing has been paid against any of these claims yet/);
+    assert.doesNotMatch(s.says, /reached the pharmacy/, "a payment has reached it: it is tied to no claim");
   });
 
   test("a matched payment for a payer outside the period does not settle it either", () => {

@@ -2,6 +2,7 @@ import "server-only";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { claimShares, isProgrammePayer, owedByPayer, type Receivable, type Received, type OwedSummary } from "./payer-owed";
+import { causesOf } from "./untied-payments-store";
 
 /**
  * Loads what each payer owes: its own receivables from the fills, and what has actually arrived.
@@ -26,8 +27,9 @@ import { claimShares, isProgrammePayer, owedByPayer, type Receivable, type Recei
  * payers on one fill, and it is not stored — so the claim's BIN is the answer, and it is the better
  * one anyway: it is what the pharmacy billed rather than what the payer called itself.
  *
- * A payment with no claim behind it therefore has no payer here, which is correct. It is money
- * received for a prescription this site does not hold, and `payer-owed.ts` counts it apart.
+ * A payment with no claim behind it therefore has no payer here, which is correct, and
+ * `payer-owed.ts` counts it apart. Why it has none is read the way the Claims page reads it
+ * (`causesOf`), so the two say the same.
  *
  * ── Two matchers for one thing, avoided ──
  *
@@ -45,7 +47,7 @@ import { claimShares, isProgrammePayer, owedByPayer, type Receivable, type Recei
  * beside this one, which is the exact mistake the note above this function warns against — two
  * matchers for one thing, disagreeing quietly.
  */
-export async function owedRows(range?: { from?: string; to?: string }): Promise<{ receivables: Receivable[]; received: Received[]; from: string; to: string }> {
+export async function owedRows(range?: { from?: string; to?: string }): Promise<{ receivables: Receivable[]; received: Received[]; from: string; to: string; feedFrom: string | null }> {
   const { addDays, todayIso } = await import("./dates");
   const today = todayIso();
   const from = range?.from ?? addDays(today, -400).slice(0, 7) + "-01";
@@ -61,6 +63,12 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
      */
     db
       .select({
+        id: schema.claimPayments.id,
+        rxNumber: schema.claimPayments.rxNumber,
+        fillNumber: schema.claimPayments.fillNumber,
+        dateFilled: schema.claimPayments.dateFilled,
+        ndc11: schema.claimPayments.ndc11,
+        reference: schema.claimPayments.reference,
         amountCents: schema.claimPayments.amountCents,
         receivedOn: schema.claimPayments.receivedOn,
         claimId: schema.claimPayments.claimId,
@@ -84,6 +92,7 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
       .where(eq(schema.claimPayments.outOfBooks, false)),
   ]);
 
+  const { feedFrom, causes } = await causesOf(payments.filter((p) => p.claimId === null));
   const { payerShares } = await import("./fills");
   const { cashPlanFor } = await import("./cash-plans");
 
@@ -164,20 +173,17 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
     notBilled: p.source === "rxrescue",
     cents: p.amountCents,
     receivedOn: p.receivedOn,
-    /*
-     * Matched means it found a claim, which is what makes it somebody's settled receivable. The 24
-     * facilitator payments on file are all unmatched and correctly so: they are for fills between
-     * January and August, and this site's records begin on 1 September.
-     */
+    /* Matched means it found a claim, which is what makes it somebody's settled receivable. Why one did not is `cause`. */
     matched: p.claimId !== null,
+    cause: causes.get(p.id),
   }));
 
-  return { receivables, received, from, to };
+  return { receivables, received, from, to, feedFrom };
 }
 
 /** What arrived and what was billed, for the payer page. `from`/`to` are fill dates. */
 export async function owedNow(range?: { from?: string; to?: string }): Promise<OwedSummary & { from: string; to: string; basis: "filled" }> {
   const { todayIso } = await import("./dates");
-  const { receivables, received, from, to } = await owedRows(range);
-  return { ...owedByPayer(receivables, received, todayIso()), from, to, basis: "filled" };
+  const { receivables, received, from, to, feedFrom } = await owedRows(range);
+  return { ...owedByPayer(receivables, received, todayIso(), feedFrom), from, to, basis: "filled" };
 }

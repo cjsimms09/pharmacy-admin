@@ -270,6 +270,8 @@ export type ArReport = {
   outstandingCents: number;
   ageing: Ageing;
   unattached: { count: number; cents: number };
+  /** Why those payments are tied to no claim, group by group, in the words the Claims page uses (untied-payments.ts). */
+  unattachedSays: string;
   /** Fees networks charge the pharmacy (negative remits): owed by it, in no figure above. */
   feesOwed: FeeOwed[];
   feesOwedCents: number;
@@ -311,6 +313,7 @@ export function arReport(
     outstandingCents,
     ageing: { bands: { "0-30": 0, "31-60": 0, "61-90": 0, "91+": 0 }, unagedCents: 0, unagedPayers: 0 },
     unattached: summary.unattached,
+    unattachedSays: summary.unattachedSays,
     feesOwed: summary.feesOwed ?? [],
     feesOwedCents: (summary.feesOwed ?? []).reduce((n, f) => n + f.cents, 0),
     nothingHasArrived: summary.nothingHasArrived,
@@ -331,11 +334,27 @@ export function arSays(r: ArReport): string {
     `${formatCents(r.billedCents)} billed, ${formatCents(r.receivedCents)} received.`;
   if (r.nothingHasArrived) {
     return (
-      `${head} Not one payer had remitted anything by that date, so every received figure is a true nought rather ` +
+      `${head} Nothing had been paid against any of these claims by that date, so every received figure is a true nought rather ` +
       `than a missing one, and none of this is called late: no remittance cycle for any of these payers is on file.`
     );
   }
   return `${head} Nothing here is called overdue — no remittance cycle for any of these payers is on file, so the age of each claim is given and the judgement left to the contract.`;
+}
+
+/** A paragraph broken into lines no wider than `width` (indent included), for the plain-text copy, which has no layout of its own to wrap it. */
+function wrapText(text: string, indent: string, width = 94): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (line && indent.length + line.length + 1 + word.length > width) {
+      lines.push(indent + line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) lines.push(indent + line);
+  return lines;
 }
 
 /**
@@ -409,13 +428,8 @@ export function arReportText(r: ArReport, pharmacy: string): string {
   }
 
   if (r.unattached.count > 0) {
-    out.push(...rule("MONEY THAT BELONGS TO NO CLAIM HERE"));
-    out.push(
-      `  ${r.unattached.count} payment${r.unattached.count === 1 ? "" : "s"} totalling ${formatCents(r.unattached.cents)} arrived for prescriptions this site does`,
-      "  not hold. It is real money and it settles nothing above, because there is no claim here",
-      "  for it to settle. It is not an error.",
-      "",
-    );
+    out.push(...rule("PAYMENTS TIED TO NO CLAIM"));
+    out.push(...wrapText(r.unattachedSays, "  "), "");
   }
 
   out.push(

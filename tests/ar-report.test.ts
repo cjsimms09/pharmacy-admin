@@ -351,6 +351,77 @@ describe("the report itself", () => {
     const row = arReportCsv(r).split("\r\n")[1];
     assert.ok(row.startsWith('"Humana, Inc. ""Gold""",'), `quoted and escaped, got: ${row}`);
   });
+
+  describe("the payments tied to no claim, as the accountant's copy prints them", () => {
+    /*
+     * The printed block is the same sentence the Claims page and the owed page carry (untied-payments.ts), broken into lines
+     * because an email body has no layout to wrap it. The figures are invented; what is pinned is that the copy says a payment
+     * is tied to no claim and why, and never the old clause that called it nothing to fix.
+     */
+    const FEED = "2026-09-01";
+    const buildWith = (received: Received[]) => {
+      const summary = owedByPayer(receivables, received, asAt, FEED);
+      const r = arReport("2026-09", monthWindow("2026-09", "2026-10-02"), summary);
+      r.ageing = ageOutstanding(receivables, r.lines, asAt);
+      return r;
+    };
+    const blockOf = (text: string): string[] => {
+      const lines = text.split("\n");
+      const at = lines.indexOf("PAYMENTS TIED TO NO CLAIM");
+      assert.ok(at >= 0, "the block is there");
+      assert.match(lines[at + 1], /^-+$/, "and underlined like the others");
+      const body: string[] = [];
+      for (const l of lines.slice(at + 2)) {
+        if (l === "") break;
+        body.push(l);
+      }
+      return body;
+    };
+    const strays = [
+      paid({ matched: false, cents: 93_10, cause: "fits_several" }),
+      paid({ matched: false, cents: 812_40, cause: "before_feed" }),
+    ];
+
+    test("the block carries the sentence the site says, wrapped to a mail window", () => {
+      const r = buildWith(strays);
+      const body = blockOf(arReportText(r, "West Wichita Family Pharmacy"));
+      assert.ok(body.length > 1, "a sentence this long is broken across lines");
+      assert.ok(body.every((l) => l.length <= 94 && l.startsWith("  ")), `no line wider than the window: ${body.map((l) => l.length).join(",")}`);
+      assert.equal(body.map((l) => l.trim()).join(" "), r.unattachedSays, "nothing lost or reworded in the wrapping");
+      assert.match(r.unattachedSays, /^2 payments \(net \$905\.50\) received since Sep 1, 2026 are tied to no claim, so they are in no payer's balance: /);
+      assert.match(r.unattachedSays, /1 payment \(\$93\.10\) that fits two or more claims equally/);
+      assert.match(r.unattachedSays, /show a balance without it\.$/, "a payment that fits claims on file leaves them looking owed until it is attached");
+    });
+
+    test("nothing is printed where nothing is tied to no claim", () => {
+      const r = buildWith([paid()]);
+      assert.equal(r.unattached.count, 0);
+      assert.doesNotMatch(arReportText(r, "the pharmacy"), /PAYMENTS TIED TO NO CLAIM/);
+    });
+
+    test("a payment whose reason the loader did not read is counted and not explained", () => {
+      const r = buildWith([paid({ matched: false, cents: 1_234_56 })]);
+      assert.equal(r.unattachedSays, "1 payment ($1,234.56) received since Sep 1, 2026 is tied to no claim, so it is in no payer's balance.");
+      assert.doesNotMatch(arReportText(r, "the pharmacy"), /fits two or more|before the claims feed/);
+    });
+
+    test("it never calls such a payment nothing to fix, whatever the reason", () => {
+      const causes = ["fits_several", "reversed_sold", "no_claim_yet", "other_fills_only", "not_a_fill", "will_attach", "reversed_not_sold", "before_feed"] as const;
+      const r = buildWith(causes.map((cause, i) => paid({ matched: false, cents: 10_00 + i, cause })));
+      const text = arReportText(r, "the pharmacy");
+      assert.doesNotMatch(text, /MONEY THAT BELONGS TO NO CLAIM|not an error|nothing to fix|real money|from before its records begin|does not hold/i);
+      assert.equal(blockOf(text).map((l) => l.trim()).join(" "), r.unattachedSays);
+    });
+
+    test("when nothing had been paid against these claims it says that, and not that no remittance had come", () => {
+      // The unattached payment settles nothing, so every received figure is nought; but a remittance did reach the pharmacy.
+      const r = buildWith([paid({ matched: false, cents: 812_40, cause: "before_feed" })]);
+      assert.equal(r.nothingHasArrived, true);
+      assert.match(r.says, /Nothing had been paid against any of these claims by that date/);
+      assert.doesNotMatch(r.says, /no remittance has reached|reached the pharmacy/i);
+      assert.match(arReportText(r, "the pharmacy"), /Nothing had been paid against any of these claims by that date/);
+    });
+  });
 });
 
 describe("when the monthly copy goes out on its own", () => {

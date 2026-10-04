@@ -21,9 +21,12 @@
  *   measured             it has paid before. Now the outstanding balance is a fact about a payer
  *                        that is capable of paying, which is the only version worth chasing.
  *
- * The same confusion in a different costume is the 24 facilitator payments on file, $5,808.33,
- * matching no claim. They are for fills between January and August; this site's records begin on
- * 1 September. Money with nothing to attach to is not an error and must not be counted as one.
+ * The same confusion in a different costume is the payments tied to no claim. On 4 October 2026 there
+ * were 3,821, net $393,948.45: 3,597 for fills from before the claims feed begins on 1 September, which
+ * the site holds no claim for, and 224 for a reason a person can act on or that needs nothing
+ * (untied-payments.ts). They are counted apart and in no payer's balance, and `unattachedSays` says why,
+ * group by group. This page said all of them were fills from before its records begin and that there was
+ * nothing to fix, which was true of the 3,597 and of nothing else.
  *
  * ── What this refuses to say ──
  *
@@ -42,7 +45,9 @@
  * Pure. `payer-owed-store.ts` loads the rows.
  */
 
+import { SITE_STARTS_ON } from "./books-start";
 import { normalisePayerName } from "./payer-name";
+import { tallyUntied, unattachedSays, unattachedTail, type UntiedCause } from "./untied-payments";
 import { COPAY_PAYER } from "./copay-remit";
 import { VERIDIKAL_CLAIM_FEE_CENTS, VERIDIKAL_CONVERSION_FEE_CENTS, VERIDIKAL_PAYER, type VeridikalProgram, type VeridikalRow } from "./veridikal-report";
 
@@ -233,8 +238,10 @@ export type Received = {
   payer: string | null;
   cents: number;
   receivedOn: string | null;
-  /** False where the payment found no claim on file: money with nothing to attach to. */
+  /** False where the payment is tied to no claim: the site holds none for it, or none it can say the payment paid. */
   matched: boolean;
+  /** Why it is tied to no claim, as untied-payments.ts reads it: absent on a matched payment and where the loader did not read it. */
+  cause?: UntiedCause;
   /** The claim and part it settled, where the matcher found one. See `Receivable.claimId`. */
   claimId?: string | null;
   portion?: Portion;
@@ -314,8 +321,10 @@ export type OwedSummary = {
   billedCents: number;
   receivedCents: number;
   outstandingCents: number;
-  /** Payments that found no claim. Not an error: see the module note. */
+  /** Payments tied to no claim, in no payer's balance. Why each is, and what that means for a figure, is `unattachedSays`. */
   unattached: { count: number; cents: number };
+  /** Why, group by group, in the words the Claims page uses; empty where there are none. */
+  unattachedSays: string;
   /**
    * Money that arrived beyond what any claim was billed, from a programme that pays it after adjudication: the Aytu /
    * IPD top-off. Revenue, counted nowhere in billed, received or outstanding, and never in the overpaid count.
@@ -367,9 +376,10 @@ export function payerKey(bin: string | null, name: string | null): string {
 /**
  * What each payer owes, and — the part that matters — what its two figures mean together.
  *
- * `today` is passed rather than read so this stays pure and so the sentences are testable.
+ * `today` is passed rather than read so this stays pure and so the sentences are testable. `feedFrom` is the first day the claims
+ * feed covers, which only the words about the payments tied to no claim need.
  */
-export function owedByPayer(receivables: Receivable[], received: Received[], today: string): OwedSummary {
+export function owedByPayer(receivables: Receivable[], received: Received[], today: string, feedFrom: string | null = null): OwedSummary {
   type Share = { payerKey: string; dateFilled: string; billed: number; paid: number };
   type Acc = {
     bin: string | null; name: string; claims: number; billed: number; got: number; oldest: string | null; cash: boolean; payments: number;
@@ -423,6 +433,7 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
 
   let unattachedCount = 0;
   let unattachedCents = 0;
+  const unattachedCauses: { cause: UntiedCause; amountCents: number }[] = [];
   let outsideCount = 0;
   let outsideCents = 0;
   /* Money that arrived beyond anything billed, because nobody billed it: the top-off. Revenue, and not a balance. */
@@ -437,6 +448,7 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
        */
       unattachedCount++;
       unattachedCents += p.cents;
+      if (p.cause) unattachedCauses.push({ cause: p.cause, amountCents: p.cents });
       continue;
     }
     if (p.claimId) {
@@ -539,19 +551,24 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
     .filter(([, a]) => !a.cash && a.loosePaid > 0 && a.looseBilled - a.loosePaid > 0)
     .map(([k, a]) => ({ payerKey: k, cents: a.looseBilled - a.loosePaid }));
 
+  /* The reasons are said only where every one is known: a tally of some would say a part as if it were the whole. */
+  const unattachedTotal = { count: unattachedCount, cents: unattachedCents };
+  const unattachedRows = unattachedCount > 0 && unattachedCauses.length === unattachedCount ? tallyUntied(unattachedCauses) : null;
+
   return {
     lines,
     billedCents,
     receivedCents,
     outstandingCents,
-    unattached: { count: unattachedCount, cents: unattachedCents },
+    unattached: unattachedTotal,
+    unattachedSays: unattachedSays(unattachedTotal, unattachedRows, SITE_STARTS_ON, feedFrom),
     topOff: { count: topOffCount, cents: topOffCents },
     claimBalances,
     unaged,
     feesOwed: [...fees.values()].sort((x, y) => y.cents - x.cents),
     outside: { count: outsideCount, cents: outsideCents },
     nothingHasArrived,
-    says: headline({ lines, real, billedCents, receivedCents, outstandingCents, nothingHasArrived, unattachedCount, unattachedCents }),
+    says: headline({ lines, real, billedCents, receivedCents, outstandingCents, nothingHasArrived, unattachedTail: unattachedTail(unattachedTotal, unattachedRows, feedFrom) }),
   };
 }
 
@@ -588,15 +605,11 @@ function headline(a: {
   receivedCents: number;
   outstandingCents: number;
   nothingHasArrived: boolean;
-  unattachedCount: number;
-  unattachedCents: number;
+  unattachedTail: string;
 }): string {
   if (a.lines.length === 0) return "No claims have been billed to any payer yet, so nobody owes anything.";
 
-  const tail =
-    a.unattachedCount > 0
-      ? ` Separately, ${a.unattachedCount} payment${a.unattachedCount === 1 ? "" : "s"} totalling ${money(a.unattachedCents)} arrived for prescriptions this site does not hold — fills from before its records begin. That money is real and is counted nowhere on this page, because there is no claim here for it to settle.`
-      : "";
+  const tail = a.unattachedTail;
 
   if (a.real.length === 0) {
     return `Every plan billed is one the pharmacy bills through rather than one that pays. Nothing is owed by anybody.${tail}`;
@@ -609,8 +622,8 @@ function headline(a: {
      */
     return (
       `${money(a.billedCents)} billed to ${a.real.length} payer${a.real.length === 1 ? "" : "s"} and nothing received from any of them yet. ` +
-      `That is not this page failing: no remittance has reached the pharmacy since these records began, so every figure in the received column is a true nought rather than a missing one. ` +
-      `When the first 835 arrives it will land here.${tail}`
+      `That is not this page failing: nothing has been paid against any of these claims yet, so every figure in the received column is a true nought rather than a missing one. ` +
+      `The first payment against one of them will land here.${tail}`
     );
   }
   return `${money(a.billedCents)} billed, ${money(a.receivedCents)} received, ${money(a.outstandingCents)} outstanding across ${a.real.length} payer${a.real.length === 1 ? "" : "s"}.${tail}`;

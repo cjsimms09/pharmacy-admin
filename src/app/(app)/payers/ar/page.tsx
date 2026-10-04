@@ -242,7 +242,7 @@ export default async function ArReportPage({
             <Figure
               value={formatCents(r.receivedCents)}
               label="Received"
-              sub={r.nothingHasArrived ? "Nothing had arrived by that date" : `Against those claims, by ${r.asAt}`}
+              sub={r.nothingHasArrived ? "Nothing paid against those claims by that date" : `Against those claims, by ${r.asAt}`}
               tone="muted"
             />
             <Figure
@@ -370,12 +370,11 @@ export default async function ArReportPage({
           )}
 
           {r.unattached.count > 0 && (
-            <Card title="Money that belongs to no claim here" className="mt-4 print-block">
-              <p className="text-sm leading-relaxed text-ink-2">
-                {r.unattached.count} payment{r.unattached.count === 1 ? "" : "s"} totalling{" "}
-                <span className="font-medium text-ink">{formatCents(r.unattached.cents)}</span> arrived for
-                prescriptions this site does not hold. The money is real and it settles nothing above, because there is
-                no claim here for it to settle. It is not a defect and there is nothing to fix.
+            <Card title="Payments tied to no claim" className="mt-4 print-block">
+              <p className="text-sm leading-relaxed text-ink-2">{r.unattachedSays}</p>
+              <p className="no-print mt-2 text-sm text-ink-2">
+                What each group is, and what it needs from you if anything, is on{" "}
+                <Link href="/claims/no-claim" className="text-accent underline">Payments with no claim</Link>.
               </p>
             </Card>
           )}

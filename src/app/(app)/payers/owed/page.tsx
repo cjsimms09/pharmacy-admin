@@ -61,7 +61,7 @@ export default async function OwedPage() {
         <>
           <div className="grid gap-3 sm:grid-cols-3">
             <Figure value={formatCents(owed.billedCents)} label="Billed" sub={`Filled ${owed.from} onwards`} />
-            <Figure value={formatCents(owed.receivedCents)} label="Received" sub={owed.nothingHasArrived ? "No remittance has arrived yet" : `Across ${real.length} payer${real.length === 1 ? "" : "s"}`} />
+            <Figure value={formatCents(owed.receivedCents)} label="Received" sub={owed.nothingHasArrived ? "Nothing paid against these claims yet" : `Across ${real.length} payer${real.length === 1 ? "" : "s"}`} />
             <Figure value={formatCents(owed.outstandingCents)} label="Outstanding" sub={chase.length ? `${chase.length} from a payer that has paid before` : "None of it from a payer that has ever paid"} />
           </div>
 
@@ -71,26 +71,24 @@ export default async function OwedPage() {
           */}
           {owed.nothingHasArrived && (
             <Notice>
-              Every figure in the received column is a true nought rather than a missing one. No payer
-              remittance has reached the pharmacy since these records began on 1 September, so there is
-              nothing here to have gone wrong. The first 835 that arrives will land on this page.{" "}
+              Every figure in the received column is a true nought rather than a missing one. Nothing has
+              yet been paid against any claim on this page, so there is nothing here to have gone wrong.
+              The first payment against one of them will land on this page.{" "}
               <Link href="/payers/routing" className="text-accent underline">Where 835s are routed</Link>.
             </Notice>
           )}
 
           {/*
-            Money received for prescriptions this site has never held. Not an error, and not counted
-            anywhere on this page — said plainly, because $5,808.33 sitting outside every total is
-            exactly the sort of thing that is discovered later and assumed to be a bug.
+            Payments tied to no claim sit outside every total above, and they are not all one thing: some are for fills from
+            before the claims feed, and some fit several claims on file and can leave those claims showing a balance without
+            them. Said group by group, in the words the Claims page uses (untied-payments.ts), so the two cannot disagree.
           */}
           {owed.unattached.count > 0 && (
-            <Card title="Money that belongs to no claim here">
-              <p className="text-sm text-ink-2">
-                {owed.unattached.count} payment{owed.unattached.count === 1 ? "" : "s"} totalling{" "}
-                <span className="font-medium text-ink">{formatCents(owed.unattached.cents)}</span> arrived for
-                prescriptions this site does not hold — fills from before its records begin on 1 September. The
-                money is real and it is counted nowhere above, because there is no claim here for it to settle.
-                It is not a defect and there is nothing to fix.
+            <Card title="Payments tied to no claim">
+              <p className="text-sm text-ink-2">{owed.unattachedSays}</p>
+              <p className="mt-2 text-sm text-ink-2">
+                What each group is, and what it needs from you if anything, is on{" "}
+                <Link href="/claims/no-claim" className="text-accent underline">Payments with no claim</Link>.
               </p>
             </Card>
           )}

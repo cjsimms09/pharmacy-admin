@@ -254,6 +254,11 @@ const are = (n: number): string => (n === 1 ? "is" : "are");
 /** A sum beside its count: "net" where there is more than one payment, because a take-back is a payment of less than nothing. */
 const sum = (n: number, cents: number): string => `${n === 1 ? "" : "net "}${money(cents)}`;
 
+/** One group as a sentence has it: its count and sum, then what it is. Every screen words a group this way, so no two can say it differently. */
+function groupPart(r: TallyRow, feedFrom: string | null): string {
+  return `${payments(r.count)} (${sum(r.count, r.cents)}) ${causeInfo(r.cause, feedFrom).short[r.count === 1 ? 0 : 1]}`;
+}
+
 /**
  * Everything tied to no claim, every figure beside what it is, so the sentence reads without the page behind it. The payments
  * that can matter come first and the fills from before the claims feed that the site holds no claim for after, because they
@@ -263,7 +268,7 @@ export function untiedHeadline(rows: TallyRow[], booksFrom: string, feedFrom: st
   const tot = (rs: TallyRow[]) => rs.reduce((t, r) => ({ n: t.n + r.count, cents: t.cents + r.cents }), { n: 0, cents: 0 });
   const rest = rows.filter((r) => r.cause !== "before_feed");
   const early = rows.find((r) => r.cause === "before_feed");
-  const part = (r: TallyRow): string => `${payments(r.count)} (${sum(r.count, r.cents)}) ${causeInfo(r.cause, feedFrom).short[r.count === 1 ? 0 : 1]}`;
+  const part = (r: TallyRow): string => groupPart(r, feedFrom);
   const since = fmt(booksFrom);
   if (rest.length === 0 && !early) return `Every payment received since ${since} is tied to a claim.`;
   const unheld = early ? `${payments(early.count)} (${sum(early.count, early.cents)})` : "";
@@ -324,8 +329,39 @@ export function sourceToDo(rows: TallyRow[], feedFrom: string | null): string {
   const groups = [...rows].sort((a, b) => CAUSES.indexOf(a.cause) - CAUSES.indexOf(b.cause)).map((r) => ({ r, info: causeInfo(r.cause, feedFrom) }));
   const idle = groups.every((g) => g.info.needs === "nothing");
   const parts = groups.map(({ r, info }) => {
-    const group = `${payments(r.count)} (${sum(r.count, r.cents)}) ${info.short[r.count === 1 ? 0 : 1]}.`;
+    const group = `${groupPart(r, feedFrom)}.`;
     return idle ? group : `${group} ${info.needs === "nothing" ? "Needs nothing." : info.asks}`;
   });
   return `${idle ? "Nothing to do. " : ""}${parts.join(" ")}`;
+}
+
+/**
+ * What is said wherever a payer's balance is shown (the owed page, the month-end AR report) about the payments tied to no claim: that none of
+ * them is in any balance, and why, group by group, in the words the Claims page uses. `rows` is null where the reasons are not known, and then
+ * only the first is said. The one consequence for a figure is that a payment which fits claims on file leaves them showing a balance without it
+ * until it is attached; the others are for fills there is no claim for, or for reversed claims, which are nobody's receivable.
+ */
+export function unattachedSays(total: { count: number; cents: number }, rows: TallyRow[] | null, booksFrom: string, feedFrom: string | null): string {
+  const n = total.count;
+  if (n === 0) return "";
+  const lead = `${payments(n)} (${sum(n, total.cents)}) received since ${fmt(booksFrom)} ${are(n)} tied to no claim, so ${n === 1 ? "it is" : "they are"} in no payer's balance`;
+  if (rows === null) return `${lead}.`;
+  const groups = [...rows].sort((a, b) => CAUSES.indexOf(a.cause) - CAUSES.indexOf(b.cause));
+  const fitsClaims = groups.some((r) => r.cause === "fits_several" || r.cause === "will_attach");
+  const consequence = fitsClaims ? " Until each payment that fits claims on file is attached, the claims it could settle show a balance without it." : "";
+  return `${lead}: ${groups.map((r) => groupPart(r, feedFrom)).join("; ")}.${consequence}`;
+}
+
+/** The same, short, for the sentence under the owed page's title: the total, how much of it is for fills from before the claims feed, and where the rest is said (the card below it). */
+export function unattachedTail(total: { count: number; cents: number }, rows: TallyRow[] | null, feedFrom: string | null): string {
+  const n = total.count;
+  if (n === 0) return "";
+  const lead = ` Separately, ${payments(n)} (${sum(n, total.cents)}) ${are(n)} tied to no claim, so ${n === 1 ? "it is" : "they are"} in no payer's balance.`;
+  if (rows === null) return lead;
+  const early = rows.find((r) => r.cause === "before_feed");
+  const rest = n - (early?.count ?? 0);
+  const who = early ? (early.count === n ? (n === 1 ? "It is" : "All of them are") : `${count(early.count)} of them ${are(early.count)}`) : "";
+  const before = early ? ` ${who} ${causeInfo("before_feed", feedFrom).short[early.count === 1 ? 0 : 1]}.` : "";
+  const why = rest === 0 ? "" : ` The card below says why${early ? ` for the other ${rest === 1 ? "one" : count(rest)}` : ""}.`;
+  return `${lead}${before}${why}`;
 }
