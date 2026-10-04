@@ -211,6 +211,7 @@ describe("money earned and money arriving", () => {
     assert.match(c.difference!, /nothing the site holds says it was deposited/, "says what is known, not that the money arrived");
     assert.match(c.difference!, /or the payer has advised it and not yet paid it/, "names the cause that is not the site's gap");
     assert.match(c.difference!, /Payments export/, "names the file that fixes it");
+    assert.match(c.difference!, /unless that deposit already stands for another remittance of the same amount/, "two remittances of one amount are two deposits: a deposit of that amount settles it only when it is not already the other one's");
   });
 
   test("one remittance is said as one, with no 'between them'", () => {

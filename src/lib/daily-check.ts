@@ -427,7 +427,7 @@ export function runDailyCheck(f: Facts): Check[] {
         ? "The register is empty while payments posted from remittances are on the books, so this check is measuring nothing. Re-read the Remit Summary export to fill it; until then neither this check nor the cash side can be trusted."
         : f.remittancesNotBanked === 0
           ? null
-          : `${money(f.remittancesNotBankedCents)} is advised as paid and nothing the site holds says it was deposited. Two causes look the same here: the deposit is on the bank statement or in the payer payment report and has not been tied to its payment number yet — the Payments export on the ProviderPay portal, read, ties it under the number it already carries — or the payer has advised it and not yet paid it. A deposit of that amount on the bank statement, on or after the advice date, settles which.`,
+          : `${money(f.remittancesNotBankedCents)} is advised as paid and nothing the site holds says it was deposited. Two causes look the same here: the deposit is on the bank statement or in the payer payment report and has not been tied to its payment number yet — the Payments export on the ProviderPay portal, read, ties it under the number it already carries — or the payer has advised it and not yet paid it. A deposit of that amount on the bank statement, on or after the advice date, settles which — unless that deposit already stands for another remittance of the same amount, because two remittances of one amount are two deposits.`,
     kind: "money",
   });
 

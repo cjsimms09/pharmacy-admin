@@ -30,7 +30,12 @@ file is how they talk.
   **Open:** whether OutcomesMTM's $9.00 "Adj-Fee" is a fee or something else (his call; it sits in a payment report's
   notes, so it has no press until payment-report adjustment rows have a table); the Health Mart Atlas 835 re-pull needs
   his login. Stored month accounts recompute on the engine's next pass after the deploy or after a press, so a page read in
-  the first minutes can still show the old figure.
+  the first minutes can still show the old figure. **Also found that day, in the morning check's one failing line:** SS&C
+  HEALTH's 15 September remittance of $2,008.00 carries a payment number and no deposit (OPEN-ITEMS, "Waiting on him": one
+  question, for his ProviderPay login). The check's closing sentence said a deposit of that amount on the statement "settles
+  which" cause, which is wrong where two remittances share an amount: September's one $2,008.00 deposit, on the 24th, is
+  carried by a receipt under another number. It now says a deposit settles it only if it does not already stand for another
+  remittance of that amount (`daily-check.ts`, pinned in `tests/daily-check.test.ts`).
 
 - **2 October, 20:24: second deploy, the morning-check screen, and what the first deploy's printouts could not show.**
   The three pages were not rendered after the first deploy: the render logs in by writing a short-lived session row into
