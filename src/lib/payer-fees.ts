@@ -54,7 +54,7 @@ export const isSettledPayerFee = (code: string, takenCents: number, reference?: 
 
 const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^EFT/, "");
 
-/** The same remittance, however two records spell it: "EFT-99930101", "99930101" and a trace that carries it all agree. */
+/** The same remittance, however two records spell it: "EFT-9000001", "9000001" and a trace that carries it all agree. */
 export function sameRemittance(a: string, b: string): boolean {
   const x = norm(a);
   const y = norm(b);

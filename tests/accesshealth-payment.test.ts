@@ -152,7 +152,7 @@ describe("the report's remittance-level adjustments", () => {
     ]);
   });
 
-  /* OutcomesMTM's section of EFT-99930001 (30 September 2026) carried a "Fee" row; the reader refused the whole EFT over it. */
+  /* OutcomesMTM section of a September 2026 EFT carried a "Fee" row; the reader refused the whole EFT over it. */
   const withWordFee = REPORT.replace(
     "12/31/26Adj-CS1234567         0.00        -0.33         0.00         0.00         0.00        -0.33",
     [

@@ -8,6 +8,24 @@ file is how they talk.
 
 ## Open items
 
+- **4 October, pharmacy session (85144ed): what the payers take off a remittance is counted once, from one record.** Three
+  records carry the same fee: the Health Mart Atlas payment report for each EFT (AH and CS rows, booked as expenses), the
+  835's provider-level segments (`remittance_holdbacks`) and the reconciliation service's adjustment report. September
+  accrual had subtracted two of them ($146.73 twice); October carried a $46.95 RedSail balance forward as income on both
+  accounts; and EFT-99930001's payment report had been refused whole over one word-coded row ("Adj-Fee"). All three are in
+  OPEN-ITEMS ("Found 4 October") in three lines each, with the pre-flight and what was not checked. **Files changed on
+  `feature/compliance`, so say so on your pull request before editing one:** `src/lib/payer-fees.ts` and
+  `payer-fees-store.ts` (new: one record per remittance, the sign converted in one place), `profit-and-loss.ts` (the fee
+  line is accrual only; `PLInputs.remitFeesCents`, `remitFeesKept`, `remitFeesHeld`), `books-check.ts` (a register entry),
+  `adjustment-report.ts` (`adjustmentsByMonth` is gone; read `payerFeesByMonth()` from `payer-fees-store.ts`),
+  `accesshealth-payment.ts` (word-coded adjustment rows are read), the Money page's help paragraph, and the data
+  dictionary (trap 13, section 9). The remits page was not touched (its path is read-denied on this machine): if it
+  shows fees it should call `payerFeesByMonth()`, not sum the holdbacks or the adjustment report, or the same fee is
+  counted twice again. **Open:** whether OutcomesMTM's $9.00 "Adj-Fee" is a fee or something else (his call); held fee
+  lines ($0.84, $46.95, $9.00) have no one-press "settled / override" yet (rule 4 of the gate, needs a table and a
+  control); the Health Mart Atlas 835 re-pull needs his login. Stored month accounts recompute on the engine's next pass
+  after the deploy, so a page read in the first minutes can still show the old figure.
+
 - **2 October, 20:24: second deploy, the morning-check screen, and what the first deploy's printouts could not show.**
   The three pages were not rendered after the first deploy: the render logs in by writing a short-lived session row into
   the live database, and this session's permission layer refused that. The sentences were read instead from the same

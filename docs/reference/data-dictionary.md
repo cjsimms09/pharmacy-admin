@@ -116,3 +116,16 @@ gives units.
     the remittance reconciliation; only the AR leg's patient total is on account. Never both.
 12. **A standing position as a move.** The buy list says where a product stands; a price-move row
     is a transition between two dated points. The same NDC on both is marked `overlapsWith`.
+13. **One payer fee in three records.** A fee a payer takes from a remittance is printed on the EFT's payment report (its
+    AH and CS rows), on the 835 (a provider-level segment) and in the reconciliation service's adjustment report. It comes
+    off revenue once, from the best record of that remittance, on the accrual account only (section 9); proved in tests/payer-fees.test.ts.
+
+## 9. What a payer takes off a remittance (EFT payment report, 835 provider-level segments, adjustment report)
+
+| Figure | Unit | Meaning | Use for | Never for |
+|---|---|---|---|---|
+| Payer fee: an origination fee (AH), or a recoupment (CS) where the payer took money | cents | Money a payer kept from a remittance after the sale. Not the point-of-sale concessions, which are inside the paid amounts. | an offset to revenue on the **accrual** account, in the remittance's month, **once**, from one record of that remittance: the payment report, else the 835, else the adjustment report | the cash account (a deposit is net of it already); a second record of the same remittance; a balance forward; a credit |
+| Balance forward (code FB, or a reference reading "balance forward") | cents | A negative balance the payer carries to a later remittance. No money moves that day. | a note on the month | revenue, a fee or a recovery, on either account |
+| Credit (CS where the payer gave money back) | cents | Money returned for something the report does not itemise. | a note on the month; held until its meaning is settled | netting against fees |
+| Any other provider-level code | cents | Meaning not settled. | held on neither account and said on the month | either account until the owner says what it is |
+| The sign | — | An 835 provider-level amount in `remittance_holdbacks.amount_cents` is positive where the payer took money; the adjustment report's amount is negative where the payer took money. | converted once, in `payer-fees-store.ts` | comparing the two records without converting |
