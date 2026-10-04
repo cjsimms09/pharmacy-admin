@@ -4,7 +4,7 @@ import { db, schema } from "@/db";
 import { SITE_STARTS_ON } from "./books-start";
 import { claimsFeedStartsOn, claimsOnFile } from "./claims-on-file";
 import { isProgrammePayment } from "./payer-owed";
-import { CAUSES, classifyUntied, isBeforeFeed, tallyUntied, untiedHeadline, type TallyRow, type UntiedCause, type UntiedPayment } from "./untied-payments";
+import { CAUSES, classifyUntied, tallyUntied, untiedHeadline, type TallyRow, type UntiedCause, type UntiedPayment } from "./untied-payments";
 
 /*
  * Every payment received since the books begin that ties to no claim, and why. Read-only: it changes nothing and decides
@@ -48,7 +48,8 @@ export async function untiedPayments(): Promise<UntiedPayments> {
     columns: { id: true, source: true, payer: true, receivedOn: true, amountCents: true, rxNumber: true, fillNumber: true, dateFilled: true, ndc11: true, reference: true },
   });
   const feedFrom = await claimsFeedStartsOn();
-  const onFile = await claimsOnFile(rows.filter((p) => !isBeforeFeed(p, feedFrom)).map((p) => p.rxNumber));
+  /* Every prescription, early fills included: a claim for a fill from before the feed can have come in a later report. */
+  const onFile = await claimsOnFile(rows.map((p) => p.rxNumber));
 
   const lines: UntiedLine[] = [];
   const classified: { cause: UntiedCause; amountCents: number }[] = [];

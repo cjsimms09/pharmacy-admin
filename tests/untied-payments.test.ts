@@ -17,9 +17,25 @@ const held = (id: string, status: "paid" | "reversed", dateFilled: string, o: Pa
 const why = (p: UntiedPayment, onFile: ClaimOnFile[], fromProgramme = false, feedFrom: string | null = FEED) => classifyUntied(p, onFile, feedFrom, fromProgramme);
 
 describe("a fill from before the claims feed", () => {
-  test("is that and nothing else, whatever the site holds for the prescription", () => {
-    assert.deepEqual(why(pay({ dateFilled: "2026-08-14" }), []), { cause: "before_feed", claimIds: [] });
-    assert.equal(why(pay({ dateFilled: "2026-08-14" }), [held("a", "paid", "2026-08-14")]).cause, "before_feed");
+  test("is that where the site holds no claim for the fill, whatever else it holds for the prescription", () => {
+    const early = pay({ dateFilled: "2026-08-14" });
+    assert.deepEqual(why(early, []), { cause: "before_feed", claimIds: [] });
+    assert.deepEqual(why(early, [held("refill", "paid", "2026-09-10", { fillNumber: 2 })]), { cause: "before_feed", claimIds: [] });
+    assert.deepEqual(why(early, [held("older", "reversed", "2026-07-10", { fillNumber: 0 })]), { cause: "before_feed", claimIds: [] });
+  });
+
+  test("is read by its claim where one for the fill came in a later report", () => {
+    const early = pay({ dateFilled: "2026-08-14" });
+    assert.deepEqual(why(early, [held("a", "paid", "2026-08-14")]), { cause: "will_attach", claimIds: ["a"] });
+    assert.deepEqual(why(early, [held("r", "reversed", "2026-08-14")]), { cause: "reversed_not_sold", claimIds: ["r"] });
+    assert.deepEqual(why(early, [held("r", "reversed", "2026-08-14", { soldOn: "2026-08-20" })]), { cause: "reversed_sold", claimIds: ["r"] });
+    const two = [held("a", "paid", "2026-08-14", { bin: "610011", remitCents: 500 }), held("b", "paid", "2026-08-14", { bin: "004336", remitCents: 700 })];
+    assert.deepEqual(why(early, two), { cause: "fits_several", claimIds: ["a", "b"] });
+  });
+
+  test("a reversed claim for the fill beside a paid claim for another is still a reversed claim for the fill", () => {
+    const early = pay({ dateFilled: "2026-08-14" });
+    assert.deepEqual(why(early, [held("r", "reversed", "2026-08-14"), held("refill", "paid", "2026-09-10", { fillNumber: 2 })]), { cause: "reversed_not_sold", claimIds: ["r"] });
   });
 
   test("needs a fill date: a payment with none is not for a fill from before the feed", () => {
@@ -150,24 +166,27 @@ describe("the one sentence", () => {
   test("leads with the payments that can matter, each figure beside what it is, and puts the fills from before the feed after", () => {
     assert.equal(
       untiedHeadline(rows, FEED, FEED),
-      "Not counting fills from before the claims feed, 3 payments received since Sep 1, 2026 (net -$2.00) are tied to no claim: 2 payments (net -$5.00) that fit two or more claims equally; " +
-        "1 payment ($3.00) that names no drug and no fill. A further 40 payments (net $12,345.67) are for fills from before the claims feed begins on Sep 1, 2026; the site holds no claim for those and none is to be loaded.",
+      "3 payments received since Sep 1, 2026 (net -$2.00) are tied to no claim: 2 payments (net -$5.00) that fit two or more claims equally; " +
+        "1 payment ($3.00) that names no drug and no fill. A further 40 payments (net $12,345.67) are for fills from before the claims feed begins on Sep 1, 2026, which the site holds no claim for.",
     );
   });
 
   test("agrees with itself for one payment of each kind", () => {
     assert.equal(
       untiedHeadline([{ cause: "not_a_fill", count: 1, cents: 300 }, { cause: "before_feed", count: 1, cents: 450 }], FEED, FEED),
-      "Not counting fills from before the claims feed, 1 payment received since Sep 1, 2026 ($3.00) is tied to no claim: 1 payment ($3.00) that names no drug and no fill. " +
-        "A further 1 payment ($4.50) is for a fill from before the claims feed begins on Sep 1, 2026; the site holds no claim for that and none is to be loaded.",
+      "1 payment received since Sep 1, 2026 ($3.00) is tied to no claim: 1 payment ($3.00) that names no drug and no fill. " +
+        "A further 1 payment ($4.50) is for a fill from before the claims feed begins on Sep 1, 2026, which the site holds no claim for.",
     );
   });
 
   test("where only fills from before the feed are tied to nothing, says that every other one is tied", () => {
     assert.equal(
       untiedHeadline([{ cause: "before_feed", count: 2, cents: 900 }], FEED, FEED),
-      "Not counting fills from before the claims feed, every payment received since Sep 1, 2026 is tied to a claim. " +
-        "A further 2 payments (net $9.00) are for fills from before the claims feed begins on Sep 1, 2026; the site holds no claim for those and none is to be loaded.",
+      "Every payment received since Sep 1, 2026 is tied to a claim, except 2 payments (net $9.00) for fills from before the claims feed begins on Sep 1, 2026, which the site holds no claim for.",
+    );
+    assert.equal(
+      untiedHeadline([{ cause: "before_feed", count: 1, cents: 450 }], FEED, FEED),
+      "Every payment received since Sep 1, 2026 is tied to a claim, except 1 payment ($4.50) for a fill from before the claims feed begins on Sep 1, 2026, which the site holds no claim for.",
     );
   });
 

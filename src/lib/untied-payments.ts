@@ -36,7 +36,7 @@ export type Classified = {
   claimIds: string[];
 };
 
-/** A fill from before the claims feed begins: the site holds no claim for it and never will. */
+/** A fill from before the claims feed begins. The site holds a claim for it only if one came in a later report, which the matcher's answer on the prescription says. */
 export function isBeforeFeed(p: { dateFilled: string | null }, feedFrom: string | null): boolean {
   return feedFrom !== null && p.dateFilled !== null && p.dateFilled < feedFrom;
 }
@@ -46,14 +46,19 @@ export function isBeforeFeed(p: { dateFilled: string | null }, feedFrom: string 
  * and `fromProgramme` whether the money is a voucher programme's, both put to the matcher exactly as attaching a payment puts them.
  */
 export function classifyUntied(p: UntiedPayment, onFile: ClaimOnFile[], feedFrom: string | null, fromProgramme: boolean): Classified {
-  if (isBeforeFeed(p, feedFrom)) return { cause: "before_feed", claimIds: [] };
   const line = { fillNumber: p.fillNumber, dateFilled: p.dateFilled, ndc11: p.ndc11, amountCents: p.amountCents, bin: null, fromProgramme };
   const v = verdictOnPrescription(onFile, line);
+  /*
+   * A fill from before the feed is a group of its own only where the site holds no claim for that fill. A claim for one can come
+   * in a later daily report (a script filled in August and collected in September), and then the payment is read by that claim
+   * like any other: 40 of 3,637 were, $3,700.92, measured 4 October 2026.
+   */
+  const early = isBeforeFeed(p, feedFrom);
   if (v.kind === "tied") return { cause: "will_attach", claimIds: [v.claim.id] };
-  if (v.kind === "no_claim_on_file") return { cause: p.ndc11 === null && p.fillNumber === null ? "not_a_fill" : "no_claim_yet", claimIds: [] };
   if (v.kind === "ambiguous") return { cause: "fits_several", claimIds: claimsOfThisFill(onFile.filter((c) => c.status === "paid"), line).map((c) => c.id) };
+  if (v.kind === "no_claim_on_file") return { cause: early ? "before_feed" : p.ndc11 === null && p.fillNumber === null ? "not_a_fill" : "no_claim_yet", claimIds: [] };
   const fill = v.kind === "only_reversed" ? v.fill : v.reversedFill;
-  if (fill.length === 0) return { cause: "other_fills_only", claimIds: onFile.map((c) => c.id) };
+  if (fill.length === 0) return early ? { cause: "before_feed", claimIds: [] } : { cause: "other_fills_only", claimIds: onFile.map((c) => c.id) };
   return { cause: fill.some((c) => c.soldOn) ? "reversed_sold" : "reversed_not_sold", claimIds: fill.map((c) => c.id) };
 }
 
@@ -116,7 +121,7 @@ export function causeInfo(cause: UntiedCause, feedFrom: string | null): CauseInf
         asks: "Find out why no claim is on file. Nothing to press: the payment attaches itself if one arrives.",
         short: ["for a prescription with no claim on file", "for prescriptions with no claim on file"],
         why:
-          `The fill is on or after ${from}, the first day of the claims feed, yet the site holds no claim for this prescription. Either its claim has not arrived or it was never in the feed. ` +
+          `Nothing puts the fill before ${feedFrom ? `${from}, the day the claims feed begins` : from}, yet the site holds no claim for this prescription. Either its claim has not arrived or it was never in the feed. ` +
           "If a claim for it is loaded, the payment attaches by itself.",
       };
     case "other_fills_only":
@@ -157,11 +162,13 @@ export function causeInfo(cause: UntiedCause, feedFrom: string | null): CauseInf
       };
     case "before_feed":
       return {
-        label: `For fills from before ${from}`,
+        label: `Fills from before ${from} that the site holds no claim for`,
         needs: "nothing",
         asks: "Nothing.",
-        short: [`for a fill from before the claims feed begins on ${from}`, `for fills from before the claims feed begins on ${from}`],
-        why: `The claims feed begins on ${from}, so the site holds no claim for a fill from before then and none is to be loaded. Nothing is owed on these from here. They are counted by who paid and not listed line by line.`,
+        short: [`for a fill from before the claims feed begins on ${from}, which the site holds no claim for`, `for fills from before the claims feed begins on ${from}, which the site holds no claim for`],
+        why:
+          `The claims feed begins on ${from}, and the site holds no claim for the fill each of these names, so there is no claim for the payment to settle. They are counted by who paid and not listed line by line. ` +
+          `A payment for a fill from before ${from} that the site does hold a claim for is not here: it is under the reason that claim gives.`,
       };
   }
 }
@@ -175,20 +182,20 @@ const sum = (n: number, cents: number): string => `${n === 1 ? "" : "net "}${mon
 
 /**
  * Everything tied to no claim, every figure beside what it is, so the sentence reads without the page behind it. The payments
- * that can matter come first and the fills from before the claims feed after, because they are nearly all of the count and
- * nothing is to be done about them. `booksFrom` is the day money received counts from.
+ * that can matter come first and the fills from before the claims feed that the site holds no claim for after, because they
+ * are nearly all of the count and there is nothing to be done about them. `booksFrom` is the day money received counts from.
  */
 export function untiedHeadline(rows: TallyRow[], booksFrom: string, feedFrom: string | null): string {
   const tot = (rs: TallyRow[]) => rs.reduce((t, r) => ({ n: t.n + r.count, cents: t.cents + r.cents }), { n: 0, cents: 0 });
-  const inFeed = rows.filter((r) => r.cause !== "before_feed");
-  const before = rows.find((r) => r.cause === "before_feed");
+  const rest = rows.filter((r) => r.cause !== "before_feed");
+  const early = rows.find((r) => r.cause === "before_feed");
   const part = (r: TallyRow): string => `${payments(r.count)} (${sum(r.count, r.cents)}) ${causeInfo(r.cause, feedFrom).short[r.count === 1 ? 0 : 1]}`;
   const since = fmt(booksFrom);
-  if (inFeed.length === 0 && !before) return `Every payment received since ${since} is tied to a claim.`;
-  const first = inFeed.length === 0
-    ? `Not counting fills from before the claims feed, every payment received since ${since} is tied to a claim.`
-    : `Not counting fills from before the claims feed, ${payments(tot(inFeed).n)} received since ${since} (${sum(tot(inFeed).n, tot(inFeed).cents)}) ${are(tot(inFeed).n)} tied to no claim: ${inFeed.map(part).join("; ")}.`;
-  if (!before) return first;
-  const one = before.count === 1;
-  return `${first} A further ${payments(before.count)} (${sum(before.count, before.cents)}) ${are(before.count)} for ${one ? "a fill" : "fills"} from before the claims feed begins on ${fmt(feedFrom ?? booksFrom)}; the site holds no claim for ${one ? "that" : "those"} and none is to be loaded.`;
+  if (rest.length === 0 && !early) return `Every payment received since ${since} is tied to a claim.`;
+  const unheld = early ? `${payments(early.count)} (${sum(early.count, early.cents)})` : "";
+  const fills = early ? `${early.count === 1 ? "a fill" : "fills"} from before the claims feed begins on ${fmt(feedFrom ?? booksFrom)}, which the site holds no claim for` : "";
+  if (rest.length === 0) return `Every payment received since ${since} is tied to a claim, except ${unheld} for ${fills}.`;
+  const t = tot(rest);
+  const first = `${payments(t.n)} received since ${since} (${sum(t.n, t.cents)}) ${are(t.n)} tied to no claim: ${rest.map(part).join("; ")}.`;
+  return early ? `${first} A further ${unheld} ${are(early.count)} for ${fills}.` : first;
 }

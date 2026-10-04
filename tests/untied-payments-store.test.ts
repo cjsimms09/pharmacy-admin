@@ -79,6 +79,29 @@ describe("the payments the site holds that tie to no claim", () => {
     assert.equal(r.feedFrom, "2026-09-01");
   });
 
+  test("a fill from before the feed that the site holds a claim for is read by that claim, and is not counted as before the feed", async () => {
+    const early = (await untiedPayments()).beforeFeed.reduce((n, b) => n + b.count, 0);
+    const rev = claim("910040", 1, "2026-08-28", { status: "reversed", soldOn: "2026-08-28", payerLabel: "Plan G", itemName: "Drug Six" });
+    const p1 = claim("910041", 1, "2026-08-29", { payerLabel: "Plan H", itemName: "Drug Seven" });
+    const p2 = claim("910041", 1, "2026-08-29", { payerLabel: "Plan I", itemName: "Drug Seven", remitCents: 6_000 });
+    const other = claim("910042", 2, "2026-09-03", { payerLabel: "Plan J", itemName: "Drug Eight" });
+    await db.insert(schema.claims).values([rev, p1, p2, other]);
+    await db.insert(schema.claimPayments).values([
+      payment("910040", { dateFilled: "2026-08-28", amountCents: 3_300 }),
+      payment("910041", { dateFilled: "2026-08-29", amountCents: 5_500 }),
+      payment("910042", { dateFilled: "2026-08-20", amountCents: 2_200 }),
+    ]);
+    const r = await untiedPayments();
+    const of = (rx: string) => r.lines.find((l) => l.rxNumber === rx);
+    assert.equal(of("910040")?.cause, "reversed_sold");
+    assert.deepEqual(of("910040")?.claims.map((x) => x.id), [rev.id]);
+    assert.equal(of("910041")?.cause, "fits_several");
+    assert.deepEqual(of("910041")?.claims.map((x) => x.id).sort(), [p1.id, p2.id].sort());
+    /* A claim for another fill of the prescription is not a claim for this one: it stays among the fills the site holds no claim for. */
+    assert.equal(of("910042"), undefined);
+    assert.equal(r.beforeFeed.reduce((n, b) => n + b.count, 0), early + 1);
+  });
+
   test("a payment already tied to a claim, or received before the books begin, is not here", async () => {
     const before = (await untiedPayments()).total;
     const held = claim("910015", 1, "2026-09-12");
