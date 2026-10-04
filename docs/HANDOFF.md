@@ -29,6 +29,31 @@ file is how they talk.
   **Files changed on `feature/compliance`, so say so on your pull request before editing one:** `claim-payments.ts`
   (`facilitatorMoney`, `FacilitatorMoney`), `money-found.ts` (the MTF row), `untied-payments.ts` (`tiedSays`, `sourceToDo`).
 
+- **4 October, pharmacy session (61cd493 to 20e671a): every payment that ties to no claim has a page that says why, and every
+  screen that spoke of them now reads the same classifier.** The first reading of these payments (in the next item) split them by
+  the fill's date alone and said no screen listed any; both are superseded. A fill from before the claims feed can have a claim
+  on file (one arrived in a later report), so "before the feed" is the matcher's own answer on the prescription
+  (`verdictOnPrescription` in `match-remittance.ts`, the function `findClaim` attaches by) and the fill's date together, never
+  the date alone. Live on 4 October, of 3,821 payments received since 1 September that tie to no claim ($393,948.45 net): 3,597
+  ($387,222.77) are for fills from before the feed that the site holds no claim for, and need nothing; the other 224 ($6,725.68)
+  are 23 that fit two or more claims, 10 on reversed claims where one carries a sale date, 12 that name no drug and no fill, and
+  179 on reversed claims none of which carries a sale date. New: `src/lib/untied-payments.ts` (the classifier and every sentence
+  about it, pure), `untied-payments-store.ts`, `claims-on-file.ts`, `src/app/(app)/claims/no-claim/page.tsx` and `view.tsx`; the
+  data dictionary's section 10 and trap 14 define the words. **Files changed on `feature/compliance`, so say so on your pull
+  request before editing one:** `claim-payments.ts`, `match-remittance.ts` (`verdictOnPrescription`, `claimsOfThisFill`,
+  `ClaimOnFile`), `alerts.ts`, `money-found.ts`, `payer-owed.ts`, `payer-owed-store.ts`, `ar-report.ts`, `ar-report-store.ts`,
+  `claims/page.tsx`, `payers/owed/page.tsx` and `payers/ar/page.tsx`. What it corrected: the Claims card said all $584,973.81 of
+  payments in the books "has reached these claims" when $393,948.45 of it is tied to none; the owed pages, the AR page and the
+  printed month-end AR report called every payment tied to no claim "fills from before its records begin" and "nothing to
+  fix", true of 3,597 of the 3,821; the MTF row on the money list told him to load days for 2 payments that fit two claims of a
+  fill the site already holds. **Open:** the page has no press (the 33 payments that need a decision, net $2,017.47, cannot be
+  attached by hand yet, and the matcher's own message still says "attach it by hand"); what a sale date on a reversed claim
+  means is his call (OPEN-ITEMS, "Waiting on him"); the nightly proof `remit_to_claim` (`engine/proofs.ts`) counts every plan
+  payment with no claim and a fill date from 1 September as "unmatched" and passes only at zero, so it fails every month, and
+  its needs-you row (`engine/needs-you.ts`) links to `/v2/claims?tab=unmatched`, which is not a route here: left alone; and
+  the monthly AR email is due from 5 October with no address nominated, so nothing is sent: deploy before one is set, or the
+  old wording goes out. All of it is in OPEN-ITEMS ("Found 4 October, afternoon") in three lines each, with the pre-flight.
+
 - **4 October, pharmacy session (85144ed): what the payers take off a remittance is counted once, from one record.** Three
   records carry the same fee: the Health Mart Atlas payment report for each EFT (AH and CS rows, booked as expenses), the
   835's provider-level segments (`remittance_holdbacks`) and the reconciliation service's adjustment report. September
@@ -57,14 +82,11 @@ file is how they talk.
   which" cause, which is wrong where two remittances share an amount: September's one $2,008.00 deposit, on the 24th, is
   carried by a receipt under another number. It now says a deposit settles it only if it does not already stand for another
   remittance of that amount (`daily-check.ts`, pinned in `tests/daily-check.test.ts`). **And from the scan the same day:**
-  3,821 payments received since 1 September tie to no claim ($393,948.45 net). 3,637 are for fills before the claims feed
-  begins and are not a job; of the 184 inside it, 151 are payments on reversed claims, 19 fit more than one live claim, 12
-  are not fills and 2 are MTF. **No screen lists any payment that ties to no claim:** the morning list's "See the lines" and
-  "Look at them" go to `/claims`, which shows a count, and its card says "184 not yet matched to a claim", of which at most
-  2 are waiting for one. `reversed-fill-payments.ts` and `claimsView` (`engine/read.ts`) have no callers in `src/`, so do not
-  assume either is live. Anyone adding the listing should read `findClaim` and `laterPaymentSummary` (`claim-payments.ts`) first. Two
-  claims that were sold and then reversed, $1,072.74 paid and $1,182.07 unpaid, are a question to him (OPEN-ITEMS,
-  "Waiting on him").
+  3,821 payments received since 1 September tie to no claim ($393,948.45 net). The reading written here that day split them
+  by the fill's date alone, called 3,637 of them "before the claims feed" and said no screen lists any; the item above
+  corrects it (3,597 are that, and `/claims/no-claim` lists the rest with a reason). `reversed-fill-payments.ts` and
+  `claimsView` (`engine/read.ts`) have no callers in `src/`, so do not assume either is live. Two claims that were sold and
+  then reversed, $1,072.74 paid and $1,182.07 unpaid, are a question to him (OPEN-ITEMS, "Waiting on him").
 
 - **2 October, 20:24: second deploy, the morning-check screen, and what the first deploy's printouts could not show.**
   The three pages were not rendered after the first deploy: the render logs in by writing a short-lived session row into

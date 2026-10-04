@@ -46,6 +46,11 @@ Measured on the real database the same afternoon, after the ProviderPay detail i
   attach money to a reversed claim, so these sit with no claim and nothing on any screen says so.
   Almost certainly the brand-to-generic rebill shape fixed in `fillKey` on 17 September — the
   money belongs to the row the prescription was re-billed on. **Open.**
+  **Update, 4 October:** `/claims/no-claim` now lists every payment that ties to no claim with its
+  reason, these among them. Counted again that day: 189 payments, net $6,779.52, sit on reversed
+  claims. In 10 of them (net $2,181.31) a reversed claim carries a sale date, which is a question
+  to him (OPEN-ITEMS, "Waiting on him"); in the other 179 (net $4,598.21) none does. Built, not
+  deployed.
 - **Remittance adjustments are not booked at all.** Every difference between the portal's remit
   amount and what the site holds for that remittance is exactly the portal's "Adjust" column —
   $12.40 on 9397708, $67.84 on EFT-31470757, $73.04 on EFT-31445402, and so on, about **$259
