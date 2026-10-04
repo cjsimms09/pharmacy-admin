@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 let db: typeof import("../src/db").db;
 let schema: typeof import("../src/db").schema;
 let untiedPayments: typeof import("../src/lib/untied-payments-store").untiedPayments;
+let untiedPaymentsFrom: typeof import("../src/lib/untied-payments-store").untiedPaymentsFrom;
 let newId: typeof import("../src/lib/crypto").newId;
 let importId: string;
 let cleanup: () => void;
@@ -19,7 +20,7 @@ before(async () => {
   const { useScratchDb } = await import("./support/scratch-db");
   cleanup = await useScratchDb();
   ({ db, schema } = await import("../src/db"));
-  ({ untiedPayments } = await import("../src/lib/untied-payments-store"));
+  ({ untiedPayments, untiedPaymentsFrom } = await import("../src/lib/untied-payments-store"));
   ({ newId } = await import("../src/lib/crypto"));
   importId = newId();
   await db.insert(schema.claimImports).values({ id: importId, fileName: "the test", createdBy: "the test", periodFrom: "2026-09-01" });
@@ -143,5 +144,51 @@ describe("the payments the site holds that tie to no claim", () => {
     assert.equal(r.lines.reduce((n, l) => n + l.amountCents, 0) + r.beforeFeed.reduce((n, b) => n + b.cents, 0), r.total.cents);
     assert.match(r.headline, /tied to no claim/);
     assert.match(r.headline, /received since Sep 1, 2026/);
+  });
+});
+
+describe("the same reading for one source of payment", () => {
+  test("counts that source alone, by the same causes, and has no sentence about every payment", async () => {
+    const all = await untiedPayments();
+    const mtf = await untiedPaymentsFrom("mtf");
+    const mine = all.lines.filter((l) => l.source === "mtf");
+    assert.deepEqual(mtf.lines.map((l) => l.id), mine.map((l) => l.id));
+    assert.deepEqual(mtf.beforeFeed, all.beforeFeed.filter((b) => b.source === "mtf"));
+    assert.equal(mtf.total.count, mine.length + mtf.beforeFeed.reduce((n, b) => n + b.count, 0));
+    assert.equal(mtf.total.cents, mine.reduce((n, l) => n + l.amountCents, 0) + mtf.beforeFeed.reduce((n, b) => n + b.cents, 0));
+    assert.equal("headline" in mtf, false);
+    assert.deepEqual((await untiedPaymentsFrom("a_source_nobody_used")).total, { count: 0, cents: 0 });
+  });
+});
+
+describe("the payments that reached claims and the payments tied to none", () => {
+  test("every payment received since the books begin is in one count or the other, to the cent", async () => {
+    const { laterPaymentSummary } = await import("../src/lib/claim-payments");
+    const inBooks = (await db.query.claimPayments.findMany()).filter((r) => !r.outOfBooks);
+    const tied = inBooks.filter((r) => r.claimId !== null);
+    const later = await laterPaymentSummary();
+    const none = await untiedPayments();
+    assert.ok(tied.length > 0 && none.total.count > 0, "the test holds some of each");
+    assert.equal(later.reduce((n, x) => n + x.payments, 0), tied.length);
+    assert.equal(later.reduce((n, x) => n + x.amountCents, 0), tied.reduce((n, r) => n + r.amountCents, 0));
+    assert.equal(later.reduce((n, x) => n + x.payments, 0) + none.total.count, inBooks.length);
+    assert.equal(later.reduce((n, x) => n + x.amountCents, 0) + none.total.cents, inBooks.reduce((n, r) => n + r.amountCents, 0));
+  });
+});
+
+describe("the two groups the morning list speaks of", () => {
+  test("are the payments the whole reading puts under those two causes, read without the fills from before the feed", async () => {
+    const { paymentsWithNoClaimOnFile } = await import("../src/lib/untied-payments-store");
+    /* A payment that names no fill date is not for a fill from before the feed: the narrower reading has to take it in. */
+    await db.insert(schema.claimPayments).values(payment("910050", { dateFilled: null, fillNumber: null, ndc11: null, amountCents: 700 }));
+    const whole = await untiedPayments();
+    const some = await paymentsWithNoClaimOnFile();
+    const ids = (xs: { id: string }[]) => xs.map((x) => x.id).sort();
+    assert.ok(whole.lines.some((l) => l.rxNumber === "910050" && l.cause === "not_a_fill"));
+    assert.deepEqual(ids(some.stranded), ids(whole.lines.filter((l) => l.cause === "no_claim_yet")));
+    assert.deepEqual(ids(some.notAFill), ids(whole.lines.filter((l) => l.cause === "not_a_fill")));
+    assert.ok(some.stranded.length > 0 && some.notAFill.length > 0, "the test holds some of each");
+    assert.ok(whole.beforeFeed.length > 0, "and some from before the feed, which the narrower reading leaves unread");
+    assert.equal(some.feedFrom, whole.feedFrom);
   });
 });

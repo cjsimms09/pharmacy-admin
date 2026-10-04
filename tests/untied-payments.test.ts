@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { CAUSES, causeInfo, classifyUntied, needsSays, tallyUntied, untiedHeadline, type TallyRow, type UntiedPayment } from "../src/lib/untied-payments";
+import { CAUSES, causeInfo, classifyUntied, claimBesideSays, namesSays, needsPhrase, needsSays, sourceSays, tallyByNeeds, tallyUntied, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedPayment } from "../src/lib/untied-payments";
 import type { ClaimOnFile } from "../src/lib/match-remittance";
 
 /*
@@ -192,5 +192,123 @@ describe("the one sentence", () => {
 
   test("says so when every payment is tied", () => {
     assert.equal(untiedHeadline([], FEED, FEED), "Every payment received since Sep 1, 2026 is tied to a claim.");
+  });
+});
+
+describe("the groups of a person's attention", () => {
+  const rows: TallyRow[] = [
+    { cause: "reversed_not_sold", count: 179, cents: 459_821 },
+    { cause: "fits_several", count: 23, cents: -16_384 },
+    { cause: "reversed_sold", count: 10, cents: 218_131 },
+    { cause: "not_a_fill", count: 12, cents: 11_000 },
+    { cause: "will_attach", count: 3, cents: 900 },
+    { cause: "before_feed", count: 3_597, cents: 38_722_277 },
+  ];
+
+  test("are counted from the ones that need a decision to the ones that need nothing, and leave out the fills from before the feed", () => {
+    assert.deepEqual(tallyByNeeds(rows), [
+      { needs: "decide", count: 33, cents: 201_747 },
+      { needs: "look", count: 12, cents: 11_000 },
+      { needs: "wait", count: 3, cents: 900 },
+      { needs: "nothing", count: 179, cents: 459_821 },
+    ]);
+  });
+
+  test("leave out a group nothing is in, and add up to the payments that are not from before the feed", () => {
+    assert.deepEqual(tallyByNeeds([{ cause: "not_a_fill", count: 2, cents: 300 }, { cause: "before_feed", count: 9, cents: 9_999 }]), [{ needs: "look", count: 2, cents: 300 }]);
+    assert.deepEqual(tallyByNeeds([{ cause: "before_feed", count: 9, cents: 9_999 }]), []);
+    assert.equal(tallyByNeeds(rows).reduce((n, r) => n + r.count, 0), rows.filter((r) => r.cause !== "before_feed").reduce((n, r) => n + r.count, 0));
+  });
+
+  test("are said in a line a person can read at a glance", () => {
+    assert.equal(needsPhrase(tallyByNeeds(rows)), "33 need a decision, 12 are worth a look, 3 will attach at the next claims load, 179 need nothing");
+    assert.equal(
+      needsPhrase([{ needs: "decide", count: 1, cents: 5 }, { needs: "look", count: 1, cents: 5 }, { needs: "nothing", count: 1, cents: 5 }]),
+      "1 needs a decision, 1 is worth a look, 1 needs nothing",
+    );
+    assert.equal(needsPhrase([]), "");
+  });
+});
+
+describe("who paid, in the site's own words", () => {
+  test("every source the site files a payment under has words, and one it does not know is shown as stored", () => {
+    for (const s of ["plan", "mtf", "copay_card", "rxrescue", "dir", "secondary", "manual"]) assert.notEqual(sourceSays(s), s);
+    assert.equal(sourceSays("mtf"), "Medicare Transaction Facilitator");
+    assert.equal(sourceSays("a_new_one"), "a_new_one");
+  });
+});
+
+describe("what a line says of itself and of the claims beside it", () => {
+  test("says what a payment does not name, in words, and never as a bare dash", () => {
+    assert.equal(namesSays(pay({ fillNumber: 2, dateFilled: "2026-09-10", ndc11: "00000000001" })), "fill 2 · Sep 10, 2026 · NDC 00000000001");
+    assert.equal(namesSays(pay({ fillNumber: null, dateFilled: null, ndc11: null })), "no fill number · no fill date · no drug");
+    assert.equal(namesSays(pay({ fillNumber: 0, ndc11: null })), "fill 0 · Sep 10, 2026 · no drug");
+  });
+
+  const claim = (o: Partial<ClaimBeside> = {}): ClaimBeside => ({ id: "c", payerLabel: "Invented Plan", itemName: "Invented Drug", status: "paid", fillNumber: 1, dateFilled: "2026-09-10", remitCents: 4_250, soldOn: null, ...o });
+
+  test("names the payer first and then what tells the claim from its twin", () => {
+    assert.deepEqual(claimBesideSays(claim()), { who: "Invented Plan", rest: "Invented Drug · fill 1, Sep 10, 2026 · paid · claim amount $42.50" });
+  });
+
+  test("says a reversal with and without a sale date, and what the claim does not carry", () => {
+    assert.equal(claimBesideSays(claim({ status: "reversed", soldOn: "2026-09-11", remitCents: -4_250 })).rest, "Invented Drug · fill 1, Sep 10, 2026 · reversed, sale date Sep 11, 2026 · claim amount -$42.50");
+    assert.equal(claimBesideSays(claim({ status: "reversed" })).rest.includes("reversed, no sale date"), true);
+    assert.deepEqual(claimBesideSays(claim({ payerLabel: null, itemName: null, fillNumber: null, remitCents: null })), {
+      who: "no payer name",
+      rest: "no drug name · no fill number, Sep 10, 2026 · paid · no amount on the claim",
+    });
+  });
+});
+
+describe("the line the Claims page shows", () => {
+  const rows: TallyRow[] = [
+    { cause: "fits_several", count: 23, cents: -16_384 },
+    { cause: "reversed_sold", count: 10, cents: 218_131 },
+    { cause: "not_a_fill", count: 12, cents: 11_000 },
+    { cause: "reversed_not_sold", count: 179, cents: 459_821 },
+    { cause: "before_feed", count: 3_597, cents: 38_722_277 },
+  ];
+
+  test("says the money and the count, what each group asks of a person, and the fills from before the feed in the same sentence", () => {
+    const r = untiedCardRow(rows, "2026-09-01", FEED)!;
+    assert.equal(r.amount, "net $6,725.68");
+    assert.equal(r.tone, "warn");
+    assert.equal(
+      r.title,
+      "is tied to no claim — 224 payments received since Sep 1, 2026: 33 need a decision, 12 are worth a look, 179 need nothing; a further 3,597 (net $387,222.77) are for fills from before the claims feed began, which the site holds no claim for",
+    );
+    assert.equal(r.why, untiedHeadline(rows, "2026-09-01", FEED));
+  });
+
+  test("the amount is the money of the groups the sentence counts, to the cent, and the fills from before the feed are not in it", () => {
+    const r = untiedCardRow(rows, "2026-09-01", FEED)!;
+    const rest = rows.filter((x) => x.cause !== "before_feed");
+    assert.equal(r.amount, `net $${(rest.reduce((n, x) => n + x.cents, 0) / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`);
+    assert.match(r.title, new RegExp(`${rest.reduce((n, x) => n + x.count, 0)} payments received`));
+  });
+
+  test("is an amber line only where something is for a person to decide or to look at", () => {
+    assert.equal(untiedCardRow([{ cause: "reversed_not_sold", count: 4, cents: 8_000 }], "2026-09-01", FEED)!.tone, "ok");
+    assert.equal(untiedCardRow([{ cause: "will_attach", count: 4, cents: 8_000 }], "2026-09-01", FEED)!.tone, "ok");
+    assert.equal(untiedCardRow([{ cause: "other_fills_only", count: 1, cents: 800 }], "2026-09-01", FEED)!.tone, "warn");
+    assert.equal(untiedCardRow([{ cause: "fits_several", count: 1, cents: 800 }], "2026-09-01", FEED)!.tone, "warn");
+  });
+
+  test("one payment is said as one payment, without 'net'", () => {
+    const r = untiedCardRow([{ cause: "not_a_fill", count: 1, cents: 1_000 }], "2026-09-01", FEED)!;
+    assert.equal(r.amount, "$10.00");
+    assert.equal(r.title, "is tied to no claim — 1 payment received since Sep 1, 2026: 1 is worth a look");
+  });
+
+  test("where all of it is for fills from before the feed, says so and asks for nothing", () => {
+    const r = untiedCardRow([{ cause: "before_feed", count: 2, cents: 5_000 }], "2026-09-01", FEED)!;
+    assert.equal(r.tone, "ok");
+    assert.equal(r.amount, "net $50.00");
+    assert.equal(r.title, "is tied to no claim — 2 payments received since Sep 1, 2026, all for fills from before the claims feed began, which the site holds no claim for");
+  });
+
+  test("is no line at all where every payment is tied", () => {
+    assert.equal(untiedCardRow([], "2026-09-01", FEED), null);
   });
 });

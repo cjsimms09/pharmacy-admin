@@ -1,5 +1,8 @@
 import React from "react";
-import { atLocal } from "@/lib/dates";
+import { atLocal, fmt } from "@/lib/dates";
+import { SITE_STARTS_ON } from "@/lib/books-start";
+import { untiedPayments } from "@/lib/untied-payments-store";
+import { untiedCardRow } from "@/lib/untied-payments";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -44,13 +47,15 @@ export default async function ClaimsPage({
   const searching = Boolean(from || to || rx || payer);
 
   const { laterPaymentSummary } = await import("@/lib/claim-payments");
-  const [flags, laterMoney, imports, s, mailReady] = await Promise.all([
+  const [flags, laterMoney, untied, imports, s, mailReady] = await Promise.all([
     claimFlags(scope),
     laterPaymentSummary(),
+    untiedPayments(),
     claimImports(),
     getSettings(),
     hasMailPassword(),
   ]);
+  const untiedRow = untiedCardRow(untied.tally, untied.booksFrom, untied.feedFrom);
   /*
    * The fills that sentence below is about, counted and totalled from the same list.
    *
@@ -491,13 +496,16 @@ export default async function ClaimsPage({
                 key: "later",
                 tone: "ok" as const,
                 amount: formatCents(laterMoney.reduce((n, x) => n + x.amountCents, 0)),
-                                /*
-                  Only what can still be matched. A payment against a prescription filled before the
-                  claims feed began has nothing to match to and never will, so counting it as
-                  pending made a number that could only go up.
-                */
-                title: `has reached these claims since they were transmitted${laterMoney.some((x) => x.unmatched > 0) ? ` — ${laterMoney.reduce((n, x) => n + x.unmatched, 0)} not yet matched to a claim` : laterMoney.some((x) => x.beforeTheFeed > 0) ? ` — every one matched, bar ${laterMoney.reduce((n, x) => n + x.beforeTheFeed, 0)} for prescriptions filled before this feed began` : ""}`,
-                why: `From ${laterMoney.map((x) => `${x.payments} ${x.source.toUpperCase()}`).join(", ")}. Added to the fill it belongs to and kept apart from what the plan itself paid. Anything naming a prescription this site has not loaded attaches itself when it arrives.`,
+                title: "has reached these claims since they were transmitted",
+                why: `Received since ${fmt(SITE_STARTS_ON)}, from ${laterMoney.map((x) => `${x.payments} ${x.source.toUpperCase()}`).join(", ")}, each tied to the claim it paid. Added to the fill it belongs to and kept apart from what the plan itself paid. Payments tied to no claim are in the next line, not in this one.`,
+              }
+            : null,
+          untiedRow
+            ? {
+                key: "no-claim",
+                href: "/claims/no-claim",
+                action: "See them",
+                ...untiedRow,
               }
             : null,
           flags.unpriceable > 0

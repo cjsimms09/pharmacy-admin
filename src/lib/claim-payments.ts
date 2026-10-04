@@ -4,7 +4,7 @@ import "server-only";
 import { originClass, legacyOrigin } from "./payment-origin";
 import nodePath from "node:path";
 import { db, schema } from "@/db";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { newId } from "./crypto";
 import type { LaterPayment } from "./fills";
 import { formatCents } from "./money";
@@ -345,52 +345,20 @@ export async function matchOrphanPayments(): Promise<{ matched: number }> {
 }
 
 /**
- * What has arrived after the day, by where it came from, for a page that has to show it.
- *
- * A payment is only unmatched if there was ever a claim for it to match. The owner:
- *
- * > "can we have it stop alerting if looking for a claim before 09/01?? this system will never
- * > get anything before 09/01.."
- *
- * He is right, and "not yet matched" was the wrong tense for all of it: the daily claims feed
- * begins on the first day this site was given a report, and a copay-card payment against a
- * prescription filled before that has nothing to match to and never will. Counting those as
- * pending made a number that could only ever go up, on a screen whose whole worth is that the
- * numbers on it can be driven to nought.
- *
- * So they are counted apart. The money is the same money and is still shown — it just is not a job.
+ * What has reached the claims since the day, by where it came from: the payments received since the books begin that are tied to a
+ * claim. The ones tied to none are not "not yet matched": nearly all are for fills from before the claims feed, and they are read and
+ * counted by cause in untied-payments-store.ts.
  */
-export async function laterPaymentSummary(): Promise<
-  { source: string; payments: number; amountCents: number; unmatched: number; beforeTheFeed: number }[]
-> {
-  // In-books money only: this is a total the owner reads, not a matching exercise.
-  const rows = await db.query.claimPayments.findMany({ where: eq(schema.claimPayments.outOfBooks, false) });
-  /*
-   * The first day the claims feed covers. Read from the claims themselves rather than set as a
-   * date in the code, so it stays true if an earlier month is ever loaded.
-   */
-  const covered = await claimsFeedStartsOn();
-  /*
-   * The earliest fill this site holds is not the same question and was the wrong answer.
-   *
-   * A daily report carries the fills *completed* that day, and a script filled on 3 August and
-   * collected in September arrives in a September report — so the claims table reaches back into
-   * August and further while the feed itself begins on the first of September. Reading the cutoff
-   * off the fills therefore declared eleven payments still matchable when every one of them was for
-   * a prescription dispensed months before anything was watching, some as far back as January.
-   */
-  const earliest = covered;
-
-  const by = new Map<string, { source: string; payments: number; amountCents: number; unmatched: number; beforeTheFeed: number }>();
+export async function laterPaymentSummary(): Promise<{ source: string; payments: number; amountCents: number }[]> {
+  const rows = await db.query.claimPayments.findMany({
+    where: and(eq(schema.claimPayments.outOfBooks, false), isNotNull(schema.claimPayments.claimId)),
+    columns: { source: true, amountCents: true },
+  });
+  const by = new Map<string, { source: string; payments: number; amountCents: number }>();
   for (const r of rows) {
-    const e = by.get(r.source) ?? { source: r.source, payments: 0, amountCents: 0, unmatched: 0, beforeTheFeed: 0 };
+    const e = by.get(r.source) ?? { source: r.source, payments: 0, amountCents: 0 };
     e.payments++;
     e.amountCents += r.amountCents;
-    if (!r.claimId) {
-      const older = earliest !== null && r.dateFilled !== null && r.dateFilled < earliest;
-      if (older) e.beforeTheFeed++;
-      else e.unmatched++;
-    }
     by.set(r.source, e);
   }
   return [...by.values()].sort((a, b) => b.amountCents - a.amountCents);

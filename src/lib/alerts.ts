@@ -244,107 +244,60 @@ export async function alerts(): Promise<Alert[]> {
     });
   }
 
-  // ── Money that arrived for a fill this site holds, and found no claim ──
+  // ── Money that arrived and ties to no claim ──
   /*
-   * The check that makes "it will match next time" something the site proves rather than something
-   * I said.
+   * Two of the groups on the payments-with-no-claim page are worth a morning's notice. They are read from that page's own reading, so the
+   * count here and the count on the page the button opens are one count. The others (a fill from before the claims feed, a payment on a
+   * claim that was reversed, one that fits several claims) are said on the page and are no alarm by themselves.
    *
-   * A remittance for a fill older than any claim on file cannot match and is not a fault — RedSail's
-   * first file was forty-four April and May fills, Veridikal's two were June and July, and these
-   * books begin on 1 September. That is why the unmatched count alone has never been worth an alert.
-   *
-   * A payment for a fill the site *does* hold and cannot place is a different animal entirely. It
-   * means the prescription number, the fill date, the NDC or the BIN disagree between the payer's
-   * file and the claim — and until somebody looks, that claim goes on being owed by a payer that has
-   * already paid it. The first September remittance is the one that will say whether the keys line
-   * up, and this is what will say so out loud on the morning it arrives.
+   * A payment is stranded only where the site holds no claim at all for its prescription, the line names a drug or a fill, and the fill is
+   * not from before the feed. An earlier floor, the oldest claim on file, counted 2,029 August payments ($149,798.52) as failures because
+   * August's claims were a thin test sample.
    */
   try {
-    /*
-     * Two things had to be narrowed before this could be trusted, and both were measured on the live
-     * data before it shipped. Written out because each one, left wide, produced a confident number
-     * that was wrong by a hundred and fifty thousand dollars or by ten payments.
-     *
-     * The floor is the day the books begin, not the oldest claim row. August's claims are a thin
-     * test sample of 78 fills, so "newer than the oldest claim on file" counted 2,029 August
-     * payments as failures: 1,934 payments and $149,798.52 of alarm, every cent of it the sample
-     * being thin rather than anything being wrong.
-     *
-     * And a payment is only stranded where the site holds NO claim on that prescription at all.
-     * Where it holds one and the payment still did not attach, the fill is here and its claim was
-     * reversed — recorded deliberately against no claim, with a note saying so. That is all ten of
-     * the September ones. Counting them would have made this fire on its first morning with nothing
-     * behind it, which is how an alert teaches the person reading it to skip the next one.
-     *
-     * With both narrowings: nought. The measurement is the point — an alert that has never been run
-     * against the real data is a guess about the real data.
-     */
-    const { SITE_STARTS_ON } = await import("./books-start");
-    {
-      const inBooks = await db.query.claimPayments.findMany({
-        where: (p, { and, isNull, gte, eq: is }) => and(isNull(p.claimId), gte(p.dateFilled, SITE_STARTS_ON), is(p.outOfBooks, false)),
-        columns: { amountCents: true, payer: true, rxNumber: true, ndc11: true, fillNumber: true, dateFilled: true },
+    const { paymentsWithNoClaimOnFile } = await import("./untied-payments-store");
+    const { causeInfo } = await import("./untied-payments");
+    const { feedFrom, stranded, notAFill } = await paymentsWithNoClaimOnFile();
+    const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const payersOf = (ps: { payer: string | null }[]) => {
+      const counts = new Map<string, number>();
+      for (const p of ps) counts.set(p.payer ?? "an unnamed payer", (counts.get(p.payer ?? "an unnamed payer") ?? 0) + 1);
+      const payers = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name]) => name);
+      return `${payers.slice(0, 3).join(", ")}${payers.length > 3 ? ` and ${payers.length - 3} more` : ""}`;
+    };
+
+    if (stranded.length > 0) {
+      const cents = stranded.reduce((n, p) => n + p.amountCents, 0);
+      out.push({
+        key: "payments-stranded",
+        level: "now",
+        title: `${stranded.length} payment${stranded.length === 1 ? "" : "s"} for a prescription with no claim on file, ${money(cents)}`,
+        why: `From ${payersOf(stranded)}. Each names a drug or a fill, so there ought to be a claim for it. ${causeInfo("no_claim_yet", feedFrom).why}`,
+        href: "/claims/no-claim#no_claim_yet",
+        action: "Look at them",
       });
-      const known = new Set(
-        (await db.query.claims.findMany({ columns: { rxNumber: true } })).map((c) => c.rxNumber),
-      );
-      const stranded = inBooks.filter((p) => !known.has(p.rxNumber));
-      const money = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
 
-      /*
-       * Two different things were being said in one sentence, and one of them was false.
-       *
-       * The row read "12 payments for a prescription this site has never seen, 110.00" and went on:
-       * the prescription number, the fill date, the drug or the BIN disagrees, and "those claims go
-       * on being owed by a payer that has already paid". Every clause of that was wrong about all
-       * twelve. They carry no drug, no fill number, a nine-digit identifier where this pharmacy's
-       * prescription numbers are six, flat amounts of $5.00 and $10.00, and a fill date of
-       * 2026-12-31 — a day in the future, which is a stand-in something substituted, not a fact.
-       * Health Mart Atlas, on the 30 September EFT. There are no claims behind them to be owed.
-       *
-       * A line with no drug and no fill number is not a claim payment that failed to match. It is
-       * money on a remittance that belongs to no fill — an administration fee, an incentive, a
-       * programme payment — and the action is to find out what it is, not to go hunting a
-       * prescription that was never there. Said as one thing, the true half taught him to distrust
-       * the sentence and the false half sent him looking for nothing.
-       */
-      const couldBeAFill = (p: (typeof stranded)[number]) => Boolean(p.ndc11) || p.fillNumber !== null;
-      const mismatched = stranded.filter(couldBeAFill);
-      const notAFill = stranded.filter((p) => !couldBeAFill(p));
-
-      if (mismatched.length > 0) {
-        const cents = mismatched.reduce((n, p) => n + p.amountCents, 0);
-        const payers = [...new Set(mismatched.map((p) => p.payer ?? "an unnamed payer"))];
-        out.push({
-          key: "payments-stranded",
-          level: "now",
-          title: `${mismatched.length} payment${mismatched.length === 1 ? "" : "s"} for a prescription this site has never seen, ${money(cents)}`,
-          why:
-            `From ${payers.slice(0, 3).join(", ")}${payers.length > 3 ? ` and ${payers.length - 3} more` : ""}. Each names a drug or a fill, so it is a fill that ought to match and did not — ` +
-            `the prescription number, the fill date, the drug or the BIN disagrees between their file and the claim. ` +
-            `A payment for a fill older than the books cannot match and is not counted here. Until it is looked at, those claims go on being owed by a payer that has already paid.`,
-          href: "/claims",
-          action: "Look at them",
-        });
-      }
-
-      if (notAFill.length > 0) {
-        const cents = notAFill.reduce((n, p) => n + p.amountCents, 0);
-        const payers = [...new Set(notAFill.map((p) => p.payer ?? "an unnamed payer"))];
-        const future = notAFill.filter((p) => (p.dateFilled ?? "") > today).length;
-        out.push({
-          key: "payments-not-a-fill",
-          level: "soon",
-          title: `${notAFill.length} payment${notAFill.length === 1 ? "" : "s"} on a remittance that belong to no fill, ${money(cents)}`,
-          why:
-            `From ${payers.slice(0, 3).join(", ")}${payers.length > 3 ? ` and ${payers.length - 3} more` : ""}, with no drug and no fill number against them` +
-            `${future > 0 ? `, and ${future === notAFill.length ? "every one" : `${future}`} dated in the future, which is a stand-in rather than a day anything was dispensed` : ""}. ` +
-            `So these are not claim payments that failed to match — there is no prescription behind them to find. They are money the payer itemised against something else: an administration ` +
-            `fee, an incentive, a programme payment. What they are decides whether they are revenue and where, and nothing here can read that off the figures.`,
-          href: "/claims",
-          action: "See the lines",
-        });
-      }
+    /*
+     * Not a claim payment that failed to match. These carry no drug, no fill number, a nine-digit identifier where this pharmacy's
+     * prescription numbers are six, flat amounts, and a fill date in the future, which is a stand-in something substituted and not a
+     * day anything was dispensed. They are money on a remittance that belongs to no fill, and the thing to do is to find out what it is.
+     */
+    if (notAFill.length > 0) {
+      const cents = notAFill.reduce((n, p) => n + p.amountCents, 0);
+      const future = notAFill.filter((p) => (p.dateFilled ?? "") > today).length;
+      out.push({
+        key: "payments-not-a-fill",
+        level: "soon",
+        title: `${notAFill.length} payment${notAFill.length === 1 ? "" : "s"} on a remittance that belong to no fill, ${money(cents)}`,
+        why:
+          `From ${payersOf(notAFill)}, with no drug and no fill number against them` +
+          `${future > 0 ? `, and ${future === notAFill.length ? "every one" : `${future}`} dated in the future, which is a stand-in rather than a day anything was dispensed` : ""}. ` +
+          `So these are not claim payments that failed to match — there is no prescription behind them to find. They are money the payer itemised against something else: an administration ` +
+          `fee, an incentive, a programme payment. What they are decides whether they are revenue and where, and nothing here can read that off the figures.`,
+        href: "/claims/no-claim#not_a_fill",
+        action: "See the lines",
+      });
     }
   } catch (e) {
     /* Never worth taking the morning list down for. */

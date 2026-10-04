@@ -36,7 +36,11 @@ export type Classified = {
   claimIds: string[];
 };
 
-/** A fill from before the claims feed begins. The site holds a claim for it only if one came in a later report, which the matcher's answer on the prescription says. */
+/**
+ * A fill from before the claims feed begins. The site holds a claim for it only if one came in a later report, which the matcher's answer on
+ * the prescription says. The owner, asking that the site stop looking for these: "can we have it stop alerting if looking for a claim before
+ * 09/01?? this system will never get anything before 09/01.."
+ */
 export function isBeforeFeed(p: { dateFilled: string | null }, feedFrom: string | null): boolean {
   return feedFrom !== null && p.dateFilled !== null && p.dateFilled < feedFrom;
 }
@@ -89,6 +93,76 @@ export type CauseInfo = {
 
 const NEEDS_SAYS: Record<Needs, string> = { decide: "Needs you", look: "Worth a look", wait: "Clears by itself", nothing: "Nothing to do" };
 export const needsSays = (n: Needs): string => NEEDS_SAYS[n];
+
+/** Where the money came from, in the site's own words; a source it has no words for is shown as it is stored. */
+const SOURCE_SAYS: Record<string, string> = {
+  plan: "Plan remittance",
+  mtf: "Medicare Transaction Facilitator",
+  copay_card: "Manufacturer copay or savings card",
+  rxrescue: "RxRescue (Aytu / IPD) credit memo",
+  dir: "DIR adjustment",
+  secondary: "Secondary payer",
+  manual: "Entered by hand",
+};
+export const sourceSays = (source: string): string => SOURCE_SAYS[source] ?? source;
+
+/** What a payment names, each said as absent where it does not carry it: "no fill date" is a state, and a bare dash is not. */
+export function namesSays(p: Pick<UntiedPayment, "fillNumber" | "dateFilled" | "ndc11">): string {
+  return [p.fillNumber === null ? "no fill number" : `fill ${p.fillNumber}`, p.dateFilled ? fmt(p.dateFilled) : "no fill date", p.ndc11 ? `NDC ${p.ndc11}` : "no drug"].join(" · ");
+}
+
+/** A claim a payment is shown beside: enough to recognise it without opening it. */
+export type ClaimBeside = {
+  id: string;
+  payerLabel: string | null;
+  itemName: string | null;
+  status: "paid" | "reversed";
+  fillNumber: number | null;
+  dateFilled: string;
+  remitCents: number | null;
+  soldOn: string | null;
+};
+
+/** The claim in words: who it was billed to, then everything else a person reads to tell it from its twin. */
+export function claimBesideSays(c: ClaimBeside): { who: string; rest: string } {
+  const state = c.status === "paid" ? "paid" : c.soldOn ? `reversed, sale date ${fmt(c.soldOn)}` : "reversed, no sale date";
+  return {
+    who: c.payerLabel ?? "no payer name",
+    rest: [c.itemName ?? "no drug name", `${c.fillNumber === null ? "no fill number" : `fill ${c.fillNumber}`}, ${fmt(c.dateFilled)}`, state, c.remitCents === null ? "no amount on the claim" : `claim amount ${formatCents(c.remitCents)}`].join(" · "),
+  };
+}
+
+export type NeedsRow = { needs: Needs; count: number; cents: number };
+const NEEDS_ORDER: Needs[] = ["decide", "look", "wait", "nothing"];
+
+/**
+ * The tally by what each group asks of a person, from the ones that need a decision to the ones that need nothing. The payments for
+ * fills from before the claims feed are not in it: the site holds no claim for those, and they are said apart wherever this is said.
+ */
+export function tallyByNeeds(rows: TallyRow[]): NeedsRow[] {
+  const by = new Map<Needs, NeedsRow>();
+  for (const r of rows) {
+    if (r.cause === "before_feed") continue;
+    const needs = causeInfo(r.cause, null).needs;
+    const x = by.get(needs) ?? { needs, count: 0, cents: 0 };
+    x.count += r.count;
+    x.cents += r.cents;
+    by.set(needs, x);
+  }
+  return NEEDS_ORDER.flatMap((n) => by.get(n) ?? []);
+}
+
+/** "33 need a decision, 12 are worth a look, 179 need nothing": the groups of a person's attention, said in a line. */
+export function needsPhrase(rows: NeedsRow[]): string {
+  const n = (c: number) => c.toLocaleString("en-US");
+  const says: Record<Needs, (c: number) => string> = {
+    decide: (c) => `${n(c)} ${c === 1 ? "needs" : "need"} a decision`,
+    look: (c) => `${n(c)} ${c === 1 ? "is" : "are"} worth a look`,
+    wait: (c) => `${n(c)} will attach at the next claims load`,
+    nothing: (c) => `${n(c)} ${c === 1 ? "needs" : "need"} nothing`,
+  };
+  return rows.map((r) => says[r.needs](r.count)).join(", ");
+}
 
 /** `feedFrom` is the first day the claims feed covers, or null where no claims have been loaded at all. */
 export function causeInfo(cause: UntiedCause, feedFrom: string | null): CauseInfo {
@@ -198,4 +272,36 @@ export function untiedHeadline(rows: TallyRow[], booksFrom: string, feedFrom: st
   const t = tot(rest);
   const first = `${payments(t.n)} received since ${since} (${sum(t.n, t.cents)}) ${are(t.n)} tied to no claim: ${rest.map(part).join("; ")}.`;
   return early ? `${first} A further ${unheld} ${are(early.count)} for ${fills}.` : first;
+}
+
+/** The line the Claims page shows for these payments, beside its page. */
+export type CardRow = { tone: "ok" | "warn"; amount: string; title: string; why: string };
+
+/**
+ * What a person reads on the Claims page about the payments tied to no claim: the money, what each group of it asks of him, and the
+ * fills from before the claims feed said in the same sentence, because they are nearly all of the count. Null where every payment is tied.
+ */
+export function untiedCardRow(rows: TallyRow[], booksFrom: string, feedFrom: string | null): CardRow | null {
+  if (rows.length === 0) return null;
+  const groups = tallyByNeeds(rows);
+  const early = rows.find((r) => r.cause === "before_feed");
+  const since = fmt(booksFrom);
+  const why = untiedHeadline(rows, booksFrom, feedFrom);
+  if (groups.length === 0 && early) {
+    return {
+      tone: "ok",
+      amount: sum(early.count, early.cents),
+      title: `is tied to no claim — ${payments(early.count)} received since ${since}, all for ${early.count === 1 ? "a fill" : "fills"} from before the claims feed began, which the site holds no claim for`,
+      why,
+    };
+  }
+  const n = groups.reduce((t, g) => t + g.count, 0);
+  const cents = groups.reduce((t, g) => t + g.cents, 0);
+  const further = early ? `; a further ${count(early.count)} (${sum(early.count, early.cents)}) ${are(early.count)} for ${early.count === 1 ? "a fill" : "fills"} from before the claims feed began, which the site holds no claim for` : "";
+  return {
+    tone: groups.some((g) => g.needs === "decide" || g.needs === "look") ? "warn" : "ok",
+    amount: sum(n, cents),
+    title: `is tied to no claim — ${payments(n)} received since ${since}: ${needsPhrase(groups)}${further}`,
+    why,
+  };
 }
