@@ -77,7 +77,7 @@ describe("two payers on one fill", () => {
     assert.equal(r.claim, null);
     assert.equal(r.ambiguous?.count, 2);
     assert.match(r.ambiguous?.why ?? "", /none of them was paid exactly this amount/);
-    assert.match(r.ambiguous?.why ?? "", /by hand/);
+    assert.match(r.ambiguous?.why ?? "", /The site will not guess: choose the claim it paid on the Payments with no claim page\.$/);
   });
 
   test("two claims paid the identical amount are not guessed between", () => {

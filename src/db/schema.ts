@@ -2737,6 +2737,12 @@ export const claimPayments = sqliteTable(
     createdAt: text("created_at").notNull().default(now()),
     /** Which kind of document it was read from, "<class>:<document key>" (payment-origin.ts). Null on rows from before 1 October 2026. */
     origin: text("origin"),
+    /**
+     * Who tied this payment to its claim by hand, where the matcher could not choose between claims that fit it equally well.
+     * Null where the matcher tied it, or where it is tied to none. A payment with a name here is left where it was put: the
+     * sweep that revisits tied payments skips it, and the same money arriving again by another report is read as the same payment.
+     */
+    tiedBy: text("tied_by"),
   },
   (t) => [
     index("claim_payments_claim_idx").on(t.claimId),

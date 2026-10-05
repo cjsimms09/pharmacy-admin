@@ -93,7 +93,7 @@ describe("the Medicare Transaction Facilitator's payments, and which are tied to
     assert.ok(row, "the row");
     assert.match(row.says, /, \$155\.00 received since Sep 1, 2026\. 1 of its 5 payments is tied to the claim it paid\.$/);
     assert.doesNotMatch(row.says, /since it started|already counted/);
-    assert.ok(row.todo.includes("1 payment ($55.00) that fits two or more claims equally. Attach each to the claim it paid. The site has no way to do that by hand yet."), row.todo);
+    assert.ok(row.todo.includes("1 payment ($55.00) that fits two or more claims equally. Pick the claim each one paid, on the Payments with no claim page. The site will not guess."), row.todo);
     assert.ok(row.todo.includes("1 payment ($20.00) for a prescription with no claim on file. Find out why no claim is on file."), row.todo);
     assert.ok(row.todo.includes("1 payment ($40.00) whose claim is on file now."), row.todo);
     assert.ok(row.todo.endsWith("1 payment ($30.00) for a fill from before the claims feed begins on Sep 1, 2026, which the site holds no claim for. Needs nothing."), row.todo);

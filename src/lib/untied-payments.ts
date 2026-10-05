@@ -244,18 +244,19 @@ export function causeInfo(cause: UntiedCause, feedFrom: string | null): CauseInf
       return {
         label: "Fit two or more claims",
         needs: "decide",
-        asks: "Attach each to the claim it paid. The site has no way to do that by hand yet.",
+        asks: "Pick the claim each one paid, on the Payments with no claim page. The site will not guess.",
         short: ["that fits two or more claims equally", "that fit two or more claims equally"],
         why:
           "The fill was billed to more than one payer, so two or more claims fit this payment equally. The site keeps no payer BIN on a payment, and neither a manufacturer voucher nor the amount " +
           "singles one claim out (nor, for a take-back, the payments already attached to them), so it will not guess: a payment attached to the wrong claim makes two claims wrong at once. " +
+          "You can tell them apart where it cannot: press the claim the payment paid and it is attached there, with your name on the choice, until you take it back. " +
           "Until it is attached, the claims it could settle can still show as owed, or, for a take-back, as paid more than they were billed.",
       };
     case "reversed_sold":
       return {
         label: "On reversed claims, one with a sale date",
         needs: "decide",
-        asks: "Say which: picked up and kept, or the sale undone.",
+        asks: "Awaiting your decision: was each picked up and kept, or was the sale undone? The site has nowhere to record the answer yet.",
         short: ["on claims that were reversed, one carrying a sale date", "on claims that were reversed, one carrying a sale date"],
         why:
           "Every claim the site holds for this fill was reversed, yet one of them carries a sale date. If it was picked up and kept, the fill should have been billed again; " +

@@ -4,7 +4,7 @@ import "server-only";
 import { originClass, legacyOrigin } from "./payment-origin";
 import nodePath from "node:path";
 import { db, schema } from "@/db";
-import { and, eq, gt, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { newId } from "./crypto";
 import type { LaterPayment } from "./fills";
 import { hasWaitingPartner, type TallyRow } from "./untied-payments";
@@ -101,12 +101,18 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
    * report's row came first, the 835 takes it over. Two rows from the same kind of document are not a duplicate
    * here — a claim paid, taken back and paid again inside one remittance is two lines, and each reader keeps its
    * own count of those — so only a different origin class is one.
+   *
+   * Where no claim is found, the twin may be tied to a claim all the same, if the owner tied it by hand: a payment that fit several claims
+   * and was put on the one he chose is a payment of this prescription, and the same money arriving again by another report is that payment
+   * and not a second one left to ask about all over again.
    */
   const origin = p.origin ?? null;
   if (origin && p.receivedOn) {
     const same = [eq(schema.claimPayments.amountCents, Math.round(p.amountCents)), eq(schema.claimPayments.receivedOn, p.receivedOn), eq(schema.claimPayments.source, p.source)];
     const twins = await db.query.claimPayments.findMany({
-      where: claim ? and(eq(schema.claimPayments.claimId, claim.id), ...same) : and(isNull(schema.claimPayments.claimId), eq(schema.claimPayments.rxNumber, rx), ...same),
+      where: claim
+        ? and(eq(schema.claimPayments.claimId, claim.id), ...same)
+        : and(or(isNull(schema.claimPayments.claimId), isNotNull(schema.claimPayments.tiedBy)), eq(schema.claimPayments.rxNumber, rx), ...same),
     });
     const classOf = (t: (typeof twins)[number]) => originClass(t.origin ?? legacyOrigin(t));
     const twin = twins.find((t) => classOf(t) !== originClass(origin));
@@ -318,7 +324,9 @@ export async function rematchMisattachedPayments(): Promise<{ looked: number; de
   const rows = await db
     .select({ id: schema.claimPayments.id, rxNumber: schema.claimPayments.rxNumber, fillNumber: schema.claimPayments.fillNumber, paidDate: schema.claimPayments.dateFilled, ndc11: schema.claimPayments.ndc11, amountCents: schema.claimPayments.amountCents, claimId: schema.claimPayments.claimId, claimDate: schema.claims.dateFilled, payer: schema.claimPayments.payer, source: schema.claimPayments.source })
     .from(schema.claimPayments)
-    .innerJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id));
+    .innerJoin(schema.claims, eq(schema.claimPayments.claimId, schema.claims.id))
+    /* A payment the owner tied by hand stays where he put it: he chose between claims the matcher could not. */
+    .where(isNull(schema.claimPayments.tiedBy));
   const far = rows.filter((r) => r.paidDate && Math.abs(Date.parse(`${r.paidDate}T00:00:00Z`) - Date.parse(`${r.claimDate}T00:00:00Z`)) > 3 * 86_400_000);
   let detached = 0;
   let moved = 0;

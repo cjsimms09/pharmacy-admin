@@ -502,7 +502,7 @@ describe("one source's payments, said on the money list", () => {
     ];
     assert.equal(
       sourceToDo(rows, FEED),
-      "2 payments (net $93.10) that fit two or more claims equally. Attach each to the claim it paid. The site has no way to do that by hand yet. " +
+      "2 payments (net $93.10) that fit two or more claims equally. Pick the claim each one paid, on the Payments with no claim page. The site will not guess. " +
         "7 payments (net $812.40) for fills from before the claims feed begins on Sep 1, 2026, which the site holds no claim for. Needs nothing.",
     );
   });

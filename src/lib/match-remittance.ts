@@ -226,7 +226,7 @@ export function chooseClaimForRemittance(candidates: ClaimCandidate[], line: Rem
           `${pool.length} paid claims on this prescription match the line equally well` +
           `${line.bin ? "" : " and the remittance does not name a payer BIN"}` +
           amountClause(line, byAmount.length, byTakeBack.length) +
-          ". Attach it to the right one by hand rather than have the site guess.",
+          ". The site will not guess: choose the claim it paid on the Payments with no claim page.",
       },
     };
   }

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, gte, isNull, or } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull, or } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { SITE_STARTS_ON } from "./books-start";
 import { claimsFeedStartsOn, claimsOnFile, type ClaimHeld } from "./claims-on-file";
@@ -7,8 +7,9 @@ import { isProgrammePayment } from "./payer-owed";
 import { CAUSES, cancellingPairs, classifyUntied, takeBacksWithPartner, tallyUntied, untiedHeadline, type CancelPartner, type ClaimBeside, type TallyRow, type UntiedCause, type UntiedPayment } from "./untied-payments";
 
 /*
- * Every payment received since the books begin that ties to no claim, and why. Read-only: it changes nothing and decides
- * nothing. The cause is the matcher's own answer (untied-payments.ts), reached the way attaching a payment reaches it.
+ * Every payment received since the books begin that ties to no claim, and why, and the ones the owner tied by hand. Read-only: it changes
+ * nothing and decides nothing (tie-by-hand.ts is what changes a payment). The cause is the matcher's own answer (untied-payments.ts),
+ * reached the way attaching a payment reaches it.
  */
 
 export type UntiedLine = UntiedPayment & { cause: UntiedCause; claims: ClaimBeside[]; partner: CancelPartner | null };
@@ -34,6 +35,9 @@ export type UntiedReading = {
 export type UntiedPayments = UntiedReading & { headline: string };
 
 const COLUMNS = { id: true, source: true, payer: true, receivedOn: true, amountCents: true, rxNumber: true, fillNumber: true, dateFilled: true, ndc11: true, reference: true } as const;
+
+/** A claim as a person recognises it beside a payment: who it was billed to, the drug, the fill, its state and amount. */
+const besideOf = (h: ClaimHeld): ClaimBeside => ({ id: h.id, payerLabel: h.payerLabel, itemName: h.itemName, status: h.status, fillNumber: h.fillNumber, dateFilled: h.dateFilled, remitCents: h.remitCents, soldOn: h.soldOn });
 
 /* A pair is listed together: it sorts by the later of its two received dates and then by its own id, the payment before its take-back. */
 const received = (l: UntiedLine): string => (l.partner && (l.partner.receivedOn ?? "") > (l.receivedOn ?? "") ? l.partner.receivedOn : l.receivedOn) ?? "";
@@ -83,7 +87,7 @@ async function classifyAll(rows: UntiedPayment[], feedFrom: string | null) {
     const claims = held
       .filter((h) => claimIds.includes(h.id))
       .sort((a, b) => a.dateFilled.localeCompare(b.dateFilled) || (a.fillNumber ?? 0) - (b.fillNumber ?? 0))
-      .map((h) => ({ id: h.id, payerLabel: h.payerLabel, itemName: h.itemName, status: h.status, fillNumber: h.fillNumber, dateFilled: h.dateFilled, remitCents: h.remitCents, soldOn: h.soldOn }));
+      .map(besideOf);
     lines.push({ ...p, cause, claims, partner });
   }
   return { lines: lines.sort(byNewest), classified, before };
@@ -150,4 +154,44 @@ export async function paymentsWithNoClaimOnFile(): Promise<{ feedFrom: string | 
   });
   const { lines } = await classifyAll(rows, feedFrom);
   return { feedFrom, stranded: lines.filter((l) => l.cause === "no_claim_yet"), notAFill: lines.filter((l) => l.cause === "not_a_fill") };
+}
+
+/**
+ * What one payment fits, read the way the page reads it, among every payment of its prescription that is tied to no claim, so that a pair is a
+ * pair. Null where the payment is not waiting for a claim: it was tied since the page was drawn, or it was received before the books begin.
+ * The press that acts on one payment asks this at the press and acts on what is true then, not on what the page said when it was drawn.
+ */
+export async function whatItFits(paymentId: string): Promise<{ payment: UntiedPayment; cause: UntiedCause; claimIds: string[] } | null> {
+  const payment: UntiedPayment | undefined = await db.query.claimPayments.findFirst({
+    where: and(eq(schema.claimPayments.id, paymentId), isNull(schema.claimPayments.claimId), eq(schema.claimPayments.outOfBooks, false)),
+    columns: COLUMNS,
+  });
+  if (!payment) return null;
+  const siblings: UntiedPayment[] = await db.query.claimPayments.findMany({
+    where: and(isNull(schema.claimPayments.claimId), eq(schema.claimPayments.outOfBooks, false), eq(schema.claimPayments.rxNumber, payment.rxNumber)),
+    columns: COLUMNS,
+  });
+  const onFile = await claimsOnFile([payment.rxNumber], { withTied: true });
+  const read = readEach(siblings, onFile, await claimsFeedStartsOn()).find((r) => r.p.id === payment.id);
+  return read ? { payment, cause: read.cause, claimIds: read.claimIds } : null;
+}
+
+/** A payment the owner tied to a claim by hand, beside the claim he chose: what the page lists so that a choice can be taken back. */
+export type HandTied = UntiedPayment & { tiedBy: string; claim: ClaimBeside | null };
+
+/** Every payment tied by hand, newest received first. Read-only. */
+export async function handTied(): Promise<HandTied[]> {
+  const rows = await db.query.claimPayments.findMany({
+    where: and(isNotNull(schema.claimPayments.tiedBy), isNotNull(schema.claimPayments.claimId)),
+    columns: { ...COLUMNS, claimId: true, tiedBy: true },
+  });
+  if (rows.length === 0) return [];
+  const onFile = await claimsOnFile(rows.map((r) => r.rxNumber));
+  const claims = new Map([...onFile.values()].flat().map((c) => [c.id, c]));
+  return rows
+    .map(({ claimId, tiedBy, ...p }) => {
+      const held = claimId === null ? undefined : claims.get(claimId);
+      return { ...p, tiedBy: tiedBy ?? "", claim: held ? besideOf(held) : null };
+    })
+    .sort((a, b) => (b.receivedOn ?? "").localeCompare(a.receivedOn ?? "") || a.id.localeCompare(b.id));
 }

@@ -98,7 +98,7 @@ describe("what the proof says when something is still open", () => {
     assert.equal(
       r.says,
       "2026-09: 6 payments (net -$300.00) received for fills inside the books are tied to no claim and still open. " +
-        "6 payments (net -$300.00) that fit two or more claims equally. Attach each to the claim it paid. The site has no way to do that by hand yet. " +
+        "6 payments (net -$300.00) that fit two or more claims equally. Pick the claim each one paid, on the Payments with no claim page. The site will not guess. " +
         "10 payments (net $500.00) are tied to the claim each paid.",
     );
     assert.deepEqual([r.figures.open, r.figures.openCents, r.figures.untied, r.figures.untiedCents], [6, -30_000, 6, -30_000]);
