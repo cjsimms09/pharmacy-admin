@@ -292,3 +292,84 @@ describe("a take-back is read by what is already tied to the claims it could bel
     assert.equal(v.kind === "tied" && v.claim.id, "paid-a");
   });
 });
+
+describe("the facilitator's refund is read against the refund each claim promised, never against its remit", () => {
+  /*
+   * A fill billed to a Part D plan and then to the Medicare Prescription Payment Plan is two claims with the same fill, date and drug.
+   * The facilitator pays neither one a remit: it refunds what the manufacturer owes on the negotiated price, and the claims report says,
+   * on the first claim only, what that refund is expected to be. Every figure here is invented.
+   */
+  const refund = 6_235;
+  const partD: ClaimCandidate = { ...primary, id: "part-d", remitCents: 14_800, facilitatorCents: refund };
+  const paymentPlan: ClaimCandidate = { ...secondary, id: "payment-plan", remitCents: 2_100, facilitatorCents: 0 };
+  const refunds = { ...line, bin: null, amountCents: refund, source: "mtf" };
+  const paid = (amountCents: number, source = "mtf"): TiedPayment => ({ amountCents, source });
+
+  test("it is the claim that promised exactly that refund, and the claim that promised none is left alone", () => {
+    const r = chooseClaimForRemittance([partD, paymentPlan], refunds);
+    assert.equal(r.claim?.id, "part-d");
+    assert.equal(r.ambiguous, null);
+    assert.equal(chooseClaimForRemittance([paymentPlan, partD], refunds).claim?.id, "part-d", "whichever claim is listed first");
+  });
+
+  test("a claim whose promise is another figure, or is not known, is not the one: the refund is refused and says so", () => {
+    const other = chooseClaimForRemittance([{ ...partD, facilitatorCents: 7_000 }, paymentPlan], refunds);
+    assert.equal(other.claim, null);
+    assert.equal(other.ambiguous?.count, 2);
+    assert.match(other.ambiguous?.why ?? "", /and none of them promises exactly this refund/);
+    const unknown = chooseClaimForRemittance([{ ...partD, facilitatorCents: null }, { ...paymentPlan, facilitatorCents: undefined }], refunds);
+    assert.equal(unknown.claim, null);
+    assert.equal(unknown.ambiguous?.count, 2);
+  });
+
+  test("a claim whose report said nothing promised no figure, not a promise of nothing: a refund of nothing is not tied to it", () => {
+    const silent = chooseClaimForRemittance([{ ...partD, facilitatorCents: null }, { ...paymentPlan, facilitatorCents: 7_000 }], { ...refunds, amountCents: 0 });
+    assert.equal(silent.claim, null);
+    assert.equal(chooseClaimForRemittance([{ ...partD, facilitatorCents: null }, paymentPlan], { ...refunds, amountCents: 0 }).claim?.id, "payment-plan", "a claim that promised none is the one a refund of none is tied to");
+  });
+
+  test("the facilitator pays no remit: a claim whose remit equals the refund is not tied to it for that", () => {
+    const coincidence = chooseClaimForRemittance([{ ...partD, remitCents: refund, facilitatorCents: 7_000 }, { ...paymentPlan, remitCents: 2_100 }], refunds);
+    assert.equal(coincidence.claim, null);
+    assert.equal(coincidence.ambiguous?.count, 2);
+  });
+
+  test("two claims that promise the same refund stay ambiguous: neither is chosen over the other", () => {
+    const r = chooseClaimForRemittance([partD, { ...paymentPlan, facilitatorCents: refund }], refunds);
+    assert.equal(r.claim, null);
+    assert.equal(r.ambiguous?.count, 2);
+    assert.match(r.ambiguous?.why ?? "", /and 2 of them promise exactly this refund/);
+  });
+
+  test("a plan's payment of the same figure is still read against the remit, and the promised refund is no part of it", () => {
+    const owed = [{ ...partD, remitCents: refund, facilitatorCents: 7_000 }, paymentPlan];
+    assert.equal(chooseClaimForRemittance(owed, { ...refunds, source: "plan" }).claim?.id, "part-d");
+    const promisedOnly = chooseClaimForRemittance([partD, paymentPlan], { ...refunds, source: "plan" });
+    assert.equal(promisedOnly.claim, null);
+    assert.match(promisedOnly.ambiguous?.why ?? "", /none of them was paid exactly this amount/);
+  });
+
+  test("a line that does not say where its money came from is read as a plan's", () => {
+    assert.equal(chooseClaimForRemittance([partD, paymentPlan], { ...refunds, source: null }).claim, null);
+    assert.equal(chooseClaimForRemittance([partD, paymentPlan], { ...refunds, source: undefined }).claim, null);
+  });
+
+  test("a refund the facilitator takes back reverses a payment of its own and the refund the claim promised", () => {
+    const back = { ...refunds, amountCents: -refund };
+    const held: ClaimCandidate[] = [{ ...partD, tied: [paid(refund)] }, { ...paymentPlan, tied: [paid(refund)] }];
+    assert.equal(chooseClaimForRemittance(held, back).claim?.id, "part-d");
+    assert.equal(chooseClaimForRemittance([{ ...partD, tied: [] }, paymentPlan], back).claim, null, "nothing was refunded on it");
+    assert.equal(chooseClaimForRemittance([{ ...partD, facilitatorCents: 7_000, remitCents: refund, tied: [paid(refund)] }, paymentPlan], back).claim, null, "not the refund it promised");
+    assert.equal(chooseClaimForRemittance([{ ...partD, tied: [paid(refund, "plan")] }, paymentPlan], back).claim, null, "a plan's payment is not the facilitator's to take back");
+  });
+
+  test("a prescription's claims are read the same way as a whole: the refund is tied to the claim that promised it", () => {
+    const held = (id: string, o: Partial<ClaimOnFile> = {}): ClaimOnFile => ({
+      id, status: "paid", fillNumber: 0, dateFilled: "2026-09-03", ndc11: "00093505698", bin: "610455", remitCents: 14_800, soldOn: null, facilitatorCents: refund, ...o,
+    });
+    const v = verdictOnPrescription([held("part-d"), held("payment-plan", { bin: "004336", remitCents: 2_100, facilitatorCents: 0 })], refunds);
+    assert.equal(v.kind === "tied" && v.claim.id, "part-d");
+    const both = verdictOnPrescription([held("one"), held("two", { bin: "004336" })], refunds);
+    assert.equal(both.kind, "ambiguous");
+  });
+});

@@ -326,3 +326,46 @@ describe("a take-back, read by the payments already tied to the claims beside it
     );
   });
 });
+
+describe("the facilitator's refund, read by the refund each claim promised", () => {
+  const refund = 6_235;
+  const rows = async (rx: string) => {
+    const { eq } = await import("drizzle-orm");
+    return db.query.claimPayments.findMany({ where: eq(schema.claimPayments.rxNumber, rx) });
+  };
+  const twoClaims = async (rx: string, promises: [number | null, number | null]) => {
+    const a = claim(rx, 1, "2026-09-05", { bin: "610097", remitCents: 14_800, expectedFacilitatorCents: promises[0], payerLabel: "Plan V" });
+    const b = claim(rx, 1, "2026-09-05", { bin: "004336", remitCents: 2_100, expectedFacilitatorCents: promises[1], payerLabel: "Payment Plan" });
+    await db.insert(schema.claims).values([a, b]);
+    return { a, b };
+  };
+  const refunded = (rx: string, o: Partial<typeof import("../src/db").schema.claimPayments.$inferInsert> = {}) =>
+    payment(rx, { source: "mtf", payer: "Medicare Transaction Facilitator", amountCents: refund, ...o });
+
+  test("one that is what one of two claims promised will attach to that claim, and is named beside it", async () => {
+    const { a } = await twoClaims("930001", [refund, 0]);
+    await db.insert(schema.claimPayments).values(refunded("930001"));
+    const mine = (await untiedPayments()).lines.filter((l) => l.rxNumber === "930001");
+    assert.deepEqual(mine.map((l) => [l.cause, l.amountCents, l.claims.map((c) => c.id), l.partner]), [["will_attach", refund, [a.id], null]]);
+  });
+
+  test("one that two claims promised, or none did, is one of several and names both", async () => {
+    const same = await twoClaims("930002", [refund, refund]);
+    const none = await twoClaims("930003", [7_000, null]);
+    await db.insert(schema.claimPayments).values([refunded("930002"), refunded("930003")]);
+    const lines = (await untiedPayments()).lines;
+    for (const [rx, c] of [["930002", same], ["930003", none]] as const) {
+      const mine = lines.filter((l) => l.rxNumber === rx);
+      assert.deepEqual(mine.map((l) => [l.cause, l.claims.map((x) => x.id).sort()]), [["fits_several", [c.a.id, c.b.id].sort()]]);
+    }
+  });
+
+  test("the facilitator's money from one source is read the same, and so are the balance screens asking after it", async () => {
+    const { causesOf } = await import("../src/lib/untied-payments-store");
+    const mtf = (await untiedPaymentsFrom("mtf")).lines.filter((l) => ["930001", "930002", "930003"].includes(l.rxNumber));
+    assert.deepEqual(mtf.map((l) => [l.rxNumber, l.cause]).sort(), [["930001", "will_attach"], ["930002", "fits_several"], ["930003", "fits_several"]]);
+    const all = [...(await rows("930001")), ...(await rows("930002")), ...(await rows("930003"))].filter((p) => p.claimId === null);
+    const { causes } = await causesOf(all);
+    assert.deepEqual(all.map((p) => [p.rxNumber, causes.get(p.id)]).sort(), [["930001", "will_attach"], ["930002", "fits_several"], ["930003", "fits_several"]]);
+  });
+});

@@ -216,7 +216,7 @@ async function findClaim(
   bin: string | null,
   /* True where the money is a voucher programme's, which narrows a coordinated fill to the row carrying the voucher. */
   fromProgramme: boolean,
-  /* Where the money came from. Read only of a take-back, which is matched by what is tied to a claim already. */
+  /* Where the money came from. Read of a take-back, which is matched by what is tied to a claim already, and of the facilitator's money, which is matched by the refund each claim promised. */
   taking?: { source: string; payer: string | null },
 ): Promise<{ claim: { id: string; fillNumber: number | null; dateFilled: string; ndc11: string | null } | null; onlyReversed: boolean; ambiguous: { count: number; why: string } | null }> {
   const takesBack = taking !== undefined && amountCents !== null && amountCents < 0;

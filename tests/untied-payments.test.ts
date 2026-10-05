@@ -274,6 +274,40 @@ describe("a take-back is read by what is tied to the claims beside it", () => {
   });
 });
 
+describe("the facilitator's refund is read by the refund each claim promised", () => {
+  /* The Medicare Transaction Facilitator pays no remit. A fill billed to a Part D plan and then to the Medicare Prescription Payment Plan is two claims, and the refund is the first one's. */
+  const refund = 6_235;
+  const refunds = pay({ id: "mtf", source: "mtf", payer: "Medicare Transaction Facilitator", amountCents: refund });
+  const claims = (promisedA: number | null, promisedB: number | null): ClaimOnFile[] => [
+    held("a", "paid", "2026-09-10", { bin: "610011", remitCents: 14_800, facilitatorCents: promisedA }),
+    held("b", "paid", "2026-09-10", { bin: "004336", remitCents: 2_100, facilitatorCents: promisedB }),
+  ];
+
+  test("one that is exactly what one of two claims promised will attach to that claim, and names it", () => {
+    assert.deepEqual(why(refunds, claims(refund, 0)), { cause: "will_attach", claimIds: ["a"] });
+    assert.deepEqual(why(refunds, claims(0, refund)), { cause: "will_attach", claimIds: ["b"] });
+  });
+
+  test("two claims that promised it, or neither, or no figure at all, leave it one of several", () => {
+    assert.deepEqual(why(refunds, claims(refund, refund)), { cause: "fits_several", claimIds: ["a", "b"] });
+    assert.deepEqual(why(refunds, claims(7_000, 0)), { cause: "fits_several", claimIds: ["a", "b"] });
+    assert.deepEqual(why(refunds, claims(null, null)), { cause: "fits_several", claimIds: ["a", "b"] });
+  });
+
+  test("a plan's payment of that figure is read by the remits, and what a claim promised the facilitator is no part of it", () => {
+    assert.deepEqual(why({ ...refunds, source: "plan" }, claims(refund, 0)), { cause: "fits_several", claimIds: ["a", "b"] });
+    assert.deepEqual(why({ ...refunds, source: "plan", amountCents: 2_100 }, claims(refund, 0)), { cause: "will_attach", claimIds: ["b"] });
+  });
+
+  test("a refund the facilitator takes back will attach to the claim it refunded, once that refund is tied to it", () => {
+    const back = { ...refunds, id: "mtf-back", amountCents: -refund };
+    const refunded = (tied: { amountCents: number; source: string }[]) => [{ ...claims(refund, 0)[0], tied }, { ...claims(refund, 0)[1], tied: [] }];
+    assert.deepEqual(why(back, refunded([{ amountCents: refund, source: "mtf" }])), { cause: "will_attach", claimIds: ["a"] });
+    assert.deepEqual(why(back, refunded([{ amountCents: refund, source: "plan" }])), { cause: "fits_several", claimIds: ["a", "b"] });
+    assert.deepEqual(why(back, refunded([])), { cause: "fits_several", claimIds: ["a", "b"] });
+  });
+});
+
 describe("what a line says of the payment that cancels it", () => {
   test("a take-back says whom it takes back, and a payment says that it was taken back, each with the date the other was received", () => {
     assert.equal(partnerSays({ amountCents: -1_080 }, { id: "a", amountCents: 1_080, receivedOn: "2026-09-20" }), "Takes back in full the $10.80 received Sep 20, 2026.");

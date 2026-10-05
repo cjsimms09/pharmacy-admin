@@ -46,7 +46,7 @@ export async function claimsOnFile(rxNumbers: string[], opts: ClaimsOnFileOption
   for (let i = 0; i < rx.length; i += 400) {
     const rows = await db.query.claims.findMany({
       where: inArray(schema.claims.rxNumber, rx.slice(i, i + 400)),
-      columns: { id: true, rxNumber: true, fillNumber: true, dateFilled: true, ndc11: true, status: true, bin: true, remitCents: true, evoucherCents: true, evoucherMessageCents: true, soldOn: true, itemName: true, payerLabel: true },
+      columns: { id: true, rxNumber: true, fillNumber: true, dateFilled: true, ndc11: true, status: true, bin: true, remitCents: true, expectedFacilitatorCents: true, evoucherCents: true, evoucherMessageCents: true, soldOn: true, itemName: true, payerLabel: true },
     });
     const tied = opts.withTied ? await tiedTo(rows.map((r) => r.id)) : null;
     for (const r of rows) {
@@ -58,6 +58,7 @@ export async function claimsOnFile(rxNumbers: string[], opts: ClaimsOnFileOption
         ndc11: r.ndc11,
         bin: r.bin,
         remitCents: r.remitCents,
+        facilitatorCents: r.expectedFacilitatorCents ?? null,
         /* Which of a coordinated fill's two rows a manufacturer programme could be paying. */
         carriesVoucher: (r.evoucherCents ?? 0) > 0 || (r.evoucherMessageCents ?? 0) > 0,
         status: r.status,

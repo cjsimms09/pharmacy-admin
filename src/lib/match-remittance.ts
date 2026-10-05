@@ -17,7 +17,9 @@
  * 1. **The BIN.** An 835 comes from one payer, and the claim knows which payer it went to. Where
  *    the remittance names a BIN this settles it outright.
  * 2. **The amount.** Two payers on one fill almost never pay the same figure, and the 835 line says
- *    what this payer paid. A claim whose own remit equals it is the claim being settled.
+ *    what this payer paid. A claim whose own remit equals it is the claim being settled. The Medicare
+ *    Transaction Facilitator pays no remit but a refund, and is read against the refund each claim
+ *    itself promised (`facilitatorCents`, the report's "Est. MTF"), never against its remit.
  *
  * And where neither separates the candidates, the answer is no answer. A payment attached to
  * nothing shows up as unmatched and somebody chases it; a payment attached to the wrong claim is
@@ -40,6 +42,12 @@ export type ClaimCandidate = {
    * Only consulted for a payment from a voucher programme — see `fromProgramme` below.
    */
   carriesVoucher?: boolean;
+  /**
+   * What this claim says the Medicare Transaction Facilitator owes on it: the report's "Est. MTF", null where it says nothing and 0 where
+   * it says none. A fill billed to a Part D plan and then to the Medicare Prescription Payment Plan is two claims, and only the first
+   * carries the refund.
+   */
+  facilitatorCents?: number | null;
   /**
    * What is already tied to this claim, where the caller read it. A take-back is matched against this and nothing else: its
    * amount is the opposite of the claim's own remit and so can never equal it. Left off, no take-back is matched to a claim.
@@ -73,7 +81,10 @@ export type RemittanceLine = {
    * about — where it does not single one out, the answer is the refusal it would have given anyway.
    */
   fromProgramme?: boolean;
-  /** Where the money came from, as `claim_payments.source` says. A take-back reverses a payment of the same source and of no other. */
+  /**
+   * Where the money came from, as `claim_payments.source` says. A take-back reverses a payment of the same source and of no other, and
+   * the facilitator's money is read against each claim's promised refund and not against its remit.
+   */
   source?: string | null;
   /**
    * A payment of exactly the opposite amount for this same fill, from the same payer by the same source, is itself tied to no claim and
@@ -124,11 +135,22 @@ function levelsFor(line: RemittanceLine): ((r: ClaimCandidate) => boolean)[] {
   return levels;
 }
 
+/** Where the Medicare Transaction Facilitator's money comes from, as `claim_payments.source` names it. */
+const FACILITATOR = "mtf";
+
+/**
+ * What a line's source is expected to pay on a claim, as the claim itself says: its remit, for a plan; for the facilitator, the refund
+ * the claim promised. The facilitator pays no remit, so a claim whose remit happens to equal a refund says nothing about whose refund it
+ * is. Null where the claim says nothing, which equals no amount.
+ */
+const expectedOn = (r: ClaimCandidate, line: RemittanceLine): number | null => (line.source === FACILITATOR ? (r.facilitatorCents ?? null) : r.remitCents);
+
 /**
  * The claims a take-back can be reversing. A plan pays a claim and later takes the money back, and the line names the fill and nothing
  * that says which of two claims it is. Its amount is the opposite of what the claim was paid, so the amount rule can never single a
- * claim out; what can is the claim itself: one whose remit is exactly the amount taken back, that already holds a payment of exactly
- * that amount from the same source, and that has not been taken back for it already (what it holds is still at least the amount).
+ * claim out; what can is the claim itself: one whose remit (for the facilitator, its promised refund) is exactly the amount taken back,
+ * that already holds a payment of exactly that amount from the same source, and that has not been taken back for it already (what it
+ * holds is still at least the amount).
  *
  * Measured 5 October 2026 over every take-back in the books that fits two or more claims: 6 of the 13, -$434.40 in all, meet every
  * condition, each on exactly one claim. Those 6 are on five claims, each paid its remit two or three times over, and each is paid exactly
@@ -140,7 +162,7 @@ function claimsTakenBackFrom(pool: ClaimCandidate[], line: RemittanceLine): Clai
   if (line.amountCents === null || line.amountCents >= 0 || line.partnerWaiting) return [];
   const back = -line.amountCents;
   return pool.filter((r) => {
-    if (r.remitCents !== back) return false;
+    if (expectedOn(r, line) !== back) return false;
     const mine = (r.tied ?? []).filter((t) => t.source === line.source);
     return mine.some((t) => t.amountCents === back) && mine.reduce((n, t) => n + t.amountCents, 0) >= back;
   });
@@ -149,6 +171,9 @@ function claimsTakenBackFrom(pool: ClaimCandidate[], line: RemittanceLine): Clai
 /** What the line's amount did and did not settle, in the words a list of import problems reads aloud. */
 function amountClause(line: RemittanceLine, paidThis: number, takenBack: number): string {
   if (line.amountCents === null) return " and gives no amount to match on";
+  if (line.amountCents >= 0 && line.source === FACILITATOR) {
+    return paidThis > 1 ? ` and ${paidThis} of them promise exactly this refund` : " and none of them promises exactly this refund";
+  }
   if (line.amountCents >= 0) return paidThis > 1 ? ` and ${paidThis} of them were paid exactly this amount` : " and none of them was paid exactly this amount";
   if (line.partnerWaiting) return " and it takes back a payment of the same amount for this fill that is itself waiting to be attached, so the two cancel";
   return takenBack > 1
@@ -187,7 +212,7 @@ export function chooseClaimForRemittance(candidates: ClaimCandidate[], line: Rem
     if (byBin.length === 1) return { claim: byBin[0], ambiguous: null };
     const pool = byBin.length > 1 ? byBin : from;
 
-    const byAmount = line.amountCents === null ? [] : pool.filter((r) => r.remitCents === line.amountCents);
+    const byAmount = line.amountCents === null ? [] : pool.filter((r) => expectedOn(r, line) === line.amountCents);
     if (byAmount.length === 1) return { claim: byAmount[0], ambiguous: null };
 
     const byTakeBack = claimsTakenBackFrom(pool, line);

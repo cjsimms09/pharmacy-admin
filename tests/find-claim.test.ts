@@ -173,3 +173,76 @@ describe("a take-back is attached to the claim that was paid what it takes back"
     assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[4_150], []]);
   });
 });
+
+describe("the facilitator's refund is attached to the claim that promised it", () => {
+  /*
+   * A fill billed to a Part D plan and then to the Medicare Prescription Payment Plan is two claims, and the facilitator's refund equals
+   * neither one's remit. What tells them apart is which claim promised that refund: the report's "Est. MTF", on the first only. Every
+   * figure here is invented.
+   */
+  const refund = 6_235;
+  const twoClaims = async (rx: string, promises: [number | null, number | null] = [refund, 0]) => {
+    const a = claim(rx, 1, "2026-09-05", { bin: "610097", remitCents: 14_800, expectedFacilitatorCents: promises[0] });
+    const b = claim(rx, 1, "2026-09-05", { bin: "004336", remitCents: 2_100, pbmName: "Payment Plan", expectedFacilitatorCents: promises[1] });
+    await db.insert(schema.claims).values([a, b]);
+    return { a, b };
+  };
+  const tiedTo = async (claimId: string) => (await db.query.claimPayments.findMany({ where: (t, { eq }) => eq(t.claimId, claimId) })).map((p) => p.amountCents).sort((x, y) => x - y);
+  const refunded = (rx: string, receivedOn: string, amountCents = refund) =>
+    pay(rx, 1, "2026-09-05", { source: "mtf", payer: "Medicare Transaction Facilitator", amountCents, receivedOn });
+
+  test("it is tied to the claim that promised exactly that refund, and the other claim is left alone", async () => {
+    const { a, b } = await twoClaims("900720");
+    const r = await refunded("900720", "2026-09-20");
+    assert.deepEqual([r.matched, r.ambiguous], [true, null]);
+    assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[refund], []]);
+  });
+
+  test("a refund of a figure no claim promised is refused, and says that none promises it", async () => {
+    const { a, b } = await twoClaims("900721");
+    const r = await refunded("900721", "2026-09-20", 5_000);
+    assert.deepEqual([r.matched, r.ambiguous?.count], [false, 2]);
+    assert.match(r.ambiguous?.why ?? "", /none of them promises exactly this refund/);
+    assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[], []]);
+  });
+
+  test("two claims that promise the same refund leave it tied to neither, and say so", async () => {
+    const { a, b } = await twoClaims("900722", [refund, refund]);
+    const r = await refunded("900722", "2026-09-20");
+    assert.deepEqual([r.matched, r.ambiguous?.count], [false, 2]);
+    assert.match(r.ambiguous?.why ?? "", /2 of them promise exactly this refund/);
+    assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[], []]);
+  });
+
+  test("claims whose report said nothing of a refund promised none: the refund is tied to neither", async () => {
+    const { a, b } = await twoClaims("900723", [null, null]);
+    assert.equal((await refunded("900723", "2026-09-20")).matched, false);
+    assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[], []]);
+  });
+
+  test("a plan's payment of the same figure is the plan's, and is read against the remits as before", async () => {
+    const { a, b } = await twoClaims("900724");
+    const r = await pay("900724", 1, "2026-09-05", { amountCents: refund, receivedOn: "2026-09-20" });
+    assert.equal(r.matched, false);
+    assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[], []]);
+    const owed = await pay("900724", 1, "2026-09-05", { amountCents: 2_100, receivedOn: "2026-09-21" });
+    assert.equal(owed.matched, true);
+    assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[], [2_100]]);
+  });
+
+  test("the refund the facilitator takes back is tied to the claim it refunded, after it", async () => {
+    const { a, b } = await twoClaims("900725");
+    await refunded("900725", "2026-09-20");
+    const back = await refunded("900725", "2026-10-02", -refund);
+    assert.deepEqual([back.matched, back.ambiguous], [true, null]);
+    assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[-refund, refund], []]);
+  });
+
+  test("a refund that arrived before its claims is tied by the sweep that follows the claims", async () => {
+    const early = await refunded("900726", "2026-09-20");
+    assert.equal(early.matched, false);
+    const { a, b } = await twoClaims("900726");
+    await matchOrphanPayments();
+    assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[refund], []]);
+  });
+});
