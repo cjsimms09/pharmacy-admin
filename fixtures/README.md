@@ -42,4 +42,7 @@ To get the text layer of a PDF on the pharmacy machine: `npx tsx -e "import {pdf
 
 The payer payment report, as the remittance service exports it for a date range: one row per
 payment, with the payer's own payment number, the day it was deposited, and the amount. Payer names
-are replaced with placeholders; the shape, the columns and the arithmetic are the real ones.
+are replaced with placeholders; the shape, the columns and the arithmetic are the real ones. The
+payment numbers are invented — the 999 series, and `EFT-999NNNNN` for Health Mart Atlas — because a
+payer's payment number names a real deposit into the pharmacy's bank, and the pre-commit hook refuses
+a real one.

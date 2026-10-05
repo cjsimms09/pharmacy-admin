@@ -525,7 +525,7 @@ const RULES: Rule[] = [
      *
      * The report itemises every payment into the ProviderPay account by payer and payment number,
      * and the deposit on the bank statement is that same money swept across. August's file matches
-     * every deposit tested to exactly one payment — $40,084.14 to Health Mart Atlas EFT-31312459,
+     * every deposit tested to exactly one payment — $40,084.14 to Health Mart Atlas EFT-99900010,
      * $1,454.22 to Argus 999000000000006 — so whichever is banked, the other must not be.
      *
      * The report is the better source: itemised, by payer, with a payment number to match on. So
@@ -549,7 +549,7 @@ const RULES: Rule[] = [
      *
      * The report itemises every payment into the ProviderPay account by payer and payment number,
      * and the deposit on the bank statement is that same money swept across. August's file matches
-     * every deposit tested to exactly one payment — $40,084.14 to Health Mart Atlas EFT-31312459,
+     * every deposit tested to exactly one payment — $40,084.14 to Health Mart Atlas EFT-99900010,
      * $1,454.22 to Argus 999000000000006 — so whichever is banked, the other must not be.
      *
      * The report is the better source: itemised, by payer, with a payment number to match on. So
@@ -571,7 +571,7 @@ const RULES: Rule[] = [
      *
      * The report itemises every payment into the ProviderPay account by payer and payment number,
      * and the deposit on the bank statement is that same money swept across. August's file matches
-     * every deposit tested to exactly one payment — $40,084.14 to Health Mart Atlas EFT-31312459,
+     * every deposit tested to exactly one payment — $40,084.14 to Health Mart Atlas EFT-99900010,
      * $1,454.22 to Argus 999000000000006 — so whichever is banked, the other must not be.
      *
      * The report is the better source: itemised, by payer, with a payment number to match on. So

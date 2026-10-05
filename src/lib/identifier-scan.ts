@@ -21,6 +21,13 @@
  *                                            which is a fixture and so was meant to carry none. Each names a real
  *                                            payment into this pharmacy's bank. Nothing here had this shape, so every
  *                                            one of them passed every commit it was ever part of.
+ *   a payer's EFT number                     "EFT" and eight digits: how Health Mart Atlas numbers a deposit into this
+ *                                            pharmacy's bank, and a payer's own number just as the series above are.
+ *                                            Added 5 October 2026 after eleven real ones were found in twelve tracked
+ *                                            files — three documents, four lib files, a fixture and four tests — seventeen
+ *                                            days after the same fault was fixed for the series above. A rule keyed on one
+ *                                            payer's numbering does not cover the next payer's, and nothing here had this
+ *                                            shape either, so every one of them passed every commit it was ever part of.
  *
  * ── What it deliberately does not do ──
  *
@@ -44,6 +51,12 @@ const ALLOWED = new Set([
   "1234567893",
   // The fixtures' own DEA stand-in.
   "XX0000000",
+  // Invented EFT numbers the tests and one doc comment use; the 999 series is allowed by shape, in the EFT rule below.
+  "00000000",
+  "12345678",
+  "87654321",
+  "90000001",
+  "90000002",
 ]);
 
 /**
@@ -164,6 +177,19 @@ export function findIdentifiers(text: string, path = "", own: string[] = []): Fi
      */
     for (const m of line.matchAll(/\b(101000\d{9}|242071\d{9}|21000\d{9}|531011\d{8})\b/g)) {
       say(i, "payer payment number", m[1], "a payer's own number for a deposit into this pharmacy's ProviderPay account");
+    }
+    /*
+     * A payer's EFT number: "EFT" and eight digits, which is how Health Mart Atlas numbers a deposit into this pharmacy's
+     * bank. The same class as the series above under another payer's name, and named by its shape for the same reason: it
+     * identifies a real payment into a real account.
+     *
+     * Not flagged: the invented ones, which begin 999 (a series no payer's numbering has reached) or are named in ALLOWED,
+     * and a run of digits that reads as a calendar date, because "EFT 20260908" is a day and not a deposit. A seven-digit
+     * number is not read as one, which is a known limit and is said here so nobody takes the rule for more than it is.
+     */
+    for (const m of line.matchAll(/\bEFT[-\s#:]{0,2}(\d{8})(?!\d)/gi)) {
+      if (/^999\d{5}$/.test(m[1]) || /^20[2-3]\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(m[1])) continue;
+      say(i, "payer EFT number", m[1], "a payer's own number for a deposit into this pharmacy's bank account");
     }
     /* A prescription number and a drug code on one line is a dispensing, however much else has been changed. */
     if (/\b\d{11}\b/.test(line) && /\brx\s*(#|number|no)?\b/i.test(line) && !/fixtures?|invented|test/i.test(path)) {

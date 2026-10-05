@@ -46,7 +46,7 @@ describe("a statement line confirms the deposit already banked", () => {
   });
 
   test("the four days between paid and deposited on Health Mart Atlas money are inside the window", () => {
-    // EFT-31434994: paid 2026-09-04, deposited 2026-09-08.
+    // EFT-99900011: paid 2026-09-04, deposited 2026-09-08.
     assert.equal(matchHeldDeposit([hma({ receivedOn: "2026-09-04" })], { amountCents: 2_009_128, on: "2026-09-08", payer: null }, new Set()).kind, "confirms");
   });
 });

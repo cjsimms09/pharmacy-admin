@@ -325,7 +325,7 @@ export function countedTwice(i: PLInputs, pl: MonthlyPL): CountedTwice[] {
     routes: ["The ProviderPay payment report, itemised by payer and payment number", "The deposit on the bank statement"],
     rule:
       "The report wins: it names which payer sent what, and the deposit is that same money swept across. August's file matches every deposit to exactly one payment — " +
-      "$40,084.14 to Health Mart Atlas EFT-31312459 — so whichever is banked, the other must not be. Each payment is keyed on the payer and their own payment number, so the same report read twice banks nothing twice.",
+      "$40,084.14 to one Health Mart Atlas EFT — so whichever is banked, the other must not be. Each payment is keyed on the payer and their own payment number, so the same report read twice banks nothing twice.",
     bothPresent: false,
     keptOutCents: null,
     says: "Banked from the report, by payer. The deposits on the statement are recognised as the same money and add nothing.",

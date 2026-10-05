@@ -53,7 +53,7 @@ Measured on the real database the same afternoon, after the ProviderPay detail i
   deployed.
 - **Remittance adjustments are not booked at all.** Every difference between the portal's remit
   amount and what the site holds for that remittance is exactly the portal's "Adjust" column —
-  $12.40 on 9397708, $67.84 on EFT-31470757, $73.04 on EFT-31445402, and so on, about **$259
+  $12.40 on one remittance, $67.84 on another, $73.04 on a third, and so on, about **$259
   across September**. `readRemitDetail` skips adjustment rows because they carry no prescription
   number, so they can be posted against no claim. They are real money the payer kept and they
   belong on the cash side. **Open — needs a decision on where they land** (expense, or an offset

@@ -49,7 +49,7 @@ describe("reading the report", () => {
 
   test("the deposit date is what counts, and the payment date is kept where it differs", () => {
     // Atlas paid on the 31st of August and it landed on the 1st of September: September's money.
-    const atlas = read.payments.find((p) => p.paymentNumber === "EFT-31415975")!;
+    const atlas = read.payments.find((p) => p.paymentNumber === "EFT-99900006")!;
     assert.equal(atlas.depositedOn, "2026-09-01");
     assert.equal(atlas.paidOn, "2026-08-31");
     assert.equal(atlas.method, "COPY");

@@ -15,14 +15,14 @@
  *
  * The same deposit does not carry the same date in both feeds. An 835 banks on BPR16, the payment's
  * effective date; the payer's payment report banks on the day it landed in the account. On every
- * Health Mart Atlas deposit on file they differ by one to four days — EFT-31434994 is paid
+ * Health Mart Atlas deposit on file they differ by one to four days — EFT-99900011 is paid
  * 2026-09-04 and deposited 2026-09-08. The gate used to require the same calendar day, so the
  * second copy went straight through: $37,909.27 on that one deposit, $84,921.40 across the five
  * known mismatched rows.
  *
  * What identifies a deposit exactly is the payer's own reference, because the payer put it on the
- * payment and both feeds copy it down. Digits only, and at least six of them, so "EFT-31434994" and
- * "31434994" are one payment while two short references cannot collide by accident.
+ * payment and both feeds copy it down. Digits only, and at least six of them, so "EFT-99900011" and
+ * "99900011" are one payment while two short references cannot collide by accident.
  *
  * ── Who this applies to ──
  *

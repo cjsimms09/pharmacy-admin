@@ -8,6 +8,24 @@ file is how they talk.
 
 ## Open items
 
+- **5 October, pharmacy session (the commit after `bdfcc56`; NOT deployed or pushed): eleven real payment numbers
+  stood in twelve tracked files, and the commit hook now refuses the shape.** A payer's payment number (for Health
+  Mart Atlas, the EFT number of a deposit) names a real deposit into the pharmacy's bank account. 11 distinct ones
+  stood in 3 documents, 4 lib files, a fixture and 4 tests, ten of them in the copy of this repository on GitHub,
+  which is public (OPEN-ITEMS, the repository rows); the hook had a shape for the ProviderPay series since 18
+  September and none for these. Now `src/lib/identifier-scan.ts` reads "payer EFT number" (the word EFT and eight
+  digits; the invented series `999NNNNN`, five placeholders and a calendar date pass), the twelve files carry invented
+  numbers or none, and `fixtures/payer-payments.csv` uses `EFT-99900006`, `EFT-99900008` and `EFT-99900009`. **For
+  you:** (1) write a payer's payment number in a test, fixture, document, commit message or pull-request description
+  only as `EFT-999NNNNN`; the hook reads commits and not pull-request text; (2) the shape does not read a payment
+  number of seven digits, or one that does not follow the word EFT, so that part is still a matter of care; (3) the
+  ten that were pushed stay in the history and the eleventh is in unpushed commits, so nothing is pushed until he
+  answers the repository question (the first row of OPEN-ITEMS, "Waiting on him"). **Files changed on
+  `feature/compliance`, so say so on your pull request before editing one:** `identifier-scan.ts`,
+  `health-mart-eft.ts`, `bank-descriptors.ts`, `books-check.ts`, `deposit-gate.ts`, `fixtures/payer-payments.csv`,
+  `fixtures/README.md`, and the tests `payer-payments`, `bank-descriptors`, `bank-deposit-confirm`,
+  `cash-receipt-duplicates` and `identifier-scan`.
+
 - **5 October, pharmacy session (4a80fd5 to ee765c3, nine commits, and a docs commit after them; NOT deployed): the 33
   payments that "need a decision" are now 7, the nightly `remit_to_claim` proof judges the payments that page asks about,
   and no page he still uses links to a page retired on 2 October.** His words: *"33 of those ($2,017.47) need one ...
@@ -134,7 +152,7 @@ file is how they talk.
   records carry the same fee: the Health Mart Atlas payment report for each EFT (AH and CS rows, booked as expenses), the
   835's provider-level segments (`remittance_holdbacks`) and the reconciliation service's adjustment report. September
   accrual had subtracted two of them ($146.73 twice); October carried a $46.95 RedSail balance forward as income on both
-  accounts; and EFT-99930001's payment report had been refused whole over one word-coded row ("Adj-Fee"). All three are in
+  accounts; and the 30 September EFT's payment report had been refused whole over one word-coded row ("Adj-Fee"). All three are in
   OPEN-ITEMS ("Found 4 October") in three lines each, with the pre-flight and what was not checked. **Files changed on
   `feature/compliance`, so say so on your pull request before editing one:** `src/lib/payer-fees.ts` and
   `payer-fees-store.ts` (new: one record per remittance, the sign converted in one place), `profit-and-loss.ts` (the fee

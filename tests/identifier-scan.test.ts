@@ -40,6 +40,14 @@ describe("what a commit must not carry", () => {
   test("a drug code beside a prescription, which together are a dispensing", () => {
     assert.deepEqual(shapes("Rx 4508821 NDC 00093721410 30 tabs"), ["NDC beside a prescription"]);
   });
+
+  test("a payer's EFT number, which names a real deposit into this pharmacy's bank", () => {
+    /* 24681357 is invented. The shape is what matters: eleven real ones sat in twelve tracked files with nothing to stop them. */
+    assert.deepEqual(shapes("Health Mart Atlas EFT-24681357 $100.00"), ["payer EFT number"]);
+    assert.deepEqual(shapes("reference: \"EFT 24681357\""), ["payer EFT number"]);
+    assert.deepEqual(shapes("AHADJ|EFT24681357|CS|1234567"), ["payer EFT number"]);
+    assert.deepEqual(shapes("EFT-24681357", "fixtures/payer-payments.csv"), ["payer EFT number"], "a fixture is where it was found");
+  });
 });
 
 describe("what it must not cry wolf over, or it will be turned off", () => {
@@ -55,6 +63,12 @@ describe("what it must not cry wolf over, or it will be turned off", () => {
   test("the invented numbers this repository's own fixtures use", () => {
     assert.deepEqual(shapes("7000000001 CKACH00000001 ACH00000003 990101 000000990201 5000202609031 1234567893"), []);
     assert.deepEqual(shapes("{ supplier: \"Mckesson\", invoiceNumber: \"7000000003\", checkNumber: \"CKACH00000001\" }"), []);
+  });
+
+  test("the invented EFT numbers this repository uses, a date after the word, and a number too short to be one", () => {
+    assert.deepEqual(shapes("EFT-99900001 EFT-99000002 EFT-00000000 EFT-12345678 EFT-87654321 EFT-90000001"), []);
+    assert.deepEqual(shapes("the EFT 20260908 notice"), [], "eight digits that read as a calendar date are a day, not a deposit");
+    assert.deepEqual(shapes("EFT-1234567 and EFT-123456789"), [], "only eight digits is the shape; the rule says so rather than pretending to more");
   });
 
   test("a fixture that says it is invented is still checked for the shapes that hid there", () => {

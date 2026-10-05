@@ -22,8 +22,8 @@ const fromReport: BankedReceipt = {
   amountCents: 3_790_927,
   receivedOn: "2026-09-08",
   payer: "Health Mart Atlas",
-  sourceKey: "payer-payment|health mart atlas|EFT-31434994",
-  reference: "EFT-31434994",
+  sourceKey: "payer-payment|health mart atlas|EFT-99900011",
+  reference: "EFT-99900011",
   month: "2026-09",
   createdBy: "the payment report",
 };
@@ -39,21 +39,21 @@ describe("the same deposit down two roads", () => {
       amountCents: 3_790_927,
       receivedOn: "2026-09-04",
       payer: "Health Mart Atlas",
-      sourceKey: "835|Health Mart Atlas|31434994|2026-09-04",
-      reference: "31434994",
+      sourceKey: "835|Health Mart Atlas|99900011|2026-09-04",
+      reference: "99900011",
     });
     assert.equal(v.bank, false);
     assert.match(v.bank === false ? v.why : "", /already banked/);
   });
 
   test("it is caught in the other order too", () => {
-    const held: BankedReceipt = { ...fromReport, receivedOn: "2026-09-04", sourceKey: "835|Health Mart Atlas|31434994|2026-09-04", reference: "31434994", createdBy: "the 835" };
+    const held: BankedReceipt = { ...fromReport, receivedOn: "2026-09-04", sourceKey: "835|Health Mart Atlas|99900011|2026-09-04", reference: "99900011", createdBy: "the 835" };
     const v = gateDeposit([held], {
       amountCents: 3_790_927,
       receivedOn: "2026-09-08",
       payer: "Health Mart Atlas",
-      sourceKey: "payer-payment|health mart atlas|EFT-31434994",
-      reference: "EFT-31434994",
+      sourceKey: "payer-payment|health mart atlas|EFT-99900011",
+      reference: "EFT-99900011",
     });
     assert.equal(v.bank, false);
   });
@@ -71,7 +71,7 @@ describe("the same deposit down two roads", () => {
   });
 
   test("a matching reference with a different amount is still one deposit, and says so", () => {
-    const v = gateDeposit([fromReport], { amountCents: 3_790_900, receivedOn: "2026-09-04", payer: "Health Mart Atlas", sourceKey: "835|x", reference: "31434994" });
+    const v = gateDeposit([fromReport], { amountCents: 3_790_900, receivedOn: "2026-09-04", payer: "Health Mart Atlas", sourceKey: "835|x", reference: "99900011" });
     assert.equal(v.bank, false);
     assert.match(v.bank === false ? v.why : "", /though this copy says 37909\.00/);
   });
@@ -110,7 +110,7 @@ describe("what must still be banked", () => {
    * document it exists to agree with.
    */
   test("a hand-typed receipt is never refused, whatever else is banked", () => {
-    const v = gateDeposit([fromReport], { amountCents: 3_790_927, receivedOn: "2026-09-08", payer: "Health Mart Atlas", sourceKey: null, reference: "EFT-31434994" });
+    const v = gateDeposit([fromReport], { amountCents: 3_790_927, receivedOn: "2026-09-08", payer: "Health Mart Atlas", sourceKey: null, reference: "EFT-99900011" });
     assert.equal(v.bank, true);
   });
 
