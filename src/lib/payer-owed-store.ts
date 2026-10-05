@@ -171,6 +171,8 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
      * an overpayment to query.
      */
     notBilled: p.source === "rxrescue",
+    /* The facilitator's refund is owed by the facilitator, so it settles no plan's share (payer-owed.ts, `Received.facilitator`). */
+    facilitator: p.source === "mtf",
     cents: p.amountCents,
     receivedOn: p.receivedOn,
     /* Matched means it found a claim, which is what makes it somebody's settled receivable. Why one did not is `cause`. */
@@ -178,7 +180,12 @@ export async function owedRows(range?: { from?: string; to?: string }): Promise<
     cause: causes.get(p.id),
   }));
 
-  return { receivables, received, from, to, feedFrom };
+  /*
+   * Where the figures begin, which is not where the range asked begins: no fill before the books begin is billed here
+   * whatever the range, and the page prints this under "Billed". It printed the range's start, 1 August 2025, beside a
+   * figure that starts on 1 September 2026.
+   */
+  return { receivables, received, from: from < SITE_STARTS_ON ? SITE_STARTS_ON : from, to, feedFrom };
 }
 
 /** What arrived and what was billed, for the payer page. `from`/`to` are fill dates. */

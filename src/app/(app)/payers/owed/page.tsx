@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { requireReimbursement } from "@/lib/features";
 import { familyTabs } from "@/lib/families";
 import { formatCents } from "@/lib/money";
+import { fmt } from "@/lib/dates";
 import { owedNow } from "@/lib/payer-owed-store";
 import type { PayerState } from "@/lib/payer-owed";
 import { PageHeader, Card, Notice, Empty, Figure } from "@/components/ui";
@@ -60,7 +61,7 @@ export default async function OwedPage() {
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Figure value={formatCents(owed.billedCents)} label="Billed" sub={`Filled ${owed.from} onwards`} />
+            <Figure value={formatCents(owed.billedCents)} label="Billed" sub={`Filled ${fmt(owed.from)} onwards`} />
             <Figure value={formatCents(owed.receivedCents)} label="Received" sub={owed.nothingHasArrived ? "Nothing paid against these claims yet" : `Across ${real.length} payer${real.length === 1 ? "" : "s"}`} />
             <Figure value={formatCents(owed.outstandingCents)} label="Outstanding" sub={chase.length ? `${chase.length} from a payer that has paid before` : "None of it from a payer that has ever paid"} />
           </div>
@@ -108,6 +109,28 @@ export default async function OwedPage() {
                 settled were billed. That is the Aytu / IPD top-off, which arrives on a credit memo weeks after the
                 fill: the claim adjudicates for the copay assistance alone and never says how much top-off is coming. It
                 is revenue, it is not an overpayment, and there is nothing to query.
+              </p>
+            </Card>
+          )}
+
+          {/*
+            The Medicare Transaction Facilitator's refunds, kept out of every payer's received figure and out of the
+            overpaid count.
+
+            The facilitator pays the manufacturer's refund on a negotiated-price drug on top of what the plan paid, and it
+            owes that money itself. Settling the plan's share with it made each of those fills read as overpaid by the
+            refund, and a plan that had paid nothing as paid.
+          */}
+          {owed.facilitator.count > 0 && (
+            <Card title="Money from the Medicare Transaction Facilitator">
+              <p className="text-sm text-ink-2">
+                {owed.facilitator.count} payment{owed.facilitator.count === 1 ? "" : "s"} from the facilitator,{" "}
+                <span className="font-medium text-ink">{formatCents(owed.facilitator.cents)}</span> in all,{" "}
+                {owed.facilitator.count === 1 ? "is" : "are"} tied to claims. The facilitator pays the manufacturer&apos;s refund on a
+                negotiated-price drug on top of what the plan paid, and it owes that money itself, so it is in no payer&apos;s
+                received figure and cannot make a plan look overpaid. What it has paid after each claim, and what is still
+                awaited, is on{" "}
+                <Link href="/remits/mtf" className="text-accent underline">Facilitator payments</Link>.
               </p>
             </Card>
           )}

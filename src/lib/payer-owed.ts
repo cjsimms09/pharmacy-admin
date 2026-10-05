@@ -254,6 +254,15 @@ export type Received = {
    * nothing in it worth acting on stops being read.
    */
   notBilled?: boolean;
+  /**
+   * True where the Medicare Transaction Facilitator paid it (`claim_payments.source = "mtf"`).
+   *
+   * The facilitator pays the manufacturer's refund on a negotiated-price drug on top of what the plan paid, and owes it
+   * itself: the plan is not its debtor (claim-lifecycle.md, Rule 1). So a tied one settles no plan's share and is no
+   * payer's received money. Settling the share with it read every fill carrying one as over-paid by the refund, and a
+   * plan that had paid nothing as paid.
+   */
+  facilitator?: boolean;
 };
 
 /** One claim's share, as it stands: what the month-end report ages. */
@@ -330,6 +339,12 @@ export type OwedSummary = {
    * IPD top-off. Revenue, counted nowhere in billed, received or outstanding, and never in the overpaid count.
    */
   topOff: { count: number; cents: number };
+  /**
+   * Payments from the Medicare Transaction Facilitator that are tied to a claim: the manufacturer's refund, paid on top of
+   * the plan's share and owed by the facilitator. Counted nowhere in billed, received or outstanding, and never in the
+   * overpaid count. Payments of the facilitator's that are tied to no claim are in `unattached`, with the rest.
+   */
+  facilitator: { count: number; cents: number };
   /** Every claim share that carries a claim id, as it stands, for ageing. */
   claimBalances: ClaimBalance[];
   /** Payers' outstanding from shares with no claim id, where the payer has sent something: not ageable. */
@@ -439,6 +454,9 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
   /* Money that arrived beyond anything billed, because nobody billed it: the top-off. Revenue, and not a balance. */
   let topOffCount = 0;
   let topOffCents = 0;
+  /* The facilitator's refunds, tied to claims: nobody's balance. */
+  let facilitatorCount = 0;
+  let facilitatorCents = 0;
   for (const p of received) {
     if (!p.matched) {
       /*
@@ -449,6 +467,16 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
       unattachedCount++;
       unattachedCents += p.cents;
       if (p.cause) unattachedCauses.push({ cause: p.cause, amountCents: p.cents });
+      continue;
+    }
+    if (p.facilitator) {
+      /*
+       * Owed by the facilitator and not by the plan, so it settles nothing here and is not a payer's money. Measured on
+       * 5 October 2026: 13 of the 20 over-paid shares, $3,181.68 of the $3,739.05 the page called overpayment, each
+       * equal to its claim's remit once this was taken out.
+       */
+      facilitatorCount++;
+      facilitatorCents += p.cents;
       continue;
     }
     if (p.claimId) {
@@ -563,6 +591,7 @@ export function owedByPayer(receivables: Receivable[], received: Received[], tod
     unattached: unattachedTotal,
     unattachedSays: unattachedSays(unattachedTotal, unattachedRows, SITE_STARTS_ON, feedFrom),
     topOff: { count: topOffCount, cents: topOffCents },
+    facilitator: { count: facilitatorCount, cents: facilitatorCents },
     claimBalances,
     unaged,
     feesOwed: [...fees.values()].sort((x, y) => y.cents - x.cents),
