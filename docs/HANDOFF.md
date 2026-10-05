@@ -41,8 +41,11 @@ file is how they talk.
   payments / $977.95 open (5 on reversed claims where one carries a sale date, $1,108.57; 12 that name no drug and no
   fill, $110.00; 8 waiting to attach, -$240.62) and October 2 / $1,149.52 (it said 161 / $1,681.38 and 21 / $1,149.60
   before, for reasons that were not faults). What clears them: the 8 attach at the next claims load after a deploy; the
-  $76.78 when he presses the claim it paid; the 6 on reversed claims (+$2,181.31) and the 12 MTM payments ($110.00) wait on
-  answers only he can give (OPEN-ITEMS, "Waiting on him"). **Do not describe the proof as passing.**
+  $76.78 when he presses the claim it paid; the 6 on reversed claims (+$2,181.31) and the 12 payments that name no fill ($110.00, probably
+  OutcomesMTM's, not known) wait on answers only he can give (OPEN-ITEMS, "Waiting on him"; the 12 are the last row of "Found 5 October": two EFTs have
+  carried payments of that shape (August's, out of the books, and 30 September's) and no stored field says what they
+  are, so a screen or a settle must come from the report's section name and not from their shape). **Do not describe
+  the proof as passing.**
 
   **Links** (`ee765c3`): his words said the proof "links to a retired page", so every link on a page he still uses was
   read against the routes and `src/lib/retired.ts`. Before: shared code 85 of 353 literals bad (84 retired, 1 to no page),
