@@ -158,12 +158,14 @@ async function passInProcess(reason: string, opts: { proofs?: boolean; today?: s
       }
       if (opts.proofs) {
         const p = await import("./proofs");
+        /* The Payments page's reading of every payment tied to no claim, made once and judged month by month. */
+        const reading = await (await import("../untied-payments-store")).untiedPayments();
         const results = [
           ...figures.map((f) => p.bankToCent(f)),
           ...figures.map((f) => p.receiptsToBank(f)),
           await p.claimsEqualPioneer(),
           await p.readerArithmetic(today),
-          ...(await Promise.all(months.map((m) => p.remitToClaim(m)))),
+          ...(await Promise.all(months.map((m) => p.remitToClaim(m, reading)))),
           await p.expectedArrived(),
           await p.paymentsOnce(),
         ];

@@ -160,7 +160,7 @@ async function claimPots(today: string): Promise<Line[]> {
     const route = e.programme ? routeFor(payer, e.pcn) : null;
     const routeDays = route && typeof route.value.cycleDays === "number" ? (route.value.cycleDays as number) : null;
     const oldestAge = (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${e.oldest}T00:00:00Z`)) / 864e5;
-    const href = `/v2/claims?payer=${encodeURIComponent(payer)}`;
+    const href = `/claims?payer=${encodeURIComponent(payer)}`;
     /* The month in the id: a line a person answers never returns, and a payer's pot must — next month, with next month's claims. */
     const month = today.slice(0, 7);
     /* A programme whose route and cycle are known is a pot inside its cycle: nothing to ask until the cycle has passed. */
@@ -223,17 +223,32 @@ async function monthNotClosed(today: string): Promise<Line[]> {
   ];
 }
 
+/** Where a person acts on a failed proof: a page the site has today, never a retired address, which lands on one sentence saying the page is gone. */
+export function proofHref(proof: string, scope: string | null): string {
+  switch (proof) {
+    case "remit_to_claim":
+      return "/claims/no-claim";
+    case "payments_once":
+      return "/payers/owed";
+    case "claims_eq_pioneer":
+      return "/claims";
+    default:
+      return `/money/bank-review?month=${scope ?? ""}`;
+  }
+}
+
 /**
  * A proof that failed last night is a line, except where its items are already lines (held documents) or the
- * month has not ended (a month with no statement yet is not a failure, it is October).
+ * bank's month has not ended (a month with no statement yet is not a failure, it is October). Payments received
+ * this month are a failure now: money in hand that nothing accounts for does not wait for the month to end.
  */
-async function proofFailures(today: string): Promise<Line[]> {
+export async function proofFailures(today: string): Promise<Line[]> {
   const latest = (await db.all(sql`select proof, scope, run_at, passed, says from proof_run p where run_at = (select max(run_at) from proof_run q where q.proof = p.proof and coalesce(q.scope, '') = coalesce(p.scope, ''))`)) as { proof: string; scope: string | null; run_at: string; passed: number; says: string }[];
   const out: Line[] = [];
   for (const p of latest) {
     if (p.passed) continue;
     if (p.proof === "reader_arithmetic" || p.proof === "expected_arrived") continue;
-    if ((p.proof === "bank_to_cent" || p.proof === "receipts_to_bank" || p.proof === "remit_to_claim") && p.scope && p.scope >= today.slice(0, 7)) continue;
+    if ((p.proof === "bank_to_cent" || p.proof === "receipts_to_bank") && p.scope && p.scope >= today.slice(0, 7)) continue;
     if (p.proof === "bank_to_cent" && /no bank statement is on file/.test(p.says)) continue;
     out.push({
       id: `proof|${p.proof}|${p.scope ?? ""}`,
@@ -241,7 +256,7 @@ async function proofFailures(today: string): Promise<Line[]> {
       rank: p.proof === "claims_eq_pioneer" ? 3 : 4,
       title: p.says,
       detail: `A proof the engine runs every night, failed on ${p.run_at.slice(0, 10)}.`,
-      href: p.proof === "claims_eq_pioneer" ? "/tools/data-health" : p.proof === "remit_to_claim" || p.proof === "payments_once" ? "/v2/claims?tab=unmatched" : `/money/bank-review?month=${p.scope ?? ""}`,
+      href: proofHref(p.proof, p.scope),
       answers: [{ label: "Open", action: "open" }],
       rows: { proof: p.proof, scope: p.scope },
     });

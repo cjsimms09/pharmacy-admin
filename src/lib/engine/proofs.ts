@@ -3,6 +3,10 @@ import { db, schema } from "@/db";
 import { newId } from "../crypto";
 import { SITE_STARTS_ON } from "../books-start";
 import type { MonthFigures } from "./month";
+import { fmt } from "../dates";
+import { formatCents } from "../money";
+import { causeInfo, groupsSay, sourceToDo, tallyUntied, type TallyRow, type UntiedCause } from "../untied-payments";
+import type { UntiedReading } from "../untied-payments-store";
 
 /**
  * The proofs: what has to be true about the books, checked against the sources, every night, and kept.
@@ -85,23 +89,75 @@ export async function readerArithmetic(today: string): Promise<ProofResult> {
   };
 }
 
-export async function remitToClaim(month: string): Promise<ProofResult> {
-  const from = `${month}-01`;
-  const to = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
-  const r = (await db.all(sql`select sum(case when claim_id is not null then 1 else 0 end) matched, sum(case when claim_id is not null then amount_cents else 0 end) matched_cents, sum(case when claim_id is null and date_filled >= ${SITE_STARTS_ON} then 1 else 0 end) unmatched, sum(case when claim_id is null and date_filled >= ${SITE_STARTS_ON} then amount_cents else 0 end) unmatched_cents, sum(case when date_filled < ${SITE_STARTS_ON} then amount_cents else 0 end) before_books from claim_payments where source = 'plan' and received_on >= ${from} and received_on <= ${to}`)) as { matched: number; matched_cents: number; unmatched: number; unmatched_cents: number; before_books: number }[];
-  const f = r[0] ?? { matched: 0, matched_cents: 0, unmatched: 0, unmatched_cents: 0, before_books: 0 };
-  const total = (f.matched_cents ?? 0) + (f.unmatched_cents ?? 0);
-  const share = total ? (f.matched_cents ?? 0) / total : 1;
-  const passed = (f.unmatched ?? 0) === 0;
+/** What the proof reads of one month: the payments received in it for fills inside the books, with nothing that names a prescription. */
+export type RemitMonth = {
+  /** Tied to the claim each paid. */
+  tied: { count: number; cents: number };
+  /** Tied to no claim, each with the reason the Payments page gives it. */
+  untied: { cause: UntiedCause; amountCents: number }[];
+  /** Received that month for fills from before the books begin, tied or not: cash, never receivable, and not judged here. */
+  beforeBooks: { count: number; cents: number };
+  /** The first day the claims feed covers; the Payments page's words for each group depend on it. */
+  feedFrom: string | null;
+};
+
+const paymentsOf = (n: number) => `${n.toLocaleString("en-US")} payment${n === 1 ? "" : "s"}`;
+/* "net" over more than one payment, because a take-back is a payment of less than nothing. */
+const sumOf = (n: number, cents: number) => `${n === 1 ? "" : "net "}${formatCents(cents)}`;
+const isAre = (n: number) => (n === 1 ? "is" : "are");
+const addUp = (rows: TallyRow[]) => rows.reduce((t, r) => ({ count: t.count + r.count, cents: t.cents + r.cents }), { count: 0, cents: 0 });
+
+/**
+ * Money received for a fill inside the books is applied to the claim it paid or explained, and the explanation is the Payments page's
+ * (untied-payments.ts), so no screen can say of a payment what this does not. It passes when every payment is tied to a claim or is one that page
+ * says needs nothing: a payment and its exact take-back, one on a claim that was reversed and never sold, one for a fill from before the claims feed.
+ * It fails, saying which and how much, when any needs a decision, a look, or the next claims load.
+ */
+export function judgeRemitToClaim(month: string, m: RemitMonth): ProofResult {
+  const by = tallyUntied(m.untied);
+  const open = by.filter((r) => causeInfo(r.cause, m.feedFrom).needs !== "nothing");
+  const idle = by.filter((r) => causeInfo(r.cause, m.feedFrom).needs === "nothing");
+  const o = addUp(open);
+  const i = addUp(idle);
+  const passed = open.length === 0;
+  /* A month nothing came in for is measured and none, which is not "every payment is tied". */
+  const noneIn = m.tied.count === 0 && by.length === 0;
+  const says = [
+    passed
+      ? noneIn
+        ? "no payment for a fill inside the books was received."
+        : `every payment received for a fill inside the books is tied to a claim${idle.length > 0 ? " or needs nothing" : ""}.`
+      : `${paymentsOf(o.count)} (${sumOf(o.count, o.cents)}) received for ${o.count === 1 ? "a fill" : "fills"} inside the books ${isAre(o.count)} tied to no claim and still open. ${sourceToDo(open, m.feedFrom)}`,
+    m.tied.count > 0 ? `${paymentsOf(m.tied.count)} (${sumOf(m.tied.count, m.tied.cents)}) ${isAre(m.tied.count)} tied to the claim ${m.tied.count === 1 ? "it" : "each"} paid.` : "",
+    idle.length > 0 ? `Tied to no claim and needing nothing: ${groupsSay(idle, m.feedFrom)}.` : "",
+    m.beforeBooks.count > 0 ? `Separately, ${paymentsOf(m.beforeBooks.count)} (${sumOf(m.beforeBooks.count, m.beforeBooks.cents)}) ${isAre(m.beforeBooks.count)} for ${m.beforeBooks.count === 1 ? "a fill" : "fills"} from before ${fmt(SITE_STARTS_ON)}: cash received, never receivable, and not judged here.` : "",
+  ]
+    .filter((s) => s !== "")
+    .join(" ");
   return {
     proof: "remit_to_claim",
     scope: month,
     passed,
-    figures: { matched: f.matched ?? 0, matchedCents: f.matched_cents ?? 0, unmatched: f.unmatched ?? 0, unmatchedCents: f.unmatched_cents ?? 0, beforeBooksCents: f.before_books ?? 0, share },
-    says: passed
-      ? `${month}: every remittance payment for a fill inside the books is tied to its claim (${(f.matched ?? 0).toLocaleString("en-US")} payments, ${money(f.matched_cents ?? 0)}).`
-      : `${month}: ${(f.matched ?? 0).toLocaleString("en-US")} payments tied to their claim (${money(f.matched_cents ?? 0)}, ${(share * 100).toFixed(1)}%); ${f.unmatched} not tied (${money(f.unmatched_cents ?? 0)}). ${money(f.before_books ?? 0)} more is for fills before the books, cash and not receivable.`,
+    figures: { tied: m.tied.count, tiedCents: m.tied.cents, untied: o.count + i.count, untiedCents: o.cents + i.cents, open: o.count, openCents: o.cents, byCause: by, beforeBooks: m.beforeBooks.count, beforeBooksCents: m.beforeBooks.cents },
+    says: `${month}: ${says}`,
   };
+}
+
+/** Every payment received in the month, of every source, for a fill inside the books or naming no fill date. `reading` is the Payments page's, read once for all the months. */
+export async function remitToClaim(month: string, reading?: Pick<UntiedReading, "each" | "feedFrom">): Promise<ProofResult> {
+  const from = `${month}-01`;
+  const to = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
+  const read = reading ?? (await (await import("../untied-payments-store")).untiedPayments());
+  const r = (await db.all(
+    sql`select sum(case when claim_id is not null and (date_filled is null or date_filled >= ${SITE_STARTS_ON}) then 1 else 0 end) tied, sum(case when claim_id is not null and (date_filled is null or date_filled >= ${SITE_STARTS_ON}) then amount_cents else 0 end) tied_cents, sum(case when date_filled < ${SITE_STARTS_ON} then 1 else 0 end) before_books, sum(case when date_filled < ${SITE_STARTS_ON} then amount_cents else 0 end) before_books_cents from claim_payments where out_of_books = 0 and received_on >= ${from} and received_on <= ${to}`,
+  )) as { tied: number | null; tied_cents: number | null; before_books: number | null; before_books_cents: number | null }[];
+  const f = r[0];
+  return judgeRemitToClaim(month, {
+    tied: { count: f?.tied ?? 0, cents: f?.tied_cents ?? 0 },
+    untied: read.each.filter((e) => e.receivedOn !== null && e.receivedOn >= from && e.receivedOn <= to && (e.dateFilled === null || e.dateFilled >= SITE_STARTS_ON)),
+    beforeBooks: { count: f?.before_books ?? 0, cents: f?.before_books_cents ?? 0 },
+    feedFrom: read.feedFrom,
+  });
 }
 
 /**

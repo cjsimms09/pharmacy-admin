@@ -16,12 +16,17 @@ export type UntiedLine = UntiedPayment & { cause: UntiedCause; claims: ClaimBesi
 /** Payments for fills from before the claims feed, counted by who paid and not listed line by line. */
 export type BeforeFeedRow = { source: string; count: number; cents: number };
 
+/** One payment as a count by month needs it: when it came and for which day's fill, who paid, how much and why it is tied to no claim, and nothing that names a prescription. */
+export type UntiedEach = { source: string; receivedOn: string | null; dateFilled: string | null; amountCents: number; cause: UntiedCause };
+
 export type UntiedReading = {
   booksFrom: string;
   feedFrom: string | null;
   total: { count: number; cents: number };
   tally: TallyRow[];
   beforeFeed: BeforeFeedRow[];
+  /** Every payment read, the before-feed ones too, each read among all the others so that a pair is a pair whichever month either half came in. */
+  each: UntiedEach[];
   /** Every payment but the before-feed ones, in the order of CAUSES and newest received first within a cause. */
   lines: UntiedLine[];
 };
@@ -58,10 +63,10 @@ function readEach(rows: UntiedPayment[], onFile: Map<string, ClaimHeld[]>, feedF
 async function classifyAll(rows: UntiedPayment[], feedFrom: string | null) {
   const onFile = await claimsOnFile(rows.map((p) => p.rxNumber));
   const lines: UntiedLine[] = [];
-  const classified: { cause: UntiedCause; amountCents: number }[] = [];
+  const classified: UntiedEach[] = [];
   const before = new Map<string, BeforeFeedRow>();
   for (const { p, held, cause, claimIds, partner } of readEach(rows, onFile, feedFrom)) {
-    classified.push({ cause, amountCents: p.amountCents });
+    classified.push({ cause, amountCents: p.amountCents, source: p.source, receivedOn: p.receivedOn, dateFilled: p.dateFilled });
     if (cause === "before_feed") {
       const b = before.get(p.source) ?? { source: p.source, count: 0, cents: 0 };
       b.count++;
@@ -109,6 +114,7 @@ async function readUntied(source: string | null): Promise<UntiedReading> {
     total: { count: rows.length, cents: rows.reduce((n, p) => n + p.amountCents, 0) },
     tally: tallyUntied(classified),
     beforeFeed: [...before.values()].sort((a, b) => b.count - a.count || a.source.localeCompare(b.source)),
+    each: classified,
     lines,
   };
 }
