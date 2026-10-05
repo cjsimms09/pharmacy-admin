@@ -40,7 +40,15 @@ export type ClaimCandidate = {
    * Only consulted for a payment from a voucher programme — see `fromProgramme` below.
    */
   carriesVoucher?: boolean;
+  /**
+   * What is already tied to this claim, where the caller read it. A take-back is matched against this and nothing else: its
+   * amount is the opposite of the claim's own remit and so can never equal it. Left off, no take-back is matched to a claim.
+   */
+  tied?: TiedPayment[];
 };
+
+/** A payment already tied to a claim: how much, and which source it came from (plan, secondary, copay card and so on). */
+export type TiedPayment = { amountCents: number; source: string };
 
 export type RemittanceLine = {
   fillNumber: number | null;
@@ -65,6 +73,14 @@ export type RemittanceLine = {
    * about — where it does not single one out, the answer is the refusal it would have given anyway.
    */
   fromProgramme?: boolean;
+  /** Where the money came from, as `claim_payments.source` says. A take-back reverses a payment of the same source and of no other. */
+  source?: string | null;
+  /**
+   * A payment of exactly the opposite amount for this same fill, from the same payer by the same source, is itself tied to no claim and
+   * waiting. This take-back is that payment's own and the two cancel (untied-payments.ts `cancellingPairs`): tying it to a claim that
+   * happens to hold an equal payment would leave that other one unpaired and the claim taken back for what it kept.
+   */
+  partnerWaiting?: boolean;
 };
 
 export type Choice = {
@@ -109,6 +125,38 @@ function levelsFor(line: RemittanceLine): ((r: ClaimCandidate) => boolean)[] {
 }
 
 /**
+ * The claims a take-back can be reversing. A plan pays a claim and later takes the money back, and the line names the fill and nothing
+ * that says which of two claims it is. Its amount is the opposite of what the claim was paid, so the amount rule can never single a
+ * claim out; what can is the claim itself: one whose remit is exactly the amount taken back, that already holds a payment of exactly
+ * that amount from the same source, and that has not been taken back for it already (what it holds is still at least the amount).
+ *
+ * Measured 5 October 2026 over every take-back in the books that fits two or more claims: 6 of the 13, -$434.40 in all, meet every
+ * condition, each on exactly one claim. Those 6 are on five claims, each paid its remit two or three times over, and each is paid exactly
+ * its remit once they are counted. Each of the other 7 is one half of a payment and take-back that are both tied to nothing, and none
+ * of them is the amount of a remit, so none is tied. `partnerWaiting` is for a case the data has not shown yet: such a pair, on a fill
+ * where another claim also holds a payment of that amount.
+ */
+function claimsTakenBackFrom(pool: ClaimCandidate[], line: RemittanceLine): ClaimCandidate[] {
+  if (line.amountCents === null || line.amountCents >= 0 || line.partnerWaiting) return [];
+  const back = -line.amountCents;
+  return pool.filter((r) => {
+    if (r.remitCents !== back) return false;
+    const mine = (r.tied ?? []).filter((t) => t.source === line.source);
+    return mine.some((t) => t.amountCents === back) && mine.reduce((n, t) => n + t.amountCents, 0) >= back;
+  });
+}
+
+/** What the line's amount did and did not settle, in the words a list of import problems reads aloud. */
+function amountClause(line: RemittanceLine, paidThis: number, takenBack: number): string {
+  if (line.amountCents === null) return " and gives no amount to match on";
+  if (line.amountCents >= 0) return paidThis > 1 ? ` and ${paidThis} of them were paid exactly this amount` : " and none of them was paid exactly this amount";
+  if (line.partnerWaiting) return " and it takes back a payment of the same amount for this fill that is itself waiting to be attached, so the two cancel";
+  return takenBack > 1
+    ? ` and it takes money back, and ${takenBack} of them were paid exactly that amount in full by this source`
+    : " and it takes money back, and none of them was paid exactly that amount in full by this source";
+}
+
+/**
  * The claim a remittance line settles, or nothing and the reason.
  *
  * `candidates` is every *paid* claim on the prescription. Reversed rows are not offered here: a
@@ -142,6 +190,9 @@ export function chooseClaimForRemittance(candidates: ClaimCandidate[], line: Rem
     const byAmount = line.amountCents === null ? [] : pool.filter((r) => r.remitCents === line.amountCents);
     if (byAmount.length === 1) return { claim: byAmount[0], ambiguous: null };
 
+    const byTakeBack = claimsTakenBackFrom(pool, line);
+    if (byTakeBack.length === 1) return { claim: byTakeBack[0], ambiguous: null };
+
     return {
       claim: null,
       ambiguous: {
@@ -149,7 +200,7 @@ export function chooseClaimForRemittance(candidates: ClaimCandidate[], line: Rem
         why:
           `${pool.length} paid claims on this prescription match the line equally well` +
           `${line.bin ? "" : " and the remittance does not name a payer BIN"}` +
-          `${line.amountCents === null ? " and gives no amount to match on" : byAmount.length > 1 ? ` and ${byAmount.length} of them were paid exactly this amount` : " and none of them was paid exactly this amount"}` +
+          amountClause(line, byAmount.length, byTakeBack.length) +
           ". Attach it to the right one by hand rather than have the site guess.",
       },
     };

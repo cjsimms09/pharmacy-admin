@@ -282,3 +282,47 @@ describe("payments that cancel one another, read from the database", () => {
     assert.equal(r.tally.reduce((n, t) => n + t.cents, 0), r.total.cents);
   });
 });
+
+describe("a take-back, read by the payments already tied to the claims beside it", () => {
+  const rowsOf = async (rx: string) => {
+    const { eq } = await import("drizzle-orm");
+    return db.query.claimPayments.findMany({ where: eq(schema.claimPayments.rxNumber, rx) });
+  };
+
+  test("one that takes back what one of two claims was paid will attach to that claim, and is named beside it", async () => {
+    const a = claim("920001", 1, "2026-09-05", { bin: "610097", remitCents: 4_150, payerLabel: "Plan Q" });
+    const b = claim("920001", 1, "2026-09-05", { bin: "004336", remitCents: 1_900, payerLabel: "Plan R" });
+    await db.insert(schema.claims).values([a, b]);
+    await db.insert(schema.claimPayments).values([
+      payment("920001", { claimId: a.id, amountCents: 4_150, receivedOn: "2026-09-20" }),
+      payment("920001", { claimId: a.id, amountCents: 4_150, receivedOn: "2026-09-27" }),
+      payment("920001", { amountCents: -4_150, receivedOn: "2026-10-02" }),
+    ]);
+    const mine = (await untiedPayments()).lines.filter((l) => l.rxNumber === "920001");
+    assert.deepEqual(mine.map((l) => [l.cause, l.amountCents, l.claims.map((c) => c.id), l.partner]), [["will_attach", -4_150, [a.id], null]]);
+  });
+
+  test("one whose own payment is waiting beside it cancels that payment, and is not given to the claim that holds an equal one", async () => {
+    const a = claim("920002", 1, "2026-09-05", { bin: "610097", remitCents: 4_150, payerLabel: "Plan S" });
+    const b = claim("920002", 1, "2026-09-05", { bin: "004336", remitCents: 4_150, payerLabel: "Plan T" });
+    await db.insert(schema.claims).values([a, b]);
+    await db.insert(schema.claimPayments).values([
+      payment("920002", { claimId: a.id, amountCents: 4_150, receivedOn: "2026-09-20" }),
+      payment("920002", { amountCents: 4_150, receivedOn: "2026-09-27" }),
+      payment("920002", { amountCents: -4_150, receivedOn: "2026-10-02" }),
+    ]);
+    const mine = (await untiedPayments()).lines.filter((l) => l.rxNumber === "920002");
+    assert.deepEqual(mine.map((l) => [l.cause, l.amountCents]).sort(), [["cancels_out", -4_150], ["cancels_out", 4_150]]);
+    assert.ok(mine.every((l) => l.partner !== null && mine.some((o) => o.id === l.partner!.id)));
+  });
+
+  test("the balance screens, asking after these payments, are told the same", async () => {
+    const { causesOf } = await import("../src/lib/untied-payments-store");
+    const rows = [...(await rowsOf("920001")), ...(await rowsOf("920002"))].filter((p) => p.claimId === null);
+    const { causes } = await causesOf(rows);
+    assert.deepEqual(
+      rows.map((p) => [p.rxNumber, p.amountCents, causes.get(p.id)]).sort(),
+      [["920001", -4_150, "will_attach"], ["920002", -4_150, "cancels_out"], ["920002", 4_150, "cancels_out"]],
+    );
+  });
+});

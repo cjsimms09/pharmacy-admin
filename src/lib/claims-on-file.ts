@@ -1,7 +1,7 @@
 import "server-only";
 import { inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { ClaimOnFile } from "./match-remittance";
+import type { ClaimOnFile, TiedPayment } from "./match-remittance";
 
 /** A claim the site holds, as the matcher reads it and as a screen names it. */
 export type ClaimHeld = ClaimOnFile & { itemName: string | null; payerLabel: string | null };
@@ -12,12 +12,35 @@ export async function claimsFeedStartsOn(): Promise<string | null> {
   return from[0] ?? null;
 }
 
+export type ClaimsOnFileOptions = {
+  /** Say on each claim what is tied to it (`tied`), for reading a take-back. Left off, no claim says, and no take-back is matched to one. */
+  withTied?: boolean;
+};
+
+/** The amount and source of every payment tied to each of these claims. */
+async function tiedTo(claimIds: string[]): Promise<Map<string, TiedPayment[]>> {
+  const byClaim = new Map<string, TiedPayment[]>();
+  for (let i = 0; i < claimIds.length; i += 400) {
+    const rows = await db.query.claimPayments.findMany({
+      where: inArray(schema.claimPayments.claimId, claimIds.slice(i, i + 400)),
+      columns: { claimId: true, amountCents: true, source: true },
+    });
+    for (const r of rows) {
+      if (r.claimId === null) continue;
+      const list = byClaim.get(r.claimId) ?? [];
+      list.push({ amountCents: r.amountCents, source: r.source });
+      byClaim.set(r.claimId, list);
+    }
+  }
+  return byClaim;
+}
+
 /**
  * Every claim the site holds for each of the given prescriptions, paid and reversed, in the shape the matcher reads
  * (match-remittance.ts). One place, so the matcher that attaches a payment and the screen that says why one is not
  * attached read the same rows the same way.
  */
-export async function claimsOnFile(rxNumbers: string[]): Promise<Map<string, ClaimHeld[]>> {
+export async function claimsOnFile(rxNumbers: string[], opts: ClaimsOnFileOptions = {}): Promise<Map<string, ClaimHeld[]>> {
   const byRx = new Map<string, ClaimHeld[]>();
   const rx = [...new Set(rxNumbers)];
   for (let i = 0; i < rx.length; i += 400) {
@@ -25,6 +48,7 @@ export async function claimsOnFile(rxNumbers: string[]): Promise<Map<string, Cla
       where: inArray(schema.claims.rxNumber, rx.slice(i, i + 400)),
       columns: { id: true, rxNumber: true, fillNumber: true, dateFilled: true, ndc11: true, status: true, bin: true, remitCents: true, evoucherCents: true, evoucherMessageCents: true, soldOn: true, itemName: true, payerLabel: true },
     });
+    const tied = opts.withTied ? await tiedTo(rows.map((r) => r.id)) : null;
     for (const r of rows) {
       const list = byRx.get(r.rxNumber) ?? [];
       list.push({
@@ -40,6 +64,7 @@ export async function claimsOnFile(rxNumbers: string[]): Promise<Map<string, Cla
         soldOn: r.soldOn,
         itemName: r.itemName,
         payerLabel: r.payerLabel,
+        ...(tied ? { tied: tied.get(r.id) ?? [] } : {}),
       });
       byRx.set(r.rxNumber, list);
     }

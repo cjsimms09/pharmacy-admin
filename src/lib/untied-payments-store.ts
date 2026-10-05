@@ -4,7 +4,7 @@ import { db, schema } from "@/db";
 import { SITE_STARTS_ON } from "./books-start";
 import { claimsFeedStartsOn, claimsOnFile, type ClaimHeld } from "./claims-on-file";
 import { isProgrammePayment } from "./payer-owed";
-import { CAUSES, cancellingPairs, classifyUntied, tallyUntied, untiedHeadline, type CancelPartner, type ClaimBeside, type TallyRow, type UntiedCause, type UntiedPayment } from "./untied-payments";
+import { CAUSES, cancellingPairs, classifyUntied, takeBacksWithPartner, tallyUntied, untiedHeadline, type CancelPartner, type ClaimBeside, type TallyRow, type UntiedCause, type UntiedPayment } from "./untied-payments";
 
 /*
  * Every payment received since the books begin that ties to no claim, and why. Read-only: it changes nothing and decides
@@ -43,14 +43,20 @@ const byNewest = (a: UntiedLine, b: UntiedLine): number =>
   CAUSES.indexOf(a.cause) - CAUSES.indexOf(b.cause) || received(b).localeCompare(received(a)) || pairId(a).localeCompare(pairId(b)) || b.amountCents - a.amountCents;
 
 /** One payment read by the claims the site holds for its prescription, early fills' claims included: one can have come in a later report. */
-function classifyOne(p: UntiedPayment, onFile: Map<string, ClaimHeld[]>, feedFrom: string | null) {
+function classifyOne(p: UntiedPayment, onFile: Map<string, ClaimHeld[]>, feedFrom: string | null, partnerWaiting = false) {
   const held = onFile.get(p.rxNumber) ?? [];
-  return { held, ...classifyUntied(p, held, feedFrom, isProgrammePayment(p)) };
+  return { held, ...classifyUntied(p, held, feedFrom, isProgrammePayment(p), partnerWaiting) };
 }
 
-/** Each payment read by the claims the site holds for it, and then the payments that cancel one another set apart as such, each beside the one that cancels it. */
+/**
+ * Each payment read by the claims the site holds for it, and then the payments that cancel one another set apart as such, each beside the one that cancels it.
+ * `onFile` must say what is tied to each claim (`withTied`), or no take-back is read as belonging to one.
+ */
 function readEach(rows: UntiedPayment[], onFile: Map<string, ClaimHeld[]>, feedFrom: string | null) {
-  const read = rows.map((p) => ({ p, ...classifyOne(p, onFile, feedFrom) }));
+  const first = rows.map((p) => ({ p, ...classifyOne(p, onFile, feedFrom) }));
+  /* A take-back with a payment of its own waiting beside it is that payment's to cancel, and is read so: attaching it reads it the same way (`partnerWaiting`). */
+  const withPartner = takeBacksWithPartner(first.map((r) => ({ ...r.p, cause: r.cause })));
+  const read = first.map((r) => (withPartner.has(r.p.id) ? { p: r.p, ...classifyOne(r.p, onFile, feedFrom, true) } : r));
   const partner = cancellingPairs(read.map((r) => ({ ...r.p, cause: r.cause })));
   const byId = new Map(rows.map((p) => [p.id, p]));
   return read.map((r) => {
@@ -61,7 +67,7 @@ function readEach(rows: UntiedPayment[], onFile: Map<string, ClaimHeld[]>, feedF
 }
 
 async function classifyAll(rows: UntiedPayment[], feedFrom: string | null) {
-  const onFile = await claimsOnFile(rows.map((p) => p.rxNumber));
+  const onFile = await claimsOnFile(rows.map((p) => p.rxNumber), { withTied: true });
   const lines: UntiedLine[] = [];
   const classified: UntiedEach[] = [];
   const before = new Map<string, BeforeFeedRow>();
@@ -86,7 +92,7 @@ async function classifyAll(rows: UntiedPayment[], feedFrom: string | null) {
 /** The cause of each of these payments, read the way the payments-with-no-claim page reads them, so a page that counts them names the same causes. */
 export async function causesOf(rows: UntiedPayment[]): Promise<{ feedFrom: string | null; causes: Map<string, UntiedCause> }> {
   const feedFrom = await claimsFeedStartsOn();
-  const onFile = await claimsOnFile(rows.map((p) => p.rxNumber));
+  const onFile = await claimsOnFile(rows.map((p) => p.rxNumber), { withTied: true });
   /*
    * The payment that cancels one is nearly always on another remittance than its own, so the pairs are read among every payment in the books
    * that is tied to no claim for these prescriptions, the ones given and the ones not.

@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { chooseClaimForRemittance, claimsOfThisFill, verdictOnPrescription, type ClaimCandidate, type ClaimOnFile } from "../src/lib/match-remittance";
+import { chooseClaimForRemittance, claimsOfThisFill, verdictOnPrescription, type ClaimCandidate, type ClaimOnFile, type TiedPayment } from "../src/lib/match-remittance";
 
 /**
  * The owner: "We will be able to match remits with 835s?"
@@ -176,5 +176,119 @@ describe("what the site makes of a payment, given every claim it holds for the p
     assert.deepEqual(claimsOfThisFill([same, near], pays).map((c) => c.id), ["same"]);
     assert.deepEqual(claimsOfThisFill([near], pays).map((c) => c.id), ["near"]);
     assert.deepEqual(claimsOfThisFill([held("month", "reversed", "2026-10-10")], pays), []);
+  });
+});
+
+describe("a take-back is read by what is already tied to the claims it could belong to", () => {
+  /*
+   * A fill billed to two payers is two claims with the same fill, date and drug. A take-back of $41.50 can never equal a remit (a remit is
+   * what a claim is owed), so the amount cannot choose between them. What can: one of the two was paid exactly $41.50, and the take-back
+   * is that payment's.
+   */
+  const back = 4_150;
+  const paid = (amountCents: number, source = "plan"): TiedPayment => ({ amountCents, source });
+  const two = (tiedToPrimary: TiedPayment[] | undefined, tiedToSecondary: TiedPayment[] | undefined = undefined): ClaimCandidate[] => [
+    { ...primary, remitCents: back, tied: tiedToPrimary },
+    { ...secondary, remitCents: 1_900, tied: tiedToSecondary },
+  ];
+  const takes = { ...line, bin: null, amountCents: -back, source: "plan" };
+
+  test("it belongs to the claim whose remit it equals and that was paid that amount", () => {
+    const r = chooseClaimForRemittance(two([paid(back), paid(back)]), takes);
+    assert.equal(r.claim?.id, "primary");
+    assert.equal(r.ambiguous, null);
+  });
+
+  test("where nothing says what is tied, no take-back is matched to either claim", () => {
+    const r = chooseClaimForRemittance(two(undefined), takes);
+    assert.equal(r.claim, null);
+    assert.equal(r.ambiguous?.count, 2);
+  });
+
+  test("it must be the whole of a remit: a take-back no claim's remit equals belongs to neither", () => {
+    const r = chooseClaimForRemittance(two([paid(back), paid(back)]), { ...takes, amountCents: -3_300 });
+    assert.equal(r.claim, null);
+    assert.equal(r.ambiguous?.count, 2);
+    assert.match(r.ambiguous?.why ?? "", /it takes money back, and none of them was paid exactly that amount in full by this source/);
+  });
+
+  test("it must be the whole of a remit: a take-back of a payment that was only part of one is not tied either", () => {
+    const part: ClaimCandidate[] = [
+      { ...primary, remitCents: 6_000, tied: [paid(back)] },
+      { ...secondary, remitCents: 1_900, tied: [] },
+    ];
+    const r = chooseClaimForRemittance(part, takes);
+    assert.equal(r.claim, null);
+    assert.equal(r.ambiguous?.count, 2);
+    assert.match(r.ambiguous?.why ?? "", /takes money back/);
+  });
+
+  test("a line of nothing is no take-back, though a claim of nothing was paid nothing", () => {
+    const none: ClaimCandidate[] = [
+      { ...primary, remitCents: 0, tied: [paid(0)] },
+      { ...secondary, remitCents: 0, tied: [] },
+    ];
+    assert.equal(chooseClaimForRemittance(none, { ...takes, amountCents: 0 }).claim, null);
+  });
+
+  test("a claim that was paid something else, or nothing, is not the one being taken from", () => {
+    assert.equal(chooseClaimForRemittance(two([]), takes).claim, null);
+    assert.equal(chooseClaimForRemittance(two([paid(1_900), paid(back + 100)]), takes).claim, null);
+  });
+
+  test("a take-back reverses a payment of its own source and of no other", () => {
+    const secondaryPaid = two([paid(back, "secondary")]);
+    assert.equal(chooseClaimForRemittance(secondaryPaid, takes).claim, null);
+    assert.equal(chooseClaimForRemittance(secondaryPaid, { ...takes, source: "secondary" }).claim?.id, "primary");
+    assert.equal(chooseClaimForRemittance(two([paid(back)]), { ...takes, source: null }).claim, null);
+    assert.equal(chooseClaimForRemittance(two([paid(back)]), { ...takes, source: undefined }).claim, null);
+  });
+
+  test("a claim already taken back to nothing has nothing left to take back", () => {
+    assert.equal(chooseClaimForRemittance(two([paid(back), paid(-back)]), takes).claim, null);
+  });
+
+  test("paid three times and taken back twice, it can be taken back once more and then no more", () => {
+    const x3 = [paid(back), paid(back), paid(back)];
+    assert.equal(chooseClaimForRemittance(two([...x3]), takes).claim?.id, "primary");
+    assert.equal(chooseClaimForRemittance(two([...x3, paid(-back)]), takes).claim?.id, "primary");
+    assert.equal(chooseClaimForRemittance(two([...x3, paid(-back), paid(-back)]), takes).claim?.id, "primary");
+    assert.equal(chooseClaimForRemittance(two([...x3, paid(-back), paid(-back), paid(-back)]), takes).claim, null);
+  });
+
+  test("a payment of exactly the amount is needed, not merely enough in total", () => {
+    assert.equal(chooseClaimForRemittance(two([paid(2_075), paid(2_075), paid(2_075)]), takes).claim, null);
+  });
+
+  test("two claims equally entitled to it stay ambiguous: neither is chosen over the other", () => {
+    const both: ClaimCandidate[] = [
+      { ...primary, remitCents: back, tied: [paid(back)] },
+      { ...secondary, remitCents: back, tied: [paid(back)] },
+    ];
+    const r = chooseClaimForRemittance(both, takes);
+    assert.equal(r.claim, null);
+    assert.equal(r.ambiguous?.count, 2);
+    assert.match(r.ambiguous?.why ?? "", /it takes money back, and 2 of them were paid exactly that amount in full by this source/);
+  });
+
+  test("a take-back whose own payment is waiting beside it is not given to the other claim that holds an equal payment", () => {
+    const waiting = chooseClaimForRemittance(two([paid(back)]), { ...takes, partnerWaiting: true });
+    assert.equal(waiting.claim, null);
+    assert.match(waiting.ambiguous?.why ?? "", /itself waiting to be attached, so the two cancel/);
+    assert.equal(chooseClaimForRemittance(two([paid(back)]), { ...takes, partnerWaiting: false }).claim?.id, "primary");
+  });
+
+  test("a payment is not read this way: only a take-back is", () => {
+    const r = chooseClaimForRemittance(two([paid(back)]), { ...takes, amountCents: 3_300 });
+    assert.equal(r.claim, null);
+    assert.doesNotMatch(r.ambiguous?.why ?? "", /takes money back/);
+  });
+
+  test("a claim the pharmacy reversed is never offered, whatever is tied to it", () => {
+    const held = (id: string, status: "paid" | "reversed", o: Partial<ClaimOnFile> = {}): ClaimOnFile => ({
+      id, status, fillNumber: 0, dateFilled: "2026-09-03", ndc11: "00093505698", bin: "610455", remitCents: back, soldOn: null, tied: [paid(back)], ...o,
+    });
+    const v = verdictOnPrescription([held("reversed", "reversed"), held("paid-a", "paid"), held("paid-b", "paid", { remitCents: 1_900, tied: [] })], takes);
+    assert.equal(v.kind === "tied" && v.claim.id, "paid-a");
   });
 });

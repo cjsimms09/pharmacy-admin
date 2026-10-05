@@ -92,3 +92,84 @@ describe("what recording a payment makes of the claims on the prescription", () 
     assert.notEqual(row?.claimId, null);
   });
 });
+
+describe("a take-back is attached to the claim that was paid what it takes back", () => {
+  /*
+   * A fill billed to two payers is two claims, and a take-back of $41.50 cannot equal either one's remit. What tells them apart is which was
+   * paid $41.50. Every figure here is invented.
+   */
+  const twoClaims = async (rx: string, remits: [number, number] = [4_150, 1_900]) => {
+    const a = claim(rx, 1, "2026-09-05", { bin: "610097", remitCents: remits[0] });
+    const b = claim(rx, 1, "2026-09-05", { bin: "004336", remitCents: remits[1], pbmName: "Other Plan" });
+    await db.insert(schema.claims).values([a, b]);
+    return { a, b };
+  };
+  const tiedTo = async (claimId: string) => (await db.query.claimPayments.findMany({ where: (t, { eq }) => eq(t.claimId, claimId) })).map((p) => p.amountCents).sort((x, y) => x - y);
+  const take = (rx: string, receivedOn: string, amountCents = -4_150) => pay(rx, 1, "2026-09-05", { amountCents, receivedOn });
+
+  test("it is tied to the claim that was paid that amount, and the other claim is left alone", async () => {
+    const { a, b } = await twoClaims("900710");
+    const paid = await pay("900710", 1, "2026-09-05", { amountCents: 4_150, receivedOn: "2026-09-20" });
+    const again = await pay("900710", 1, "2026-09-05", { amountCents: 4_150, receivedOn: "2026-09-27" });
+    const back = await take("900710", "2026-10-02");
+    assert.deepEqual([paid.matched, again.matched, back.matched, back.ambiguous], [true, true, true, null]);
+    assert.deepEqual(await tiedTo(a.id), [-4_150, 4_150, 4_150]);
+    assert.deepEqual(await tiedTo(b.id), []);
+  });
+
+  test("one claim can be taken back until nothing is left to take back, and then it is refused", async () => {
+    const { a } = await twoClaims("900711");
+    await pay("900711", 1, "2026-09-05", { amountCents: 4_150, receivedOn: "2026-09-20" });
+    await pay("900711", 1, "2026-09-05", { amountCents: 4_150, receivedOn: "2026-09-27" });
+    assert.equal((await take("900711", "2026-10-02")).matched, true);
+    assert.equal((await take("900711", "2026-10-03")).matched, true);
+    const third = await take("900711", "2026-10-04");
+    assert.equal(third.matched, false);
+    assert.equal(third.ambiguous?.count, 2);
+    assert.match(third.ambiguous?.why ?? "", /takes money back/);
+    assert.deepEqual(await tiedTo(a.id), [-4_150, -4_150, 4_150, 4_150]);
+  });
+
+  test("a take-back for a fill nothing was paid on is refused, and says it takes money back", async () => {
+    const { a, b } = await twoClaims("900712");
+    const r = await take("900712", "2026-10-02");
+    assert.deepEqual([r.matched, r.ambiguous?.count], [false, 2]);
+    assert.match(r.ambiguous?.why ?? "", /takes money back/);
+    assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[], []]);
+  });
+
+  test("a take-back of an amount no claim was paid is refused, whatever else was paid", async () => {
+    const { a } = await twoClaims("900713");
+    await pay("900713", 1, "2026-09-05", { amountCents: 4_150, receivedOn: "2026-09-20" });
+    assert.equal((await take("900713", "2026-10-02", -3_300)).matched, false);
+    assert.deepEqual(await tiedTo(a.id), [4_150]);
+  });
+
+  test("a take-back from another source than the payment is not that payment's", async () => {
+    const { a } = await twoClaims("900714");
+    await pay("900714", 1, "2026-09-05", { amountCents: 4_150, receivedOn: "2026-09-20" });
+    const r = await pay("900714", 1, "2026-09-05", { amountCents: -4_150, receivedOn: "2026-10-02", source: "secondary" });
+    assert.equal(r.matched, false);
+    assert.deepEqual(await tiedTo(a.id), [4_150]);
+  });
+
+  test("a take-back that arrived before the payments it takes back is tied by the same sweep that ties them", async () => {
+    const early = await take("900715", "2026-10-02");
+    const one = await pay("900715", 1, "2026-09-05", { amountCents: 4_150, receivedOn: "2026-09-20" });
+    const two = await pay("900715", 1, "2026-09-05", { amountCents: 4_150, receivedOn: "2026-09-27" });
+    assert.deepEqual([early.matched, one.matched, two.matched], [false, false, false]);
+    const { a } = await twoClaims("900715");
+    await matchOrphanPayments();
+    assert.deepEqual(await tiedTo(a.id), [-4_150, 4_150, 4_150]);
+  });
+
+  test("a take-back whose own payment is waiting beside it stays beside that payment, not given to the claim that holds an equal one", async () => {
+    const { a, b } = await twoClaims("900716", [4_150, 4_150]);
+    const bin = await pay("900716", 1, "2026-09-05", { amountCents: 4_150, receivedOn: "2026-09-20", bin: "610097" });
+    const waiting = await pay("900716", 1, "2026-09-05", { amountCents: 4_150, receivedOn: "2026-09-27" });
+    const back = await take("900716", "2026-10-02");
+    assert.deepEqual([bin.matched, waiting.matched, back.matched], [true, false, false]);
+    await matchOrphanPayments();
+    assert.deepEqual([await tiedTo(a.id), await tiedTo(b.id)], [[4_150], []]);
+  });
+});

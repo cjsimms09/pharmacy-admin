@@ -46,11 +46,13 @@ export function isBeforeFeed(p: { dateFilled: string | null }, feedFrom: string 
 }
 
 /**
- * `onFile` is every claim the site holds for the payment's prescription. `feedFrom` is the first day the claims feed covers
- * and `fromProgramme` whether the money is a voucher programme's, both put to the matcher exactly as attaching a payment puts them.
+ * `onFile` is every claim the site holds for the payment's prescription, with what is tied to each where a take-back is to be read
+ * (claims-on-file.ts `withTied`). `feedFrom` is the first day the claims feed covers, `fromProgramme` whether the money is a voucher
+ * programme's, and `partnerWaiting` whether the payment this one takes back is itself waiting (`takeBacksWithPartner`): all put to the
+ * matcher exactly as attaching a payment puts them.
  */
-export function classifyUntied(p: UntiedPayment, onFile: ClaimOnFile[], feedFrom: string | null, fromProgramme: boolean): Classified {
-  const line = { fillNumber: p.fillNumber, dateFilled: p.dateFilled, ndc11: p.ndc11, amountCents: p.amountCents, bin: null, fromProgramme };
+export function classifyUntied(p: UntiedPayment, onFile: ClaimOnFile[], feedFrom: string | null, fromProgramme: boolean, partnerWaiting = false): Classified {
+  const line = { fillNumber: p.fillNumber, dateFilled: p.dateFilled, ndc11: p.ndc11, amountCents: p.amountCents, bin: null, fromProgramme, source: p.source, partnerWaiting };
   const v = verdictOnPrescription(onFile, line);
   /*
    * A fill from before the feed is a group of its own only where the site holds no claim for that fill. A claim for one can come
@@ -71,11 +73,33 @@ export type CancelPartner = Pick<UntiedPayment, "id" | "amountCents" | "received
 
 type CancelCandidate = Pick<UntiedPayment, "id" | "source" | "payer" | "receivedOn" | "amountCents" | "rxNumber" | "fillNumber" | "dateFilled" | "ndc11"> & { cause: UntiedCause };
 
+/** What two payments share when one takes the other back: the fill, the payer, the source and the amount without its sign. */
+export type PairLike = Pick<UntiedPayment, "source" | "payer" | "amountCents" | "rxNumber" | "fillNumber" | "dateFilled" | "ndc11">;
+export const pairKey = (p: PairLike): string => JSON.stringify([p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11, p.source, p.payer, Math.abs(p.amountCents)]);
+const namesAFill = (p: PairLike): boolean => p.fillNumber !== null || p.dateFilled !== null;
+
 /*
  * The causes a payment can be cancelled out of: it is tied to no claim and it names a fill. One that will attach by itself, or is for a fill
  * from before the feed, or names no fill at all, is already said where it belongs.
  */
 const CAN_CANCEL: UntiedCause[] = ["fits_several", "reversed_sold", "no_claim_yet", "other_fills_only", "reversed_not_sold"];
+
+/** The pair keys of the payments given that a take-back could cancel: a payment received, for a named fill. */
+const waitingKeys = (list: PairLike[]): Set<string> => new Set(list.filter((p) => p.amountCents > 0 && namesAFill(p)).map(pairKey));
+
+/**
+ * Whether this take-back has a payment of its own waiting: one of exactly the opposite amount for the same fill, from the same payer by the
+ * same source, itself tied to no claim. `siblings` are the payments tied to no claim for its prescription. Tying the take-back to some other
+ * claim that holds an equal payment would leave this one unpaired and that claim taken back for what it kept (match-remittance.ts
+ * `claimsTakenBackFrom`).
+ */
+export const hasWaitingPartner = (p: PairLike, siblings: PairLike[]): boolean => p.amountCents < 0 && waitingKeys(siblings).has(pairKey(p));
+
+/** The ids of the take-backs in this list that have a payment of their own waiting in it, one a pair can be cancelled out of. */
+export function takeBacksWithPartner(list: (PairLike & { id: string; cause: UntiedCause })[]): Set<string> {
+  const waiting = waitingKeys(list.filter((p) => CAN_CANCEL.includes(p.cause)));
+  return new Set(list.filter((p) => p.amountCents < 0 && waiting.has(pairKey(p))).map((p) => p.id));
+}
 
 /**
  * Which payments cancel one another: a payment, and a take-back of exactly its amount, for one fill: the same prescription, fill number,
@@ -89,8 +113,8 @@ const CAN_CANCEL: UntiedCause[] = ["fits_several", "reversed_sold", "no_claim_ye
 export function cancellingPairs(list: CancelCandidate[]): Map<string, string> {
   const buckets = new Map<string, { payments: CancelCandidate[]; takeBacks: CancelCandidate[] }>();
   for (const p of list) {
-    if (!CAN_CANCEL.includes(p.cause) || (p.fillNumber === null && p.dateFilled === null)) continue;
-    const key = JSON.stringify([p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11, p.source, p.payer, Math.abs(p.amountCents)]);
+    if (!CAN_CANCEL.includes(p.cause) || !namesAFill(p)) continue;
+    const key = pairKey(p);
     const b = buckets.get(key) ?? { payments: [], takeBacks: [] };
     (p.amountCents > 0 ? b.payments : b.takeBacks).push(p);
     buckets.set(key, b);
@@ -224,7 +248,8 @@ export function causeInfo(cause: UntiedCause, feedFrom: string | null): CauseInf
         short: ["that fits two or more claims equally", "that fit two or more claims equally"],
         why:
           "The fill was billed to more than one payer, so two or more claims fit this payment equally. The site keeps no payer BIN on a payment, and neither a manufacturer voucher nor the amount " +
-          "singles one claim out, so it will not guess: a payment attached to the wrong claim makes two claims wrong at once. Until it is attached, the claims it could settle can still show as owed.",
+          "singles one claim out (nor, for a take-back, the payments already attached to them), so it will not guess: a payment attached to the wrong claim makes two claims wrong at once. " +
+          "Until it is attached, the claims it could settle can still show as owed, or, for a take-back, as paid more than they were billed.",
       };
     case "reversed_sold":
       return {

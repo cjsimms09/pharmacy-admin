@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { CAUSES, cancellingPairs, causeInfo, classifyUntied, claimBesideSays, groupsSay, namesSays, needsPhrase, needsSays, partnerSays, sourceSays, sourceToDo, tallyByNeeds, tallyUntied, tiedSays, unattachedSays, unattachedTail, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedCause, type UntiedPayment } from "../src/lib/untied-payments";
+import { CAUSES, cancellingPairs, causeInfo, classifyUntied, claimBesideSays, groupsSay, hasWaitingPartner, namesSays, needsPhrase, needsSays, partnerSays, sourceSays, sourceToDo, takeBacksWithPartner, tallyByNeeds, tallyUntied, tiedSays, unattachedSays, unattachedTail, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedCause, type UntiedPayment } from "../src/lib/untied-payments";
 import type { ClaimOnFile } from "../src/lib/match-remittance";
 
 /*
@@ -220,6 +220,57 @@ describe("payments that cancel one another", () => {
   test("a payment of another fill does not stand in the way of the pair beside it", () => {
     const list = [cand("a", 1_080), cand("other", 1_080, { fillNumber: 2 }), cand("b", -1_080)];
     assert.deepEqual(partners(list), [["a", "b"], ["b", "a"]]);
+  });
+});
+
+describe("a take-back is read by what is tied to the claims beside it", () => {
+  const takes = pay({ id: "tb", amountCents: -4_150, receivedOn: "2026-10-02" });
+  const claims = (tiedToA: { amountCents: number; source: string }[]): ClaimOnFile[] => [
+    held("a", "paid", "2026-09-10", { bin: "610011", remitCents: 4_150, tied: tiedToA }),
+    held("b", "paid", "2026-09-10", { bin: "004336", remitCents: 1_900, tied: [] }),
+  ];
+  const planPaid = { amountCents: 4_150, source: "plan" };
+
+  test("one that takes back the whole of a claim's remit, paid to it, will attach to it", () => {
+    assert.deepEqual(why(takes, claims([planPaid, planPaid])), { cause: "will_attach", claimIds: ["a"] });
+  });
+
+  test("one that no claim was paid is one of several, and names both claims", () => {
+    assert.deepEqual(why(takes, claims([])), { cause: "fits_several", claimIds: ["a", "b"] });
+    assert.deepEqual(why(takes, claims([{ amountCents: 4_150, source: "secondary" }])), { cause: "fits_several", claimIds: ["a", "b"] });
+  });
+
+  test("with its own payment waiting beside it, it is one of several, so that the two can cancel", () => {
+    assert.deepEqual(classifyUntied(takes, claims([planPaid]), FEED, false, true), { cause: "fits_several", claimIds: ["a", "b"] });
+    assert.deepEqual(classifyUntied(takes, claims([planPaid]), FEED, false, false), { cause: "will_attach", claimIds: ["a"] });
+  });
+
+  const cand = (id: string, amountCents: number, o: Partial<UntiedPayment> & { cause?: UntiedCause } = {}) => ({ ...pay({ id, amountCents }), cause: "fits_several" as UntiedCause, ...o });
+
+  test("a take-back has a payment of its own waiting where one of the opposite amount for the fill is tied to no claim and not about to attach", () => {
+    assert.deepEqual([...takeBacksWithPartner([cand("p", 4_150), cand("t", -4_150, { cause: "will_attach" })])], ["t"]);
+    assert.deepEqual([...takeBacksWithPartner([cand("p", 4_150, { cause: "reversed_sold" }), cand("t", -4_150)])], ["t"]);
+    assert.equal(takeBacksWithPartner([cand("p", 4_150, { cause: "will_attach" }), cand("t", -4_150)]).size, 0, "a payment about to attach is not waiting");
+    assert.equal(takeBacksWithPartner([cand("p", 4_150, { cause: "before_feed" }), cand("t", -4_150)]).size, 0);
+  });
+
+  test("anything that makes them two fills, two payers, two sources or two amounts leaves it with none", () => {
+    const apart: Partial<UntiedPayment>[] = [{ rxNumber: "900802" }, { fillNumber: 2 }, { dateFilled: "2026-09-11" }, { ndc11: "00000000002" }, { source: "mtf" }, { payer: "Another Plan" }, { amountCents: -4_149 }];
+    for (const o of apart) assert.equal(takeBacksWithPartner([cand("p", 4_150), cand("t", -4_150, o)]).size, 0, JSON.stringify(o));
+    assert.equal(takeBacksWithPartner([cand("p", 4_150, { fillNumber: null, dateFilled: null }), cand("t", -4_150, { fillNumber: null, dateFilled: null })]).size, 0, "a line naming no fill is never paired");
+  });
+
+  test("a payment, and a payment beside a payment, is not a take-back", () => {
+    assert.equal(takeBacksWithPartner([cand("p", 4_150), cand("q", 4_150)]).size, 0);
+  });
+
+  test("the matcher reads the same payments from the table: tied to no claim, positive, for the fill", () => {
+    const own = { source: "plan", payer: "Invented Plan", amountCents: -4_150, rxNumber: "900801", fillNumber: 1, dateFilled: "2026-09-10", ndc11: "00000000001" };
+    const sibling = { ...own, amountCents: 4_150 };
+    assert.equal(hasWaitingPartner(own, [sibling]), true);
+    assert.equal(hasWaitingPartner(own, []), false);
+    assert.equal(hasWaitingPartner(own, [{ ...sibling, amountCents: 4_000 }, { ...sibling, source: "mtf" }, { ...sibling, fillNumber: 2 }]), false);
+    assert.equal(hasWaitingPartner(sibling, [sibling]), false, "only a take-back has a payment to cancel");
   });
 });
 

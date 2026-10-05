@@ -4,10 +4,10 @@ import "server-only";
 import { originClass, legacyOrigin } from "./payment-origin";
 import nodePath from "node:path";
 import { db, schema } from "@/db";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull } from "drizzle-orm";
 import { newId } from "./crypto";
 import type { LaterPayment } from "./fills";
-import type { TallyRow } from "./untied-payments";
+import { hasWaitingPartner, type TallyRow } from "./untied-payments";
 import { formatCents } from "./money";
 import { todayIso } from "./dates";
 import { isOutOfBooks } from "./books-start";
@@ -88,7 +88,7 @@ export async function recordClaimPayment(p: RecordPayment, user: { name: string 
   if (!rx) throw new Error("A payment has to name the prescription it is for.");
   if (!Number.isFinite(p.amountCents) || p.amountCents === 0) throw new Error("Give the amount received.");
 
-  const { claim, onlyReversed, ambiguous } = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null, Math.round(p.amountCents), p.bin ?? null, isProgrammePayment(p));
+  const { claim, onlyReversed, ambiguous } = await findClaim(rx, p.fillNumber ?? null, p.dateFilled ?? null, p.ndc11 ?? null, Math.round(p.amountCents), p.bin ?? null, isProgrammePayment(p), { source: p.source, payer: p.payer ?? null });
 
   /*
    * The same money through another kind of document is one payment.
@@ -216,9 +216,25 @@ async function findClaim(
   bin: string | null,
   /* True where the money is a voucher programme's, which narrows a coordinated fill to the row carrying the voucher. */
   fromProgramme: boolean,
+  /* Where the money came from. Read only of a take-back, which is matched by what is tied to a claim already. */
+  taking?: { source: string; payer: string | null },
 ): Promise<{ claim: { id: string; fillNumber: number | null; dateFilled: string; ndc11: string | null } | null; onlyReversed: boolean; ambiguous: { count: number; why: string } | null }> {
-  const onFile = (await claimsOnFile([rxNumber])).get(rxNumber) ?? [];
-  const v = verdictOnPrescription(onFile, { fillNumber, dateFilled, ndc11, amountCents, bin, fromProgramme });
+  const takesBack = taking !== undefined && amountCents !== null && amountCents < 0;
+  const onFile = (await claimsOnFile([rxNumber], { withTied: takesBack })).get(rxNumber) ?? [];
+  /*
+   * A payment of the opposite amount for this same fill that is tied to no claim is this take-back's own. Read fresh each time: the payments
+   * ahead of it in a pass have been tied by now.
+   */
+  const partnerWaiting =
+    takesBack &&
+    hasWaitingPartner(
+      { source: taking.source, payer: taking.payer, amountCents, rxNumber, fillNumber, dateFilled, ndc11 },
+      await db.query.claimPayments.findMany({
+        where: and(eq(schema.claimPayments.rxNumber, rxNumber), isNull(schema.claimPayments.claimId), eq(schema.claimPayments.outOfBooks, false), gt(schema.claimPayments.amountCents, 0)),
+        columns: { source: true, payer: true, amountCents: true, rxNumber: true, fillNumber: true, dateFilled: true, ndc11: true },
+      }),
+    );
+  const v = verdictOnPrescription(onFile, { fillNumber, dateFilled, ndc11, amountCents, bin, fromProgramme, source: taking?.source ?? null, partnerWaiting });
   if (v.kind === "tied") return { claim: v.claim, onlyReversed: false, ambiguous: null };
   if (v.kind === "only_reversed") return { claim: null, onlyReversed: true, ambiguous: null };
   if (v.kind === "ambiguous") return { claim: null, onlyReversed: false, ambiguous: { count: v.count, why: v.why } };
@@ -307,7 +323,7 @@ export async function rematchMisattachedPayments(): Promise<{ looked: number; de
   let detached = 0;
   let moved = 0;
   for (const p of far) {
-    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.paidDate, p.ndc11, p.amountCents, null, isProgrammePayment(p));
+    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.paidDate, p.ndc11, p.amountCents, null, isProgrammePayment(p), { source: p.source, payer: p.payer });
     const next = claim?.id ?? null;
     if (next === p.claimId) continue;
     await db.update(schema.claimPayments).set({ claimId: next }).where(eq(schema.claimPayments.id, p.id));
@@ -333,11 +349,13 @@ export async function matchOrphanPayments(): Promise<{ matched: number }> {
    * reaches a figure: the out-of-books flag travels with the row.
    */
   const orphans = await db.query.claimPayments.findMany({ where: isNull(schema.claimPayments.claimId) });
+  /* A take-back is read after every payment: what it takes back may be waiting for its claim in this same pass. */
+  orphans.sort((a, b) => Number(a.amountCents < 0) - Number(b.amountCents < 0));
   let matched = 0;
   for (const p of orphans) {
     // A payment waiting for its claim attaches to a paid one or keeps waiting; it never attaches to
     // a reversed claim, which would take the money out of every figure the moment it landed.
-    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11, p.amountCents, null, isProgrammePayment(p));
+    const { claim } = await findClaim(p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11, p.amountCents, null, isProgrammePayment(p), { source: p.source, payer: p.payer });
     if (!claim) continue;
     await db.update(schema.claimPayments).set({ claimId: claim.id }).where(eq(schema.claimPayments.id, p.id));
     matched++;
