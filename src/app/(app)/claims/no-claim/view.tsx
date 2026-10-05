@@ -1,5 +1,5 @@
 import type { UntiedLine, UntiedPayments } from "@/lib/untied-payments-store";
-import { CAUSES, causeInfo, claimBesideSays, namesSays, needsSays, sourceSays, tallyByNeeds, type ClaimBeside } from "@/lib/untied-payments";
+import { CAUSES, causeInfo, claimBesideSays, namesSays, needsSays, partnerSays, sourceSays, tallyByNeeds, type ClaimBeside } from "@/lib/untied-payments";
 import { fmt } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import { PageHeader, Card, Figure, Notice, Empty } from "@/components/ui";
@@ -46,6 +46,7 @@ function Lines({ lines }: { lines: UntiedLine[] }) {
               <td>
                 <div className="font-medium tabular-nums">Rx {l.rxNumber}</div>
                 <div className="text-xs text-ink-3">{namesSays(l)}</div>
+                {l.partner && <div className="mt-1 text-xs text-ink-2">{partnerSays(l, l.partner)}</div>}
               </td>
               <td>
                 {l.claims.length === 0 ? (

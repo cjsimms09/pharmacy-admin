@@ -192,3 +192,93 @@ describe("the two groups the morning list speaks of", () => {
     assert.equal(some.feedFrom, whole.feedFrom);
   });
 });
+
+describe("payments that cancel one another, read from the database", () => {
+  test("a payment and a take-back of exactly its amount ask for no decision, are listed side by side, and each names the other", async () => {
+    const { tallyByNeeds } = await import("../src/lib/untied-payments");
+    const decide = (r: Awaited<ReturnType<typeof untiedPayments>>) => tallyByNeeds(r.tally).find((g) => g.needs === "decide") ?? { count: 0, cents: 0 };
+    const before = await untiedPayments();
+    await db.insert(schema.claims).values([claim("910060", 1, "2026-09-05", { payerLabel: "Plan K" }), claim("910060", 1, "2026-09-05", { payerLabel: "Plan L", remitCents: 6_000 })]);
+    const paid = payment("910060", { amountCents: 3_000, receivedOn: "2026-09-20" });
+    const back = payment("910060", { amountCents: -3_000, receivedOn: "2026-09-27" });
+    await db.insert(schema.claimPayments).values([paid, back]);
+    const r = await untiedPayments();
+    const mine = r.lines.filter((l) => l.rxNumber === "910060");
+    assert.deepEqual(mine.map((l) => l.cause), ["cancels_out", "cancels_out"]);
+    assert.deepEqual(mine.map((l) => l.id), [paid.id, back.id], "the payment, and then its take-back");
+    assert.deepEqual(mine.map((l) => l.partner), [{ id: back.id, amountCents: -3_000, receivedOn: "2026-09-27" }, { id: paid.id, amountCents: 3_000, receivedOn: "2026-09-20" }]);
+    assert.equal(r.lines.indexOf(mine[1]) - r.lines.indexOf(mine[0]), 1, "side by side");
+    assert.deepEqual(decide(r), decide(before), "two payments that fit two claims equally would have been two decisions");
+    assert.equal(r.total.count, before.total.count + 2);
+    assert.equal(r.total.cents, before.total.cents, "they net to nothing");
+  });
+
+  test("a payment and its take-back on a claim that was reversed and not sold are a pair as well, and a lone payment on such a claim is not", async () => {
+    await db.insert(schema.claims).values([claim("910061", 1, "2026-09-05", { status: "reversed" }), claim("910062", 1, "2026-09-05", { status: "reversed" })]);
+    await db.insert(schema.claimPayments).values([
+      payment("910061", { amountCents: 2_000, receivedOn: "2026-09-12" }),
+      payment("910061", { amountCents: -2_000, receivedOn: "2026-09-26" }),
+      payment("910062", { amountCents: 2_000, receivedOn: "2026-09-12" }),
+    ]);
+    const r = await untiedPayments();
+    assert.deepEqual(r.lines.filter((l) => l.rxNumber === "910061").map((l) => l.cause), ["cancels_out", "cancels_out"]);
+    assert.deepEqual(r.lines.filter((l) => l.rxNumber === "910062").map((l) => [l.cause, l.partner]), [["reversed_not_sold", null]]);
+  });
+
+  test("payments of another amount, from another payer, or two of one sign are not a pair", async () => {
+    await db.insert(schema.claims).values([claim("910063", 1, "2026-09-05", { payerLabel: "Plan M" }), claim("910063", 1, "2026-09-05", { payerLabel: "Plan N", remitCents: 6_000 })]);
+    await db.insert(schema.claimPayments).values([
+      payment("910063", { amountCents: 3_000, receivedOn: "2026-09-20" }),
+      payment("910063", { amountCents: -2_900, receivedOn: "2026-09-27" }),
+      payment("910063", { amountCents: 2_500, receivedOn: "2026-09-21" }),
+      payment("910063", { amountCents: -2_500, receivedOn: "2026-09-28", payer: "Another Plan" }),
+      payment("910063", { amountCents: 2_700, receivedOn: "2026-09-22" }),
+      payment("910063", { amountCents: 2_700, receivedOn: "2026-09-23" }),
+    ]);
+    const mine = (await untiedPayments()).lines.filter((l) => l.rxNumber === "910063");
+    assert.equal(mine.length, 6);
+    assert.ok(mine.every((l) => l.cause === "fits_several" && l.partner === null));
+  });
+
+  test("a payment and a take-back for a fill from before the feed stay among the fills from before the feed", async () => {
+    const before = await untiedPayments();
+    await db.insert(schema.claimPayments).values([
+      payment("910064", { dateFilled: "2026-08-14", amountCents: 2_000 }),
+      payment("910064", { dateFilled: "2026-08-14", amountCents: -2_000, receivedOn: "2026-09-27" }),
+    ]);
+    const r = await untiedPayments();
+    assert.equal(r.lines.some((l) => l.rxNumber === "910064"), false);
+    assert.equal(r.beforeFeed.reduce((n, b) => n + b.count, 0), before.beforeFeed.reduce((n, b) => n + b.count, 0) + 2);
+  });
+
+  test("a balance screen asking after one half of a pair is told the pair's cause, and a payment from before the books begin is read on its own", async () => {
+    const { causesOf } = await import("../src/lib/untied-payments-store");
+    const { eq } = await import("drizzle-orm");
+    const rowsOf = (rx: string) => db.query.claimPayments.findMany({ where: eq(schema.claimPayments.rxNumber, rx) });
+    const paid = (await rowsOf("910060")).find((p) => p.amountCents > 0)!;
+    assert.equal((await causesOf([paid])).causes.get(paid.id), "cancels_out");
+
+    await db.insert(schema.claims).values([claim("910065", 1, "2026-09-05", { payerLabel: "Plan O" }), claim("910065", 1, "2026-09-05", { payerLabel: "Plan P", remitCents: 6_000 })]);
+    await db.insert(schema.claimPayments).values([payment("910065", { amountCents: 3_000 }), payment("910065", { amountCents: -3_000, receivedOn: "2026-08-25", outOfBooks: true })]);
+    const rows = await rowsOf("910065");
+    const { causes } = await causesOf(rows);
+    assert.deepEqual(rows.map((p) => causes.get(p.id)), ["fits_several", "fits_several"], "only payments in the books are paired");
+  });
+
+  test("one source's payments are paired the same, because both halves of a pair come by one source", async () => {
+    const mine = (await untiedPaymentsFrom("plan")).lines.filter((l) => l.rxNumber === "910060");
+    assert.deepEqual(mine.map((l) => l.cause), ["cancels_out", "cancels_out"]);
+    assert.equal((await untiedPaymentsFrom("mtf")).lines.some((l) => l.rxNumber === "910060"), false);
+  });
+
+  test("the pairs are in the tally and the total like every other payment, and every pair nets to nothing", async () => {
+    const r = await untiedPayments();
+    const row = r.tally.find((t) => t.cause === "cancels_out")!;
+    const lines = r.lines.filter((l) => l.cause === "cancels_out");
+    assert.equal(row.count, lines.length);
+    assert.equal(row.count % 2, 0, "two to a pair");
+    assert.equal(row.cents, 0);
+    assert.equal(r.tally.reduce((n, t) => n + t.count, 0), r.total.count);
+    assert.equal(r.tally.reduce((n, t) => n + t.cents, 0), r.total.cents);
+  });
+});

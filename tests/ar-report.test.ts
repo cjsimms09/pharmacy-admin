@@ -406,7 +406,7 @@ describe("the report itself", () => {
     });
 
     test("it never calls such a payment nothing to fix, whatever the reason", () => {
-      const causes = ["fits_several", "reversed_sold", "no_claim_yet", "other_fills_only", "not_a_fill", "will_attach", "reversed_not_sold", "before_feed"] as const;
+      const causes = ["fits_several", "reversed_sold", "no_claim_yet", "other_fills_only", "not_a_fill", "will_attach", "reversed_not_sold", "cancels_out", "before_feed"] as const;
       const r = buildWith(causes.map((cause, i) => paid({ matched: false, cents: 10_00 + i, cause })));
       const text = arReportText(r, "the pharmacy");
       assert.doesNotMatch(text, /MONEY THAT BELONGS TO NO CLAIM|not an error|nothing to fix|real money|from before its records begin|does not hold/i);

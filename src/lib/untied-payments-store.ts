@@ -4,14 +4,14 @@ import { db, schema } from "@/db";
 import { SITE_STARTS_ON } from "./books-start";
 import { claimsFeedStartsOn, claimsOnFile, type ClaimHeld } from "./claims-on-file";
 import { isProgrammePayment } from "./payer-owed";
-import { CAUSES, classifyUntied, tallyUntied, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedCause, type UntiedPayment } from "./untied-payments";
+import { CAUSES, cancellingPairs, classifyUntied, tallyUntied, untiedHeadline, type CancelPartner, type ClaimBeside, type TallyRow, type UntiedCause, type UntiedPayment } from "./untied-payments";
 
 /*
  * Every payment received since the books begin that ties to no claim, and why. Read-only: it changes nothing and decides
  * nothing. The cause is the matcher's own answer (untied-payments.ts), reached the way attaching a payment reaches it.
  */
 
-export type UntiedLine = UntiedPayment & { cause: UntiedCause; claims: ClaimBeside[] };
+export type UntiedLine = UntiedPayment & { cause: UntiedCause; claims: ClaimBeside[]; partner: CancelPartner | null };
 
 /** Payments for fills from before the claims feed, counted by who paid and not listed line by line. */
 export type BeforeFeedRow = { source: string; count: number; cents: number };
@@ -30,8 +30,12 @@ export type UntiedPayments = UntiedReading & { headline: string };
 
 const COLUMNS = { id: true, source: true, payer: true, receivedOn: true, amountCents: true, rxNumber: true, fillNumber: true, dateFilled: true, ndc11: true, reference: true } as const;
 
+/* A pair is listed together: it sorts by the later of its two received dates and then by its own id, the payment before its take-back. */
+const received = (l: UntiedLine): string => (l.partner && (l.partner.receivedOn ?? "") > (l.receivedOn ?? "") ? l.partner.receivedOn : l.receivedOn) ?? "";
+const pairId = (l: UntiedLine): string => (l.partner && l.partner.id < l.id ? l.partner.id : l.id);
+
 const byNewest = (a: UntiedLine, b: UntiedLine): number =>
-  CAUSES.indexOf(a.cause) - CAUSES.indexOf(b.cause) || (b.receivedOn ?? "").localeCompare(a.receivedOn ?? "") || a.id.localeCompare(b.id);
+  CAUSES.indexOf(a.cause) - CAUSES.indexOf(b.cause) || received(b).localeCompare(received(a)) || pairId(a).localeCompare(pairId(b)) || b.amountCents - a.amountCents;
 
 /** One payment read by the claims the site holds for its prescription, early fills' claims included: one can have come in a later report. */
 function classifyOne(p: UntiedPayment, onFile: Map<string, ClaimHeld[]>, feedFrom: string | null) {
@@ -39,13 +43,24 @@ function classifyOne(p: UntiedPayment, onFile: Map<string, ClaimHeld[]>, feedFro
   return { held, ...classifyUntied(p, held, feedFrom, isProgrammePayment(p)) };
 }
 
+/** Each payment read by the claims the site holds for it, and then the payments that cancel one another set apart as such, each beside the one that cancels it. */
+function readEach(rows: UntiedPayment[], onFile: Map<string, ClaimHeld[]>, feedFrom: string | null) {
+  const read = rows.map((p) => ({ p, ...classifyOne(p, onFile, feedFrom) }));
+  const partner = cancellingPairs(read.map((r) => ({ ...r.p, cause: r.cause })));
+  const byId = new Map(rows.map((p) => [p.id, p]));
+  return read.map((r) => {
+    const other = byId.get(partner.get(r.p.id) ?? "");
+    if (!other) return { ...r, partner: null };
+    return { ...r, cause: "cancels_out" as UntiedCause, partner: { id: other.id, amountCents: other.amountCents, receivedOn: other.receivedOn } };
+  });
+}
+
 async function classifyAll(rows: UntiedPayment[], feedFrom: string | null) {
   const onFile = await claimsOnFile(rows.map((p) => p.rxNumber));
   const lines: UntiedLine[] = [];
   const classified: { cause: UntiedCause; amountCents: number }[] = [];
   const before = new Map<string, BeforeFeedRow>();
-  for (const p of rows) {
-    const { held, cause, claimIds } = classifyOne(p, onFile, feedFrom);
+  for (const { p, held, cause, claimIds, partner } of readEach(rows, onFile, feedFrom)) {
     classified.push({ cause, amountCents: p.amountCents });
     if (cause === "before_feed") {
       const b = before.get(p.source) ?? { source: p.source, count: 0, cents: 0 };
@@ -58,7 +73,7 @@ async function classifyAll(rows: UntiedPayment[], feedFrom: string | null) {
       .filter((h) => claimIds.includes(h.id))
       .sort((a, b) => a.dateFilled.localeCompare(b.dateFilled) || (a.fillNumber ?? 0) - (b.fillNumber ?? 0))
       .map((h) => ({ id: h.id, payerLabel: h.payerLabel, itemName: h.itemName, status: h.status, fillNumber: h.fillNumber, dateFilled: h.dateFilled, remitCents: h.remitCents, soldOn: h.soldOn }));
-    lines.push({ ...p, cause, claims });
+    lines.push({ ...p, cause, claims, partner });
   }
   return { lines: lines.sort(byNewest), classified, before };
 }
@@ -67,7 +82,18 @@ async function classifyAll(rows: UntiedPayment[], feedFrom: string | null) {
 export async function causesOf(rows: UntiedPayment[]): Promise<{ feedFrom: string | null; causes: Map<string, UntiedCause> }> {
   const feedFrom = await claimsFeedStartsOn();
   const onFile = await claimsOnFile(rows.map((p) => p.rxNumber));
-  return { feedFrom, causes: new Map(rows.map((p) => [p.id, classifyOne(p, onFile, feedFrom).cause])) };
+  /*
+   * The payment that cancels one is nearly always on another remittance than its own, so the pairs are read among every payment in the books
+   * that is tied to no claim for these prescriptions, the ones given and the ones not.
+   */
+  const wanted = new Set(rows.map((p) => p.rxNumber));
+  const everyone: UntiedPayment[] = (
+    await db.query.claimPayments.findMany({ where: and(isNull(schema.claimPayments.claimId), eq(schema.claimPayments.outOfBooks, false)), columns: COLUMNS })
+  ).filter((p) => wanted.has(p.rxNumber));
+  const causes = new Map<string, UntiedCause>(readEach(everyone, onFile, feedFrom).map((r) => [r.p.id, r.cause]));
+  /* A payment from before the books begin, or tied since it was read, is read on its own: only payments in the books are paired. */
+  for (const p of rows) if (!causes.has(p.id)) causes.set(p.id, classifyOne(p, onFile, feedFrom).cause);
+  return { feedFrom, causes };
 }
 
 async function readUntied(source: string | null): Promise<UntiedReading> {

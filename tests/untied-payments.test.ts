@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { CAUSES, causeInfo, classifyUntied, claimBesideSays, groupsSay, namesSays, needsPhrase, needsSays, sourceSays, sourceToDo, tallyByNeeds, tallyUntied, tiedSays, unattachedSays, unattachedTail, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedPayment } from "../src/lib/untied-payments";
+import { CAUSES, cancellingPairs, causeInfo, classifyUntied, claimBesideSays, groupsSay, namesSays, needsPhrase, needsSays, partnerSays, sourceSays, sourceToDo, tallyByNeeds, tallyUntied, tiedSays, unattachedSays, unattachedTail, untiedCardRow, untiedHeadline, type ClaimBeside, type TallyRow, type UntiedCause, type UntiedPayment } from "../src/lib/untied-payments";
 import type { ClaimOnFile } from "../src/lib/match-remittance";
 
 /*
@@ -152,7 +152,85 @@ describe("what each cause says", () => {
 
   test("what needs a decision and what needs nothing", () => {
     assert.deepEqual(CAUSES.filter((c) => causeInfo(c, FEED).needs === "decide"), ["fits_several", "reversed_sold"]);
-    assert.deepEqual(CAUSES.filter((c) => causeInfo(c, FEED).needs === "nothing"), ["reversed_not_sold", "before_feed"]);
+    assert.deepEqual(CAUSES.filter((c) => causeInfo(c, FEED).needs === "nothing"), ["reversed_not_sold", "cancels_out", "before_feed"]);
+  });
+
+  test("a pair that cancels asks nothing of anyone, and says why the site ties neither to a claim", () => {
+    const i = causeInfo("cancels_out", FEED);
+    assert.equal(i.needs, "nothing");
+    assert.match(i.asks, /^Nothing/);
+    assert.match(i.why, /together they move no claim's balance/);
+    assert.match(i.why, /does not tie them to a claim they fit/);
+  });
+});
+
+describe("payments that cancel one another", () => {
+  const cand = (id: string, amountCents: number, o: Partial<UntiedPayment> & { cause?: UntiedCause } = {}) => ({ ...pay({ id, amountCents }), cause: "fits_several" as UntiedCause, ...o });
+  const partners = (list: ReturnType<typeof cand>[]) => [...cancellingPairs(list)].sort();
+
+  test("a payment and a take-back of exactly its amount for one fill are each other's partner, whichever arrived first", () => {
+    assert.deepEqual(partners([cand("a", 1_080, { receivedOn: "2026-09-20" }), cand("b", -1_080, { receivedOn: "2026-09-27" })]), [["a", "b"], ["b", "a"]]);
+    assert.deepEqual(partners([cand("a", 1_080, { receivedOn: "2026-09-27" }), cand("b", -1_080, { receivedOn: "2026-09-20" })]), [["a", "b"], ["b", "a"]]);
+  });
+
+  test("anything that makes them two fills, two payers or two amounts makes them no pair", () => {
+    const apart: Partial<UntiedPayment>[] = [{ rxNumber: "900802" }, { fillNumber: 2 }, { dateFilled: "2026-09-11" }, { ndc11: "00000000002" }, { source: "mtf" }, { payer: "Another Plan" }, { amountCents: -1_079 }];
+    for (const o of apart) assert.equal(cancellingPairs([cand("a", 1_080), cand("b", -1_080, o)]).size, 0, JSON.stringify(o));
+  });
+
+  test("two payments of one sign are no pair, and a lone payment is none", () => {
+    assert.equal(cancellingPairs([cand("a", 1_080), cand("b", 1_080)]).size, 0);
+    assert.equal(cancellingPairs([cand("a", -1_080), cand("b", -1_080)]).size, 0);
+    assert.equal(cancellingPairs([cand("a", 1_080)]).size, 0);
+    assert.equal(cancellingPairs([]).size, 0);
+  });
+
+  test("only a payment tied to no claim for a fill it names can be cancelled: one that will attach, one from before the feed and one naming no fill are already said where they belong", () => {
+    for (const cause of ["will_attach", "before_feed", "not_a_fill"] as const) {
+      assert.equal(cancellingPairs([cand("a", 1_080, { cause }), cand("b", -1_080, { cause })]).size, 0, cause);
+    }
+    for (const cause of ["fits_several", "reversed_sold", "no_claim_yet", "other_fills_only", "reversed_not_sold"] as const) {
+      assert.equal(cancellingPairs([cand("a", 1_080, { cause }), cand("b", -1_080, { cause })]).size, 2, cause);
+    }
+    assert.equal(cancellingPairs([cand("a", 1_080, { cause: "will_attach" }), cand("b", -1_080)]).size, 0, "the half that will attach settles its claim, and is no partner");
+  });
+
+  test("a line that names neither a fill number nor a fill date is never paired: the drug alone does not tell two refills apart", () => {
+    assert.equal(cancellingPairs([cand("a", 1_080, { fillNumber: null, dateFilled: null }), cand("b", -1_080, { fillNumber: null, dateFilled: null })]).size, 0);
+    assert.equal(cancellingPairs([cand("a", 1_080, { fillNumber: null }), cand("b", -1_080, { fillNumber: null })]).size, 2);
+    assert.equal(cancellingPairs([cand("a", 1_080, { dateFilled: null }), cand("b", -1_080, { dateFilled: null })]).size, 2);
+  });
+
+  test("a payment of nothing is neither a payment nor a take-back", () => {
+    assert.equal(cancellingPairs([cand("a", 0), cand("b", 0)]).size, 0);
+  });
+
+  test("each take-back cancels one payment, the oldest first: three payments and one take-back leave two", () => {
+    const list = [
+      cand("p3", 1_000, { receivedOn: "2026-09-20" }),
+      cand("t1", -1_000, { receivedOn: "2026-09-25" }),
+      cand("p1", 1_000, { receivedOn: "2026-09-01" }),
+      cand("p2", 1_000, { receivedOn: "2026-09-10" }),
+    ];
+    assert.deepEqual(partners(list), [["p1", "t1"], ["t1", "p1"]]);
+    assert.deepEqual(partners([...list].reverse()), partners(list), "the order they are given in changes nothing");
+    assert.deepEqual(partners([...list, cand("t2", -1_000, { receivedOn: "2026-09-26" })]), [["p1", "t1"], ["p2", "t2"], ["t1", "p1"], ["t2", "p2"]]);
+  });
+
+  test("a payment of another fill does not stand in the way of the pair beside it", () => {
+    const list = [cand("a", 1_080), cand("other", 1_080, { fillNumber: 2 }), cand("b", -1_080)];
+    assert.deepEqual(partners(list), [["a", "b"], ["b", "a"]]);
+  });
+});
+
+describe("what a line says of the payment that cancels it", () => {
+  test("a take-back says whom it takes back, and a payment says that it was taken back, each with the date the other was received", () => {
+    assert.equal(partnerSays({ amountCents: -1_080 }, { id: "a", amountCents: 1_080, receivedOn: "2026-09-20" }), "Takes back in full the $10.80 received Sep 20, 2026.");
+    assert.equal(partnerSays({ amountCents: 1_080 }, { id: "b", amountCents: -1_080, receivedOn: "2026-09-27" }), "Taken back in full: -$10.80 received Sep 27, 2026.");
+  });
+
+  test("says it plainly where the other has no received date", () => {
+    assert.equal(partnerSays({ amountCents: 1_080 }, { id: "b", amountCents: -1_080, receivedOn: null }), "Taken back in full: -$10.80 with no received date.");
   });
 });
 
@@ -218,6 +296,10 @@ describe("the groups of a person's attention", () => {
     assert.deepEqual(tallyByNeeds([{ cause: "not_a_fill", count: 2, cents: 300 }, { cause: "before_feed", count: 9, cents: 9_999 }]), [{ needs: "look", count: 2, cents: 300 }]);
     assert.deepEqual(tallyByNeeds([{ cause: "before_feed", count: 9, cents: 9_999 }]), []);
     assert.equal(tallyByNeeds(rows).reduce((n, r) => n + r.count, 0), rows.filter((r) => r.cause !== "before_feed").reduce((n, r) => n + r.count, 0));
+  });
+
+  test("a pair that cancels is counted with the others that need nothing", () => {
+    assert.deepEqual(tallyByNeeds([{ cause: "cancels_out", count: 18, cents: 0 }, { cause: "reversed_not_sold", count: 31, cents: 100 }]), [{ needs: "nothing", count: 49, cents: 100 }]);
   });
 
   test("are said in a line a person can read at a glance", () => {

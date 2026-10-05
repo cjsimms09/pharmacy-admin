@@ -24,7 +24,7 @@ export type UntiedPayment = {
 };
 
 /** From the causes that need a person to the ones that need nothing: the order every screen lists them in. */
-export const CAUSES = ["fits_several", "reversed_sold", "no_claim_yet", "other_fills_only", "not_a_fill", "will_attach", "reversed_not_sold", "before_feed"] as const;
+export const CAUSES = ["fits_several", "reversed_sold", "no_claim_yet", "other_fills_only", "not_a_fill", "will_attach", "reversed_not_sold", "cancels_out", "before_feed"] as const;
 export type UntiedCause = (typeof CAUSES)[number];
 
 /** What a cause asks of a person: a decision, a look, patience, or nothing. */
@@ -64,6 +64,54 @@ export function classifyUntied(p: UntiedPayment, onFile: ClaimOnFile[], feedFrom
   const fill = v.kind === "only_reversed" ? v.fill : v.reversedFill;
   if (fill.length === 0) return early ? { cause: "before_feed", claimIds: [] } : { cause: "other_fills_only", claimIds: onFile.map((c) => c.id) };
   return { cause: fill.some((c) => c.soldOn) ? "reversed_sold" : "reversed_not_sold", claimIds: fill.map((c) => c.id) };
+}
+
+/** The payment that cancels another, enough to name it beside the other. */
+export type CancelPartner = Pick<UntiedPayment, "id" | "amountCents" | "receivedOn">;
+
+type CancelCandidate = Pick<UntiedPayment, "id" | "source" | "payer" | "receivedOn" | "amountCents" | "rxNumber" | "fillNumber" | "dateFilled" | "ndc11"> & { cause: UntiedCause };
+
+/*
+ * The causes a payment can be cancelled out of: it is tied to no claim and it names a fill. One that will attach by itself, or is for a fill
+ * from before the feed, or names no fill at all, is already said where it belongs.
+ */
+const CAN_CANCEL: UntiedCause[] = ["fits_several", "reversed_sold", "no_claim_yet", "other_fills_only", "reversed_not_sold"];
+
+/**
+ * Which payments cancel one another: a payment, and a take-back of exactly its amount, for one fill: the same prescription, fill number,
+ * fill date and drug, from the same payer by the same source. The payer is where it started, so together they move no balance and nobody has
+ * anything to decide about either. Each take-back cancels one payment, the oldest first: three payments and
+ * one take-back of an amount leave two payments, not none. Returns the id of each paired payment mapped to its partner's.
+ *
+ * The site stores no BIN on a payment, so one plan's payment and take-back for a fill cannot be told from two plans' of the same amounts. The sums
+ * are the same either way, and a payment tied to no claim is in no payer's balance.
+ */
+export function cancellingPairs(list: CancelCandidate[]): Map<string, string> {
+  const buckets = new Map<string, { payments: CancelCandidate[]; takeBacks: CancelCandidate[] }>();
+  for (const p of list) {
+    if (!CAN_CANCEL.includes(p.cause) || (p.fillNumber === null && p.dateFilled === null)) continue;
+    const key = JSON.stringify([p.rxNumber, p.fillNumber, p.dateFilled, p.ndc11, p.source, p.payer, Math.abs(p.amountCents)]);
+    const b = buckets.get(key) ?? { payments: [], takeBacks: [] };
+    (p.amountCents > 0 ? b.payments : b.takeBacks).push(p);
+    buckets.set(key, b);
+  }
+  const oldest = (a: CancelCandidate, b: CancelCandidate) => (a.receivedOn ?? "").localeCompare(b.receivedOn ?? "") || a.id.localeCompare(b.id);
+  const partner = new Map<string, string>();
+  for (const { payments: paid, takeBacks } of buckets.values()) {
+    paid.sort(oldest);
+    takeBacks.sort(oldest);
+    for (let i = 0; i < Math.min(paid.length, takeBacks.length); i++) {
+      partner.set(paid[i].id, takeBacks[i].id);
+      partner.set(takeBacks[i].id, paid[i].id);
+    }
+  }
+  return partner;
+}
+
+/** What a line says of the payment that cancels it, so a person reads the pair without hunting for its other half. */
+export function partnerSays(own: Pick<UntiedPayment, "amountCents">, partner: CancelPartner): string {
+  const when = partner.receivedOn ? `received ${fmt(partner.receivedOn)}` : "with no received date";
+  return own.amountCents < 0 ? `Takes back in full the ${formatCents(partner.amountCents)} ${when}.` : `Taken back in full: ${formatCents(partner.amountCents)} ${when}.`;
 }
 
 export type TallyRow = { cause: UntiedCause; count: number; cents: number };
@@ -233,6 +281,17 @@ export function causeInfo(cause: UntiedCause, feedFrom: string | null): CauseInf
         why:
           "Every claim the site holds for this fill was reversed, and none carries a sale date. A payer that paid a claim nobody collected can be expected to take the money back, " +
           "usually on a later remittance as a negative line. The cash account's note on money banked for prescriptions nobody collected is this situation.",
+      };
+    case "cancels_out":
+      return {
+        label: "Cancelled by a take-back of exactly its amount",
+        needs: "nothing",
+        asks: "Nothing. Together they change no balance.",
+        short: ["that is cancelled by a payment of exactly the opposite amount for the same fill", "that are cancelled by payments of exactly the opposite amount for the same fill"],
+        why:
+          "A payment, and a take-back of exactly its amount, for the same fill: the same prescription, fill and drug, from the same payer by the same kind of remittance. The payer is where it started, " +
+          "so there is nothing to attach and nothing to decide, and together they move no claim's balance. The site does not tie them to a claim they fit, " +
+          "because a payment tied to a claim it merely resembles makes two claims wrong at once.",
       };
     case "before_feed":
       return {
