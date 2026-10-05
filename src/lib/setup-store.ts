@@ -1,5 +1,5 @@
 import "server-only";
-import { setupItems, ranked, stopsCount, type SetupInput, type SetupItem } from "./setup-checklist";
+import { setupItems, ranked, stopsCount, withoutRetired, type SetupInput, type SetupItem } from "./setup-checklist";
 
 /**
  * What the setup list reads.
@@ -190,7 +190,7 @@ async function loadSetup(): Promise<SetupItem[]> {
   if (!(s.pharmacy_registration_number ?? "").trim()) identityMissing.push("the Kansas registration number");
   if (!(s.pharmacy_address ?? "").trim()) identityMissing.push("the address");
 
-  return setupItems({
+  const items = setupItems({
     aiReady,
     mail: { configured: mailConfigured, enabled: s.mail_enabled === "yes", autoImport: s.mail_auto_import === "yes" },
     feeds,
@@ -207,4 +207,5 @@ async function loadSetup(): Promise<SetupItem[]> {
     ksFeeEntered: Boolean((s.ks_medicaid_dispensing_fee_cents ?? "").trim()),
     contracts,
   });
+  return withoutRetired(items);
 }

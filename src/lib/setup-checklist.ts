@@ -20,6 +20,8 @@
  * gathers what it reads.
  */
 
+import { isRetired } from "./retired";
+
 export type SetupRank = "stops" | "sharpens" | "later";
 
 export type SetupItem = {
@@ -462,4 +464,13 @@ export function ranked(items: SetupItem[]): {
  */
 export function stopsCount(items: SetupItem[]): number {
   return items.filter((i) => !i.done && !i.notApplicable && i.rank === "stops").length;
+}
+
+/**
+ * The list with the work on the pages he retired on 2 October taken out. Each item sends him to do its work at `href`, and an address that now says
+ * "retired" is not a place to do anything: three items not yet done were that (the plans, the column a plan is paid on, the contracts), and one of
+ * them counted among the things that stop something. The data stays and the work is not lost; it is not asked of him.
+ */
+export function withoutRetired(items: SetupItem[]): SetupItem[] {
+  return items.filter((i) => !isRetired(i.href.split(/[?#]/)[0]));
 }

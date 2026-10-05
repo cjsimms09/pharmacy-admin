@@ -248,7 +248,7 @@ async function load(today: string): Promise<ExpectedNow> {
       everCount: t.onHand.n + route("on_hand").n,
       expected: true,
       arrivals: [...onHandDays, ...route("on_hand").days],
-      href: "/purchasing/shelf",
+      href: null,
     },
     {
       key: "rx_transactions",
@@ -293,7 +293,7 @@ async function load(today: string): Promise<ExpectedNow> {
       everCount: route("purchase_drilldown").n,
       expected: true,
       arrivals: route("purchase_drilldown").days,
-      href: "/purchasing",
+      href: "/suppliers",
     },
 
     // ── Weekly ──
@@ -308,7 +308,7 @@ async function load(today: string): Promise<ExpectedNow> {
       everCount: t.nadac.n,
       expected: true,
       arrivals: nadacDays,
-      href: "/nadac",
+      href: null,
     },
     {
       key: "catalogue",
@@ -321,7 +321,7 @@ async function load(today: string): Promise<ExpectedNow> {
       everCount: t.catalogue.n + route("pioneer_catalog").n,
       expected: true,
       arrivals: [...catalogueDays, ...route("pioneer_catalog").days],
-      href: "/purchasing",
+      href: "/suppliers",
     },
 
     // ── Monthly, and not expected a day before their date ──
@@ -350,7 +350,7 @@ async function load(today: string): Promise<ExpectedNow> {
       expected: true,
       note: "He collects this at the end of the month; nothing chases it before then.",
       arrivals: bankDays,
-      href: "/money/bank",
+      href: "/money/bank-review",
     },
     {
       key: "wells_fargo_account",
@@ -581,7 +581,7 @@ async function load(today: string): Promise<ExpectedNow> {
       everCount: route("mck_returns").n,
       expected: true,
       arrivals: route("mck_returns").days,
-      href: "/purchasing",
+      href: null,
     },
   ];
 

@@ -43,7 +43,8 @@ export type Feed = {
   proof: string | null;
   /** The live check against the outside, when one was run. */
   probe: { ok: boolean; says: string } | null;
-  href: string;
+  /** A page that shows this feed's data. Null where no page does, which is said and not pointed at a page that has been retired. */
+  href: string | null;
   /**
    * A row that reports a state of affairs rather than a thing to go and do.
    *
@@ -184,7 +185,7 @@ async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds
             : `${pct(numberedBy.get(key) ?? 0, items)} of items carry the supplier's item number, which is what an order line is keyed by; ${pct(awpBy.get(key) ?? 0, items)} carry an AWP, which is what an AWP-paid claim is priced on.`
           : null,
         probe: null,
-        href: "/purchasing",
+        href: "/suppliers",
       });
     }
 
@@ -229,7 +230,7 @@ async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds
       detail: held ? `Newest file held is dated ${held}, ${n.toLocaleString()} NDCs.` : "No NADAC file is loaded.",
       proof: s.nadac_last_result ? `Last pull: ${s.nadac_last_result}` : null,
       probe,
-      href: "/nadac",
+      href: null,
     });
   }
 
@@ -325,7 +326,7 @@ async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds
       detail: lastAt ? `Counted ${lastAt}.` : "No count has been uploaded, so nothing can be told short.",
       proof: null,
       probe: null,
-      href: "/purchasing/shelf",
+      href: null,
     });
   }
 

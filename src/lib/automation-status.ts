@@ -202,7 +202,7 @@ export async function automationStatus(): Promise<JobStatus[]> {
         detail: last
           ? `Last catalogue loaded ${last.slice(0, 10)}.`
           : "No supplier catalogue has arrived yet. The PioneerRx export is scheduled for Mondays; it files itself when it lands.",
-        href: "/purchasing",
+        href: "/settings/feeds",
       });
     }
   }
@@ -228,7 +228,7 @@ export async function automationStatus(): Promise<JobStatus[]> {
       detail: auto
         ? (s.nadac_last_result ?? "Switched on, but it has not run yet.")
         : "Automatic pulls are off, so the weekly price history is not being collected.",
-      href: "/nadac",
+      href: "/settings/feeds",
     });
   }
 

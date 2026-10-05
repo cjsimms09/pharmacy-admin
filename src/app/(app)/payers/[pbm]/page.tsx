@@ -49,13 +49,7 @@ export default async function PayerPage({ params }: { params: Promise<{ pbm: str
         title={name}
         subtitle={[p.bins.length ? `${p.bins.length} BIN${p.bins.length === 1 ? "" : "s"} on the listing` : "Not on the BIN listing", `${p.docs.length} document${p.docs.length === 1 ? "" : "s"} on file, ${read} read`].join(" · ")}
         back={{ href: "/payers", label: "Payers" }}
-        actions={
-          <>
-            <Link href={`/claims?payer=${encodeURIComponent(name)}`} className="btn">Claims</Link>
-            <Link href="/claims/appeals" className="btn">Appeals</Link>
-            <Link href="/payers/contracts" className="btn btn-primary">The contracts</Link>
-          </>
-        }
+        actions={<Link href={`/claims?payer=${encodeURIComponent(name)}`} className="btn">Claims</Link>}
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -130,7 +124,7 @@ export default async function PayerPage({ params }: { params: Promise<{ pbm: str
               {file.documents.map((d) => (
                 <tr key={d.id}>
                   <td>
-                    <Link href={`/payers/contracts/${d.id}`} className="font-medium hover:underline">{d.name}</Link>
+                    <span className="font-medium">{d.name}</span>
                     {d.title && d.title !== d.name && <span className="block text-xs text-ink-3">{d.title}</span>}
                     {d.parent && <span className="block text-xs text-ink-3">attaches to {d.parent}</span>}
                   </td>
@@ -351,7 +345,6 @@ export default async function PayerPage({ params }: { params: Promise<{ pbm: str
             {file.unanswered.map((u, i) => (
               <li key={i} className="row">
                 <span className="min-w-0"><span className="row-title">{u.what}</span><span className="row-why block">{u.doc}</span></span>
-                <Link href={`/payers/contracts/${u.docId}`} className="btn btn-sm">Open</Link>
               </li>
             ))}
           </ul>
@@ -406,7 +399,7 @@ function RateTable({ rows }: { rows: Awaited<ReturnType<typeof pbmProfile>>["rat
 function Says({ from }: { from: CounterpartyFile["clocks"][number]["from"] }) {
   return (
     <span className="block max-w-[18rem] text-xs text-ink-3" title={from.quote ? `“${from.quote}”${from.page ? ` — p.${from.page}` : ""}${from.section ? ` ${from.section}` : ""}` : undefined}>
-      <Link href={`/payers/contracts/${from.docId}`} className="hover:underline">{from.doc}</Link>
+      <span>{from.doc}</span>
       {from.quote && <span className="block truncate italic">“{from.quote}”</span>}
     </span>
   );

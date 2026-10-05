@@ -596,7 +596,7 @@ export function feedsInTheBooks(): Feed[] {
       how: "The order is an email and carries no price; the vendor's invoice does, and lands as an ordinary bill on Spending.",
       gap: "Deliberate. Booking the order would be inventing a figure. The month's account names the orders it has left out.",
       deliberate: true,
-      href: "/purchasing/supplies",
+      href: "/expenses",
     },
     {
       name: "The reconciliation service's adjustment report",

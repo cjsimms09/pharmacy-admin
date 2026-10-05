@@ -314,14 +314,9 @@ export default async function ClaimsPage({
         title="Claims"
         subtitle="Dispensing and adjudication detail from PioneerRx, matched to the payer that priced it."
         actions={
-          <>
-            <Link href="/payers/performance" className="btn">Who pays best</Link>
-            <Link href="/claims/floor" className="btn">Paid under the floor</Link>
-            <Link href="/plans" className="btn">Classify plans</Link>
-            <form action={recheckEverything}>
-              <SubmitButton className="btn" pendingLabel="Rechecking…">Recheck every claim held</SubmitButton>
-            </form>
-          </>
+          <form action={recheckEverything}>
+            <SubmitButton className="btn" pendingLabel="Rechecking…">Recheck every claim held</SubmitButton>
+          </form>
         }
       />
 
@@ -405,8 +400,6 @@ export default async function ClaimsPage({
                 tone: "crit" as const,
                 amount: formatCents(flags.remits.shortCents),
                 title: `paid short of what was adjudicated — ${flags.remits.short.length} fill${flags.remits.short.length === 1 ? "" : "s"} on the plans' own remittances`,
-                href: "/claims/appeals",
-                action: "Appeal",
                 why: `The plan's 835 paid less than the claim adjudicated for. Worst is Rx ${flags.remits.short[0].rxNumber}${flags.remits.short[0].fillNumber !== null ? `-${flags.remits.short[0].fillNumber}` : ""}${flags.remits.short[0].itemName ? ` (${flags.remits.short[0].itemName})` : ""}: adjudicated ${formatCents(flags.remits.short[0].adjudicatedCents)}, paid ${formatCents(flags.remits.short[0].paidCents)} by ${flags.remits.short[0].payer ?? "the plan"}.`,
               }
             : null,
@@ -475,8 +468,6 @@ export default async function ClaimsPage({
                 tone: "warn" as const,
                 amount: formatCents(flags.underFeeUndeterminedShortfallCents),
                 title: `may or may not be owed — ${flags.undetermined} claims on plans nobody has classified`,
-                href: "/plans",
-                action: "Classify",
                 why: "A low payment is only a shortfall on a plan the Kansas floor reaches; on a cash discount programme it is simply the price. Until each plan is told apart, nothing here can be claimed or dismissed.",
               }
             : null,
@@ -798,9 +789,7 @@ export default async function ClaimsPage({
                   </b>{" "}
                   Whether that is money owed or simply the price depends entirely on what kind of plan it is: the Kansas
                   floor reaches a commercial or governmental plan and does not reach a discount card. Nothing can be
-                  claimed until they are told apart.{" "}
-                  <Link href="/plans" className="font-medium underline">Classify these plans</Link> and every one of
-                  these rows answers itself.
+                  claimed until they are told apart.
                   <details className="mt-2">
                     <summary className="cursor-pointer text-ink-3">Show the {unsettled.length} dispensings</summary>
                     <div className="mt-2"><NadacTable rows={unsettled} /></div>

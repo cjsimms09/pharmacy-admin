@@ -173,9 +173,13 @@ function Row({ r, now }: { r: Judged; now: Date }) {
         </span>
       </td>
       <td>
-        <Link href={r.href} className="font-medium text-ink hover:underline">
-          {r.label}
-        </Link>
+        {r.href ? (
+          <Link href={r.href} className="font-medium text-ink hover:underline">
+            {r.label}
+          </Link>
+        ) : (
+          <span className="font-medium text-ink">{r.label}</span>
+        )}
         {needsDoing && <div className="mt-0.5 text-xs leading-snug text-ink-2">{r.says}</div>}
       </td>
       <td className="truncate text-xs text-ink-2">{r.from}</td>

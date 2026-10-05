@@ -530,7 +530,7 @@ export default async function SupplierTermsPage({
           <p className="mt-3 text-sm text-ink-3">
             The buy list will hold an order to {supplier.name} until it reaches {formatCents(supplier.minimumOrderCents)},
             and will offer to fill the gap with the drugs this supplier is cheapest on that move fast enough to be worth
-            buying deep. <Link href="/purchasing" className="underline">See what it would order today</Link>.
+            buying deep.
           </p>
         )}
       </Card>

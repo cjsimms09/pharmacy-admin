@@ -1603,7 +1603,7 @@ export async function excludedFromAccount(month: string): Promise<AccountExclusi
         why:
           "The order is an email; the price arrives on the vendor's invoice afterwards. Booking the order would be " +
           "inventing a figure. Record the invoice under Spending when it comes and it lands in this month's account.",
-        href: "/purchasing/supplies",
+        href: "/expenses",
       });
     }
   } catch {

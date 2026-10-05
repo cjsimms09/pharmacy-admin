@@ -603,9 +603,10 @@ export async function alerts(): Promise<Alert[]> {
             (s.nadac_last_result ? `${s.nadac_last_result} ` : "") +
             "Each weekly file from CMS holds only the prices in force that week, so a month not collected cannot " +
             "be fetched later — the current file has forgotten it. It is a free public download needing no account. " +
-            "Open the page and press Fetch now; if CMS has moved the file, paste the new address in the box there.",
-          href: "/nadac",
-          action: "Fetch it",
+            "The page that fetched it by hand was retired on 2 October, so there is no button for this now: " +
+            "a download that has stopped is fixed in the site, not on a screen.",
+          href: "/settings/feeds",
+          action: "See the feed",
         });
       }
     }

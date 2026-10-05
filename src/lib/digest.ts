@@ -162,7 +162,7 @@ export async function buildDigest(): Promise<Digest> {
         ? `MONEY YOU CAN STILL GET BACK (${returns.lines.length}) — ${formatCents(returns.atRiskCents)} of credit goes if nothing is done`
         : `MONEY YOU CAN STILL GET BACK (${returns.lines.length}) — ${formatCents(returns.sendBackWorthCents)} on the shelf, on a clock`;
     section(heading, returns.lines.slice(0, 15).map((l) => l.says));
-    if (returns.lines.length > 15) parts.push(`  … and ${returns.lines.length - 15} more on ${link("/purchasing/return-soon")}.`, "");
+    if (returns.lines.length > 15) parts.push(`  … and ${returns.lines.length - 15} more that this email does not list. The page that listed them was retired on 2 October.`, "");
   }
 
   section(`COMING UP IN THE NEXT ${HORIZON_DAYS} DAYS (${soon.length})`, soon.slice(0, 20));
@@ -181,7 +181,6 @@ export async function buildDigest(): Promise<Digest> {
     "Open the desk:",
     `  What needs you    ${link("/")}`,
     `  If they walked in ${link("/inspection")}`,
-    ...(returns ? [`  What to send back ${link("/purchasing/return-soon")}`] : []),
     "",
     "This goes out once a week, and only when there is something in it.",
   );

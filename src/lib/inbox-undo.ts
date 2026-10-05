@@ -90,7 +90,6 @@ const EFFECTS: Record<string, KindEffect> = {
     reversal: "replaced",
     leaves:
       "the count it filed stands as that day's shelf until a real count for the same date replaces it. It files nothing at all if the file prints no date.",
-    at: { href: "/inventory", label: "Inventory" },
   },
   payer_payments: {
     short: "banks money",
@@ -104,21 +103,19 @@ const EFFECTS: Record<string, KindEffect> = {
     writes: "the month's takings, replacing whatever was held for that month",
     reversal: "replaced",
     leaves: "it stands as that month's takings until the correct summary for the same month replaces it.",
-    at: { href: "/reports", label: "Reports" },
+    at: { href: "/money", label: "Money" },
   },
   pioneer_catalog: {
     short: "reprices NDCs",
     writes: "prices and pack sizes against the NDCs in the file, for the supplier the file names",
     reversal: "replaced",
     leaves: "the prices it wrote stand until that supplier's next catalogue reprices the same NDCs, which is daily.",
-    at: { href: "/purchasing", label: "Purchasing" },
   },
   supplier_catalog: {
     short: "reprices NDCs",
     writes: "prices and pack sizes against the NDCs in the file, for the supplier the sender rule names",
     reversal: "replaced",
     leaves: "the prices it wrote stand until that supplier's next price file reprices the same NDCs.",
-    at: { href: "/purchasing", label: "Purchasing" },
   },
   rebate_report: {
     short: "sets the rebate rate",
@@ -126,14 +123,14 @@ const EFFECTS: Record<string, KindEffect> = {
     reversal: "replaced",
     leaves:
       "the rate it set is the one used to price a generic until the next statement replaces it, and statements are monthly. Worth checking rather than waiting for.",
-    at: { href: "/purchasing", label: "Purchasing" },
+    at: { href: "/suppliers", label: "Suppliers" },
   },
   purchase_drilldown: {
     short: "sets the discount band",
     writes: "where the compliance ratio stands, which is what picks the discount band",
     reversal: "replaced",
     leaves: "the ratio it set prices contract generics until the next morning's report replaces it.",
-    at: { href: "/purchasing", label: "Purchasing" },
+    at: { href: "/suppliers", label: "Suppliers" },
   },
   return_policy: {
     short: "proposes only, stores nothing",
@@ -172,7 +169,7 @@ const EFFECTS: Record<string, KindEffect> = {
     writes: "one statement line per open invoice — what is owed and the day it falls due — so Parmed's draws can be placed by statement group and Cash ahead can see them coming; no payment, no deposit, no cost",
     reversal: "kept",
     leaves: "the statement lines, which the next statement replaces; an invoice the statement names that this site does not hold is counted and named, never created from it.",
-    at: { href: "/v2/money?tab=suppliers", label: "Suppliers" },
+    at: { href: "/inventory/invoices", label: "Invoices" },
   },
   parmed_eft_notice: {
     short: "records the ACH, banks nothing",
@@ -223,7 +220,6 @@ const EFFECTS: Record<string, KindEffect> = {
     reversal: "kept",
     leaves:
       "the prices it added stay, and — the part worth knowing — the file itself is kept in the reference folder and read again every time any NADAC file is loaded afterwards. A wrong file put through here is not corrected by the next one.",
-    at: { href: "/nadac", label: "NADAC" },
   },
 };
 

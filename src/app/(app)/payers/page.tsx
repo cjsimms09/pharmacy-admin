@@ -124,15 +124,6 @@ export default async function PayersPage({ searchParams }: { searchParams: Promi
         tabs={familyTabs("payers", "/payers")}
         title="Payers"
         subtitle="Every BIN we bill, the network rates behind it, how a MAC appeal reaches it, and where the money comes from."
-        actions={
-          <>
-            <Link href="/payers/performance" className="btn">Who pays best</Link>
-            <Link href="/payers/contracts" className="btn">The contracts</Link>
-            <Link href="/payers/sort" className="btn">Sort the folder</Link>
-            <Link href="/claims/floor" className="btn">Kansas floor (SB 20)</Link>
-            <Link href="/plans" className="btn">Classify plans</Link>
-          </>
-        }
       />
 
       {imported && <Notice kind="ok">Imported. {imported}</Notice>}

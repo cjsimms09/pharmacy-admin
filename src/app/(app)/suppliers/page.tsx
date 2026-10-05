@@ -235,7 +235,6 @@ export default async function SuppliersPage({
   return (
     <>
       <PageHeader
-        back={{ href: "/purchasing", label: "Ordering" }}
         title="Suppliers"
         subtitle="The wholesalers this pharmacy buys from, and the addresses they send invoices from. An invoice only files itself if the sender is recognised."
         actions={<Link href="/inventory/invoices" className="btn">Supplier invoices</Link>}
@@ -315,12 +314,7 @@ export default async function SuppliersPage({
                 ? `From the ${rates.ratioAsOf ?? "last"} statement — the month that closed. Have the daily report emailed here and this follows it instead.`
                 : "No ratio has been read, so no band applies and nothing is being discounted."
           }
-          actions={
-          <>
-            <Link href={`/purchasing/catalog?supplier=${encodeURIComponent(rates.supplierName)}`} className="btn btn-sm">Their catalogue</Link>
-            <Link href={`/suppliers/${rates.supplierId}/terms`} className="btn btn-sm">The ladders</Link>
-          </>
-        }
+          actions={<Link href={`/suppliers/${rates.supplierId}/terms`} className="btn btn-sm">The ladders</Link>}
         >
           <div className="grid gap-3 sm:grid-cols-4">
             <Stat

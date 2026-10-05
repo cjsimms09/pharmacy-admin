@@ -101,7 +101,9 @@ function FeedTable({ title, subtitle, feeds, now }: { title: string; subtitle: s
           <tbody>
             {feeds.map((f) => (
               <tr key={f.key} className={f.state === "off" ? "text-ink-3" : ""}>
-                <td className="whitespace-nowrap"><Link href={f.href} className="font-medium hover:text-accent hover:underline">{f.label}</Link></td>
+                <td className="whitespace-nowrap">
+                  {f.href ? <Link href={f.href} className="font-medium hover:text-accent hover:underline">{f.label}</Link> : <span className="font-medium">{f.label}</span>}
+                </td>
                 <td className="text-xs text-ink-2">{f.cadence}</td>
                 <td className="whitespace-nowrap text-xs">{f.lastAt ? <>{agoWords(f.lastAt, now)} <span className="text-ink-3">· {f.lastAt.slice(0, 10)}</span></> : "—"}</td>
                 <td><StateBadge state={f.state} /></td>

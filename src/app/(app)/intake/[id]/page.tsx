@@ -222,7 +222,7 @@ function appliedWhere(json: string): string | null {
     const v = JSON.parse(json) as { filedAs?: string; routedAs?: string };
     const k = v.filedAs ?? v.routedAs;
     if (!k) return null;
-    return { remittance: "/claims", bill: "/expenses", wholesaler_invoice: "/inventory/invoices", rebate_statement: "/expenses", claims: "/claims", rx_transactions: "/claims", accrual_sales: "/money", on_hand: "/purchasing/shelf", rebate_report: "/suppliers", purchase_drilldown: "/suppliers", nadac: "/nadac", supplier_catalog: "/purchasing", pioneer_catalog: "/purchasing" }[k] ?? null;
+    return { remittance: "/claims", bill: "/expenses", wholesaler_invoice: "/inventory/invoices", rebate_statement: "/expenses", claims: "/claims", rx_transactions: "/claims", accrual_sales: "/money", rebate_report: "/suppliers", purchase_drilldown: "/suppliers" }[k] ?? null;
   } catch {
     return null;
   }

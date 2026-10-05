@@ -149,7 +149,8 @@ export type Expectation = {
    * here, and nobody outside this building can fix it. It must never be able to read as absence.
    */
   refused?: { count: number; last: string; why: string };
-  href: string;
+  /** A page that shows what this document carries. Null where no page does, which is shown as a plain name and not as a link to a page that has been retired. */
+  href: string | null;
 };
 
 export type Judged = Expectation & {
