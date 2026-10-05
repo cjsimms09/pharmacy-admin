@@ -1176,3 +1176,13 @@ place, and an arithmetic check before anything is stored.
   fees are mostly proactive and at POS now. but there are 'adjustments' made.." · "No I am not having the adjustment
   report emailed, just the OTC profit. we should already hjave all the info we need for adjustments on 835s..." What
   each led to is in OPEN-ITEMS ("are we sure we are calculating accrual correctly??").
+
+- **5 October, his words:** "33 of those ($2,017.47) need one" · "Still failing: the nightly 'remit to claim' proof
+  has failed every month and links to a retired page ... you need to fix". Done the same day, not deployed: the 33 are
+  now 7. Nine pairs of an exact payment and take-back (net $0.00) need nothing, six take-backs and two facilitator
+  refunds tie to the claim each belongs to, and the 7 left are the one plan payment that fits two claims, which now
+  has a press with an undo, and six on claims the pharmacy reversed, which wait on his answer. The proof judges
+  exactly the payments the Payments with no claim page asks about and its line opens that page, so it still fails,
+  correctly, for the 27 payments ($2,127.47) that need him or the next claims load. Forty-one links to retired pages
+  are fixed, with a test that fails when a screen links to one (HANDOFF, top item; OPEN-ITEMS, "Found 5 October"). A
+  page the site retires next must be added to `src/lib/retired.ts`, or that test cannot know.

@@ -8,6 +8,69 @@ file is how they talk.
 
 ## Open items
 
+- **5 October, pharmacy session (4a80fd5 to ee765c3, nine commits, and a docs commit after them; NOT deployed): the 33
+  payments that "need a decision" are now 7, the nightly `remit_to_claim` proof judges the payments that page asks about,
+  and no page he still uses links to a page retired on 2 October.** His words: *"33 of those ($2,017.47) need one ...
+  Still failing: the nightly 'remit to claim' proof has failed every month and links to a retired page ... you need to
+  fix."* **The payments page** (`/claims/no-claim`; `untied-payments.ts`, `untied-payments-store.ts`, `tie-by-hand.ts`,
+  `match-remittance.ts`, `claim-payments.ts`, `claims-on-file.ts`): a ninth cause, `cancels_out`, for a payment and a
+  take-back of exactly its amount for one prescription, fill, fill date and drug, from one payer by one kind of
+  remittance, which together move no balance and need nothing (`f711d9d`: 74 pairs, 148 payments, net $0.00); a take-back
+  that equals exactly one claim's whole remit, where that claim holds the plan's payment of it and has not yet been taken
+  back, ties to that claim (`b1ef3fb`: 6 take-backs, -$434.40); a facilitator refund is read against the refund each
+  claim's report promised (`facilitatorCents`), not against the plan's remit, and ties to the claim that promised it
+  (`af646de`: 2 payments, $193.78); and a payment that fits several claims equally can be put on one by a press, "This is
+  the claim it paid", which keeps his name, survives the next import and is taken back by one press, "Take it back"
+  (`ac08c1d`; `claim_payments.tied_by`, **migration `0141_tied_by_hand`, additive: renumber yours if you add one**).
+  `tieByHand` acts only on a payment the site reads as fitting several claims and refuses every other cause, saying what
+  the page now reads. The owed page counts the facilitator's refunds apart from plan payments (`4a80fd5`: 13 of its 20
+  "paid more than billed" lines, $3,181.68 of $3,739.05, were that refund on top of an exact payment). Live, read-only,
+  through the same store, on 5 October (counts and sums only): payments tied to no claim 3,821, $393,948.45, unchanged; to
+  decide 33 ($2,017.47) -> 7 ($2,258.09: one plan payment of +$76.78 that fits two claims, and 6 on reversed claims where
+  one carries a sale date, +$2,181.31); to look at 12 ($110.00); waiting to attach 8 (-$240.62); needing nothing 197
+  ($4,598.21); for fills from before the feed 3,597 ($387,222.77). Nothing was tied live: the 8 are tied by the sweep when
+  claims are next loaded after a deploy, and then the owed page's facilitator card should read 17 payments, $4,104.66,
+  from 15, $3,910.88.
+
+  **The proof** (`engine/proofs.ts`, `engine/needs-you.ts`, `engine/run.ts`; `031e4f8`, `af11f6d`): every remittance
+  payment received in a month stands in exactly one place: tied to a claim; tied to none and judged by the payments
+  page's causes (a cancelling pair, or a reversal nobody collected, needs nothing and does not fail it); or tied to none
+  for a fill from before the books that the site holds no claim for, counted apart as cash. It passes when every judged
+  payment is tied or needs nothing, and it fails saying which payments and how much, linking to `/claims/no-claim`
+  (it linked to `/v2/claims?tab=unmatched`, which is not a route). It still FAILS, and is right to: September has 25
+  payments / $977.95 open (5 on reversed claims where one carries a sale date, $1,108.57; 12 that name no drug and no
+  fill, $110.00; 8 waiting to attach, -$240.62) and October 2 / $1,149.52 (it said 161 / $1,681.38 and 21 / $1,149.60
+  before, for reasons that were not faults). What clears them: the 8 attach at the next claims load after a deploy; the
+  $76.78 when he presses the claim it paid; the 6 on reversed claims (+$2,181.31) and the 12 MTM payments ($110.00) wait on
+  answers only he can give (OPEN-ITEMS, "Waiting on him"). **Do not describe the proof as passing.**
+
+  **Links** (`ee765c3`): his words said the proof "links to a retired page", so every link on a page he still uses was
+  read against the routes and `src/lib/retired.ts`. Before: shared code 85 of 353 literals bad (84 retired, 1 to no page),
+  the pages he uses 20 of 633, and on his screens 2 of the 10 rows of Today's strip (an earlier note of mine called these
+  "latent, not live": wrong), 7 of 19 feeds, 5 of 36 expected documents, three setup items, three buttons on Claims, five on
+  Payers, and the weekly email's two links. Each now goes to a kept page that shows the thing, or is plain text; no row, flag,
+  alert, feed or section was removed. New `tests/links-resolve.test.ts` fails when a screen links to a retired page or to no
+  page. **For you:** (1) `Feed.href` (`feeds.ts`) and the expected-document `href` (`expected.ts`) can now be `null`, so any
+  reader of either in the remits pages will fail the type check until it handles that; (2) that test skips
+  `src/app/(app)/remits` only because this machine cannot read it (the `screens` line): delete that clause on your branch and
+  fix any link it then reports; (3) check that `src/app/(app)/remits/mtf/page.tsx` treats a tied MTF payment as the
+  facilitator's, as `payer-owed-store.ts` now does (the item below asks for the rest of that card); (4) the commit
+  hook (`scripts/check-identifiers.ts`) now reads the pharmacy's own numbers from the database file, so a machine
+  with no database (the cloud one) still ends "NOT checked", as before; (5) the repository is public as of 5 October
+  (OPEN-ITEMS, the first of the new rows of "Waiting on him"), so nothing real goes in a commit, a commit message or a
+  pull-request description, and if he makes it private your access to it may change: say so on the pull request if it
+  does. **Files changed on
+  `feature/compliance`, so say so on your pull request before editing one:** `claim-payments.ts`, `claims-on-file.ts`,
+  `match-remittance.ts`, `untied-payments.ts`, `untied-payments-store.ts`, `tie-by-hand.ts` (new), `payer-owed.ts`,
+  `payer-owed-store.ts`, `payers/owed/page.tsx`, `claims/no-claim/page.tsx` and `view.tsx`, `engine/proofs.ts`,
+  `engine/needs-you.ts`, `engine/run.ts`, `db/schema.ts`, `drizzle/0141_tied_by_hand.sql`, `automation-status.ts`, `feeds.ts`,
+  `expected.ts`, `expected-store.ts`, `inbox-undo.ts`, `digest.ts`, `setup-checklist.ts`, `setup-store.ts`, `alerts.ts`,
+  `books-check.ts`, `profit-and-loss.ts`, `claims/page.tsx`, `payers/page.tsx`, `payers/[pbm]/page.tsx`,
+  `suppliers/page.tsx`, `suppliers/[id]/terms/page.tsx`, `inventory/invoices/page.tsx`, `intake/[id]/page.tsx`,
+  `settings/feeds/page.tsx`, `expected/page.tsx`, `scripts/check-identifiers.ts`, `scanned-bank-statement.ts`. The
+  questions that are his are in OPEN-ITEMS, "Waiting on him" (the last five rows, the repository first) and "Found 5
+  October". Not rendered in a browser; the remits pages were not read.
+
 - **4 October, pharmacy session: the MTF dashboard card needs a small change, and it is your file.**
   `src/app/(app)/remits/mtf/page.tsx`, about lines 166-175, reads `money.unmatched`, `unmatchedCents` and `beforeTheFeed` from
   `facilitatorMoney("mtf")`. This machine cannot read that path, so the change is yours. `facilitatorMoney` split a source's
@@ -21,11 +84,12 @@ file is how they talk.
   in-books payment of the source, `{cause, count, cents}` per cause; tied plus tied-to-none is every in-books payment of the
   source, in count and in cents), `booksFrom` and `feedFrom`. **Until the card reads them** it shows $0.00 not loaded and
   "19 were filled before this feed began", and the 2 payments that fit several claims are on no line of that page (they are on
-  the money list's MTF row, the Claims card and `/claims/no-claim`). Please render `money.tiedToNone` instead:
+  the money list's MTF row, the Claims card and `/claims/no-claim`; 5 October: those 2 now tie to the claim that promised
+  each, `af646de`, once claims are next loaded after a deploy). Please render `money.tiedToNone` instead:
   `sourceToDo(money.tiedToNone, money.feedFrom)` and `tiedSays(money.tiedPayments, money.allTimePayments)` in
   `untied-payments.ts` give the money list's words for it; `warn` only where a group's `causeInfo(cause, feedFrom).needs` is
-  not `"nothing"`; send a group that needs a person to `/claims/no-claim`. **Open:** that page has no press. A payment that
-  fits several claims has no way to be attached by hand yet, and the matcher's own message still says "attach it by hand".
+  not `"nothing"`; send a group that needs a person to `/claims/no-claim`. **Open until 5 October (the page has its press now, `ac08c1d`):** that page had no press. A payment that
+  fit several claims had no way to be attached by hand, and the matcher's own message still said "attach it by hand".
   **Files changed on `feature/compliance`, so say so on your pull request before editing one:** `claim-payments.ts`
   (`facilitatorMoney`, `FacilitatorMoney`), `money-found.ts` (the MTF row), `untied-payments.ts` (`tiedSays`, `sourceToDo`).
 
@@ -60,6 +124,8 @@ file is how they talk.
   its needs-you row (`engine/needs-you.ts`) links to `/v2/claims?tab=unmatched`, which is not a route here: left alone; and
   the monthly AR email is due from 5 October with no address nominated, so nothing is sent: deploy before one is set, or the
   old wording goes out. All of it is in OPEN-ITEMS ("Found 4 October, afternoon") in three lines each, with the pre-flight.
+  **Superseded 5 October (the first item):** the page has its press, the 33 are 7, and the nightly proof reads the page's
+  causes and links to it; still open from this item: what a sale date on a reversed claim means, and the monthly AR email.
 
 - **4 October, pharmacy session (85144ed): what the payers take off a remittance is counted once, from one record.** Three
   records carry the same fee: the Health Mart Atlas payment report for each EFT (AH and CS rows, booked as expenses), the

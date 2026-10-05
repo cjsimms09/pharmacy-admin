@@ -366,6 +366,15 @@ so "patient payments banked" is not the copay figure.
 The five largest of those 47 BINs: 019158 ×41 $41,576.95; 610011 ×79 $24,880.49; 610097 ×133 $14,614.08;
 610279 ×106 $12,659.99; 015581 ×107 $10,551.65.
 
+**Addendum, 5 October.** The last clause of the B8 row above, "ambiguous choices are not stored, so how many were
+ambiguous is not measurable", is no longer true. A payment that ties to no claim is now named on the Payments with no
+claim page with the cause beside it (data dictionary, section 10). A payment and a take-back of exactly its amount are
+one event that nets to nothing ("cancels out"); a take-back equal to exactly one claim's whole remit ties to that
+claim; a Medicare Transaction Facilitator refund is read against the refund each claim's own report promised, not
+against the plan's remit; and a payment that fits two claims equally can be put on one by hand, which keeps who did it
+(`tied_by`) and is the only manual attach on that page. A payment on a claim the pharmacy reversed is never put on a
+claim by hand. That row's count of 10 was not re-measured here: see OPEN-ITEMS, "Found 5 October".
+
 **G-LC-4. Most of September's receivables have no settling document the site reads yet.**
 OBSERVATION: 47 of 52 paying BINs, $174,192.86 of remit, have never had a payment matched to any claim. The only
 settling documents read so far are 9 AccessHealth reports (to 11 September) and a handful of 835s.
