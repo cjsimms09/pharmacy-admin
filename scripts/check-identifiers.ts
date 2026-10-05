@@ -12,6 +12,8 @@
  * exactly when somebody is part-way through fixing one.
  */
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { findIdentifiers, looksBinary, sayFindings } from "../src/lib/identifier-scan";
 
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -26,16 +28,29 @@ const BINARY = /\.(png|jpe?g|gif|pdf|ico|woff2?|ttf|zip|db|xlsx?|docx?)$/i;
  * The settings hold them; where the database is not reachable — a hook on a machine with no data — OWN_IDENTIFIERS can
  * carry them, comma separated. With neither, the shapes above still run and this one is skipped, and the run says so
  * rather than implying it checked.
+ *
+ * They are read from the database file itself, at the site's own default path. This used to go through
+ * src/lib/settings.ts, which is `server-only` and throws under a plain `npx tsx`, so the hook said "NOT checked" on every
+ * commit and the pharmacy's own provider number sat in three tracked lines until it was found on 5 October 2026 by
+ * running the check with the stub the scripts use. A check that cannot run and says so in a sentence nobody reads is
+ * the same fault as one that passes by looking at nothing.
  */
 async function ownIdentifiers(): Promise<{ values: string[]; from: string }> {
   const fromEnv = (process.env.OWN_IDENTIFIERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (fromEnv.length) return { values: fromEnv, from: "OWN_IDENTIFIERS" };
-  if (!process.env.DATABASE_PATH) return { values: [], from: "" };
+  const file = path.resolve(process.env.DATABASE_PATH ?? "./data/pharmacy-admin.db");
+  if (!fs.existsSync(file)) return { values: [], from: "" };
   try {
-    const { getSettings } = await import("../src/lib/settings");
-    const s = (await getSettings()) as unknown as Record<string, string | null>;
-    const values = ["pharmacy_npi", "pharmacy_ncpdp", "pharmacy_dea", "pharmacy_nabp"].map((k) => s[k] ?? "").filter(Boolean);
-    return { values, from: "the site's settings" };
+    const { createClient } = await import("@libsql/client");
+    const client = createClient({ url: `file:${file}` });
+    try {
+      const r = await client.execute("select value from settings where key in ('pharmacy_npi', 'pharmacy_ncpdp', 'pharmacy_dea', 'pharmacy_nabp')");
+      /* A placeholder such as "n/a" is not an identifier, and as one it would flag every file that says it. */
+      const values = r.rows.map((row) => String(row.value ?? "").trim()).filter((v) => v.length >= 7);
+      return { values, from: "the site's settings" };
+    } finally {
+      client.close();
+    }
   } catch {
     return { values: [], from: "" };
   }

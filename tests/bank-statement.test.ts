@@ -162,8 +162,8 @@ describe("the lines September 2026 could not place, and what explains them", () 
   test("an Access Health deposit takes only Health Mart Atlas's remittances, and a remittance stands behind one deposit", () => {
     const out = placeLines(
       [
-        { on: "2026-09-30", description: "ACCESS HEALTH/ACCESS HEA 1722734 West Wichita Family Ph", amountCents: 2_006_882, key: "ah" },
-        { on: "2026-09-30", description: "ACCESS HEALTH/ACCESS HEA 1722734 West Wichita Family Ph", amountCents: 2_006_882, key: "ah2" },
+        { on: "2026-09-30", description: "ACCESS HEALTH/ACCESS HEA 1234567 West Wichita Family Ph", amountCents: 2_006_882, key: "ah" },
+        { on: "2026-09-30", description: "ACCESS HEALTH/ACCESS HEA 1234567 West Wichita Family Ph", amountCents: 2_006_882, key: "ah2" },
       ],
       { ...base, remits },
     );

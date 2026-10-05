@@ -291,7 +291,7 @@ export function readRaw(items: ScanItem[]): RawStatement {
        *
        * Where a description wraps to two lines the bank prints the amount level with the gap between
        * them, and the engine attaches it to the second line: "9/10 ACCESS HEALTH/ACCESS HEA" and then
-       * "21,094.87 1722734 West Wichita Family Ph". Read as two half-lines, neither has a date and an
+       * "21,094.87 1234567 West Wichita Family Ph". Read as two half-lines, neither has a date and an
        * amount, and the solver refuses the statement. September 2026 had six of these in the credits
        * and McKesson's $118,085.72 in the debits. The card section already re-joins the mirror case
        * (amount first, date below); this is the other half of it. Held, and completed by the next row.
