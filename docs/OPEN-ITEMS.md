@@ -251,6 +251,31 @@ him, and the history holds the deposit under the 15th's number (see the SS&C row
 corrected, and the 1 October note above, which I called right here, now carries a correction. **Not looked at:**
 expenses, the newest PioneerRx import beyond the invoice above, and the readers not read in the 5 October scan.
 
+**Scan, 7 October (rule 3).** What he would be most angry about if it were wrong and I had not caught it, asked this
+time of money in the bank with nothing behind it: a payer deposit that reaches the cash account and that no
+remittance advice explains. The morning check looks from advice to bank (the advice says money was sent, did it
+arrive) and never from bank to advice, so a deposit with no advice is a dollar it cannot see. **Confirmed clean,
+because I read it:** all eleven Access Health deposits from 15 to 30 September (of $50 or more) are each confirmed by
+one receipt of exactly the deposit's amount, and no receipt stands behind two of them. In particular the $28,933.18
+deposit of 28 September, which I feared the 24 and 25 September receipts ($29,786.92 and $1,443.57) had already
+counted, is a separate payment: those two receipts are confirmed by their own 24 and 25 September lines, so nothing
+is counted twice and the cash account is right to the cent for that stretch. **Found, not changed, not yet a
+finding.** OBSERVATION: the 28 September deposit is the one of the eleven with no remittance advice of its amount in
+the register; each of the other ten has an advice of the same amount dated the business day before it, and the
+register has no advice from any payer dated 25 or 28 September (24 September, then 29 September) although it reads to
+30 September; the plans' claim remittances (835s) were received on 22, 23, 24, 29 and 30 September and none on 25 or
+28 September, and the 29 September batch ($88,445.41, 491 rows) is about three days' size, which may be where the
+claims of the 28th arrived. SHOULD BE: every payer deposit has an advice that names it, so an advice for $28,933.18
+dated Friday 25 September. DIFFERENCE: it is not in the register. State, in the five: expected-not-yet, because the
+export that built the register reads only to 30 September and the next ProviderPay export is due this month; whether
+the advice was never issued, was issued and not pulled, or is in the export and was not read cannot be told from the
+data, which is why nothing is asked of him yet. If the next export reads past 5 October and still holds none, it
+becomes one question: is there an advice for the $28,933.18 on ProviderPay, and did it come with the 29 September
+file? An advice for that amount arriving within 14 days of the receipt the by-hand decision made will stand on that
+receipt and not be counted again. **Not checked:** which claims the 28 September deposit paid, because the claim
+lines carry no payment number I could join on (my first attempt, on the claim reference, was wrong, since that column
+is a per-claim reference, and I discarded it); the ProviderPay site itself. **Second reader: none; the author only.**
+
 **Pre-flight, run 6 October, for the Compliance banner, the mailbox check, the invoice reader, the remittance line and
 the morning-check card.** 1 Act: the morning check and its card read and say, and write nothing; the Compliance
 register only reads once its duties are seeded, and they are, because the page he looked at is that register; the code

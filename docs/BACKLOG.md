@@ -1390,6 +1390,13 @@ place, and an arithmetic check before anything is stored.
     `cash-from-bank.ts` near line 54 keeps its own form of the question and reads both sources; a source test pins it.
     One question for him came out of it and has not been asked: what the three 16 September counter deposits held (the
     slips would say); optional, nothing waits on it.
+  - **A5-7** (watch, found 7 October by the author in the scan.) The 28 September Access Health deposit, $28,933.18,
+    has no remittance advice of its amount in the register, and the register holds no advice from any payer dated 25
+    or 28 September, though the export reads to 30 September; the other ten of the eleven Access Health deposits of
+    15-30 September each have one dated the business day before. Not a double count (checked: each deposit has one
+    receipt of exactly its amount and no receipt serves two). Expected-not-yet: look again when the next ProviderPay
+    export arrives. If it reads past 5 October and still has no advice for that amount, ask him one question: is there
+    an advice for it on ProviderPay, and did it come with the 29 September file? Until then nothing is asked.
   - **A4-1** `compliance/register/page.tsx` near lines 27 and 41-45: a cell is green ("satisfied") unless its period
     is still open, and `openItems()` skips duties that need confirming (`compliance-status.ts` near line 282), so
     every period of the six unanswered duties would render green; the main page's `clean` (near line 55) ignores
