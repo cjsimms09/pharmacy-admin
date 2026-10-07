@@ -25,6 +25,22 @@ The math has to be perfect — a wrong number that looks right is worse than no 
 
 ## Now
 
+### 0b. 7 October: "spd", legal names, and the quarterly report (asked mid-turn; not yet understood)
+
+> *"spd is uploaded. we need to make sure we get legal names, then double check to make sure our quareterly report is being done correctly, accurately, and as state intended"*
+
+Queued here, not dropped, and not guessed at. What a session on the pharmacy computer could establish on 7 October by read-only counts (no patient information, no folder listing, no names printed):
+
+- **"spd".** No file name or title on the site contains it: nine tables hold a file name, and every text column of every table was searched except those named like an id, hash, key, token, encrypted value, JSON, body, raw text or HTML, so a message body was not searched. The rows that match the three letters are a Medicare Part D plan's processor code on claims and plan rows and the notes about that plan (three `proposed_from` cells were not read), which is not an upload. The two documents a person (not the mailbox sweep) filed since the evening of 6 October are PDFs of category "other", each attached to a person and to a credential; they were not opened (the upload folder is read-denied) and neither is named "spd". If "spd" went anywhere else (a message to a session, a shared folder, another login), nothing here has seen it.
+- **The quarterly report.** The one periodic report the site prepares for the state's benefit is the CQI summary (K.A.R. 68-19-1 is quoted in `src/lib/cqi.ts`), and it is prepared **every two months**, not every quarter: four on file, April–May (carries the one incident; final; entered as historical), June–July and August–September (null reports; final), October–November (draft, due 15 December). Their null-report flags agree with the incident dates: the one incident was reported on 7 April, and the three later windows contain none. The quarterly duties on Compliance are three (controlled-substance receipts against dispensings, the emergency-kit check, a backup restore test), none of them a report to the state; rebate periods, the recurring-expense cadence and two practice-decision choices also say "quarterly" and none of those is one either. No report of payroll, wages or tax for an agency turned up by a search of file names for those words (payroll appears as an expense category on the accounting pages); no page was read for it.
+- **Legal names.** A person is stored as a first name and a last name, and nothing says whether that is the name on their licence. The only "legal name" wording in the code is the supplier match and the business-associate form's label.
+
+SHOULD BE: cannot be written yet. Which report he means, and what the state wants on it, are not on the site: the Kansas rule is quoted in one code comment and no copy of the state's form or text is in the repo. So this is not a finding. It is one question.
+
+**Question for him (not yet asked):** what is "spd" and where did you put it (the site's Documents or Intake, a folder, a message)? And which quarterly report: the CQI summary, which the site prepares every two months, or one the state asks you to file each quarter, and which?
+
+Not checked: the contents of any uploaded file; the printed CQI summary against the state's form; whether the names printed on it match anyone's licence; anything outside the site.
+
 ### 0a. 18 September: reconciling claims perfectly, and getting the 835s to arrive on their own
 
 > *"now did we reconcile every claim we can? we need to correctly account for adjustments, this
