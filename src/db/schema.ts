@@ -3764,9 +3764,11 @@ export const remittanceRegister = sqliteTable(
     /**
      * The payer's payment number, which the cash receipt for this money also carries.
      *
-     * Null is a real state and not a gap: it is ProviderPay saying it has not matched this
-     * remittance to a deposit yet, and so no cash should be expected for it. Four of September's
-     * twenty-eight were in that state on the day this was written.
+     * Null is a real state and not a gap: ProviderPay prints "Not matched" until it has tied this
+     * remittance to a payment, so there is no number to look its deposit up by yet. It does not mean
+     * no cash is coming and it does not mean none has come: none of a cheque payer's remittances has
+     * carried one, and that money is banked at the counter. Four of September's twenty-eight were in
+     * that state on the day this was written.
      */
     paymentNumber: text("payment_number"),
     /** Which export it was read from, so a changed feed is visible rather than silent. */

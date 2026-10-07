@@ -32,8 +32,27 @@
  * six was proved to fire.
  */
 
-/** Why the bank matcher counts a remittance as banked, strongest evidence first; null where nothing stands for it. */
-export type Tie = "payment number" | "remittance number" | "amount in window" | null;
+/**
+ * What stands for a remittance this check does not count as banked: a receipt of exactly its amount near its advice date, which the bank
+ * matcher accepts and this check does not, because two remittances of one amount are two deposits. Null where nothing stands for it.
+ * A receipt carrying its payment number, one naming the remittance itself, or the account history all bank it, and it is not listed.
+ */
+export type Tie = "amount in window" | null;
+
+/**
+ * What ProviderPay's account history on file can say of one remittance no receipt stands for. Five things, and "no deposit found" is
+ * each of them in turn: none is on file; the newest on file ends too soon after the advice for its deposit to be in it (the deposit may
+ * land up to the matcher's fortnight after); it reaches far enough but no file on file covers the month the advice, or the fortnight
+ * after it, falls in, so there is a gap exactly where the deposit would be (`month`); the files cover it and hold nothing under the
+ * payment number; or one holds a deposit under the payment number, dated `on`, that is not shown reaching a bank line already placed.
+ * The first three are the history not being there to look in, the fourth is measured-and-none and the last is a bank line to place, so
+ * they are not one sentence.
+ */
+export type History =
+  | { state: "none" }
+  | { state: "ends too soon" | "reaches past"; through: string }
+  | { state: "has a gap"; month: string }
+  | { state: "holds a deposit"; on: string };
 
 export type Facts = {
   /** Inbox rows, and distinct delivered attachments behind them. */
@@ -95,7 +114,9 @@ export type Facts = {
    * The other half of the same absence. Counting a remittance twice overstates the accrual side;
    * never banking its deposit understates the cash side, and on 18 September both were true at
    * once — $28,645.57 too much earned, $99,238.84 too little received. A remittance with no
-   * payment number is not counted here: that is the payer saying the deposit has not happened.
+   * payment number is not counted here: ProviderPay has not matched it to a payment, so there is no
+   * deposit to look for under a number — or its payer pays by cheque and never will. It is said
+   * apart, with what stands for it, below.
    */
   remittancesNotBanked: number;
   remittancesNotBankedCents: number;
@@ -103,11 +124,26 @@ export type Facts = {
    * The remittances behind that count, largest first. Never the payment number: it is the payer's key to its own money.
    *
    * `tie` is what the bank matcher and the Remits tab already say of that remittance (engine/remit-standing.ts), asked of that one
-   * computation and not worked out again here. This check requires the payment number itself; the matcher also accepts the remittance
-   * number and, weakest, the same amount within a fortnight. Where the two differ the card has to say so, or it tells him something
-   * the Remits tab contradicts.
+   * computation and not worked out again here: the card and the Remits tab judge a remittance banked by the same rule, except that
+   * this check does not take the same amount near the advice date as proof for a remittance that has a payment number. Where that is
+   * all that stands for it the card says so, or it tells him something the Remits tab contradicts.
+   *
+   * `history` is what ProviderPay's account history on file can say of it. It is asked of the store, not worked out here, because it
+   * turns on the same fortnight the matcher allows a remittance to take to land (engine/remit-standing.ts).
    */
-  unbankedRemittances: { payer: string | null; remitOn: string | null; amountCents: number; tie: Tie }[];
+  unbankedRemittances: { payer: string | null; remitOn: string | null; amountCents: number; tie: Tie; history: History }[];
+  /**
+   * Remittances with a payment number that no receipt carries by that number but whose deposit ProviderPay's own account history shows,
+   * swept to a bank line of the same amount (engine/remit-sweep.ts). They are banked and are in neither count above; they are said here so
+   * that a passing line does not hide that its evidence is the history and not a receipt.
+   */
+  remittancesBankedBySweep: number;
+  /**
+   * Remittances with a payment number that no receipt carries by that number but that a receipt keyed to the remittance number stands for
+   * (engine/remit-standing.ts): the key the bank matcher writes when the register holds a remittance without its payment number, which
+   * ProviderPay's later export then gives it. They are banked and are in neither count above; they are said here as the sweep ones are.
+   */
+  remittancesBankedByRemitNumber: number;
   /**
    * How many remittances the register holds at all, and how many claim payments came from one.
    *
@@ -118,24 +154,39 @@ export type Facts = {
    */
   remittanceRegisterRows: number;
   /**
-   * How many of those rows carry a payment number, which is the population the check can judge.
+   * How many remittances advised since the books began carry a payment number: the population this check judges, and the denominator
+   * of every "all N" and "K of N" it says.
    *
-   * Not the same as the row count, and the difference is not a rounding of it: a remittance with no
-   * payment number is ProviderPay saying it has not matched that money to a deposit, so no cash is
-   * owed for it yet and it is deliberately outside the comparison. Reporting the row count as though
-   * it were the number checked claims to have looked at money nobody has looked at.
+   * Not the register's row count. A remittance advised before the books began is not money the cash account is missing
+   * (`remittancesNotBanked` leaves it out, so the denominator must), and one with no payment number cannot be looked for by number.
+   * On 6 October 2026 "all 62" counted 22 advised in August and before.
    */
-  remittanceRegisterOwed: number;
+  remittancesNumbered: number;
   /**
-   * The newest remittance date the register holds, or null while it holds none.
+   * Advices since the books began of $0.00 or less: a payer's payments and take-backs netting to nothing, or a negative net, which is
+   * money taken back and not money sent. There is no deposit for the bank to hold for either, so no bank line could ever clear one;
+   * counting it as "advised as paid and not banked" would be an alarm nothing the pharmacy does can end. They are left out of every
+   * count and list here, and said apart.
+   */
+  remittancesNotPositive: number;
+  /**
+   * The remittances since the books began with no payment number, said in the two states the check can tell apart: a receipt already
+   * stands for it (a cheque payer's money arrives at the counter and its remittance never gets a number, which is why a blank number
+   * is not "unpaid"), or nothing stands for it yet and it is waiting. The waiting ones are listed largest first, so that what he is
+   * waiting for is named.
+   */
+  remittancesUnnumberedStanding: number;
+  remittancesWaiting: { payer: string | null; remitOn: string | null; amountCents: number }[];
+  /**
+   * The newest remittance date the register holds, and the day the register was last filled from an export; each null while it is empty.
    *
-   * The horizon of the check, and the reason it is a fact rather than a sentence: the ProviderPay
-   * pull is monthly and by hand, so between pulls this check is reading an older and older snapshot
-   * while saying nothing about it. A green line that means "reconciled to the 17th" and reads as
-   * "reconciled" is the kind of sentence CLAUDE.md's sixth clause is about — right, and acted on
-   * wrongly.
+   * The horizon of the check, and a fact rather than a sentence: the ProviderPay pull is monthly and by hand, so between pulls this
+   * check reads an older and older snapshot while saying nothing about it. Two dates because they are not one: advice is dated the day
+   * the payer remitted and the export is read days later, and "reading to the 30th (6 days ago)" made an export read the day before look
+   * a week stale. A green line that means "reconciled to the 17th" and reads as "reconciled" is what CLAUDE.md's sixth clause is about.
    */
   remittanceRegisterThrough: string | null;
+  remittanceRegisterReadOn: string | null;
   remittancePaymentsPosted: number;
   /** Today, so the check does not have to ask the clock and can be tested. */
   today: string;
@@ -179,16 +230,64 @@ const daysBetween = (from: string, to: string) => Math.round((Date.parse(to) - D
  * 17th. The horizon goes in the observation, where the number he reads is, and not in a footnote.
  */
 function horizon(f: Facts): string {
-  if (!f.remittanceRegisterThrough) return "";
-  const days = daysBetween(f.remittanceRegisterThrough, f.today);
-  const how = days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
-  return `, reading to ${f.remittanceRegisterThrough} (${how}) — the last ProviderPay export`;
+  const read = f.remittanceRegisterReadOn;
+  const through = f.remittanceRegisterThrough;
+  if (!read && !through) return "";
+  const ago = (iso: string) => {
+    const days = daysBetween(iso, f.today);
+    return days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
+  };
+  const readSaid = read ? `the last ProviderPay export was read ${read} (${ago(read)})` : "the last ProviderPay export";
+  const holds = through ? ` ${read ? "and holds" : "holds"} advice to ${through}` : "";
+  return `; ${readSaid}${holds}`;
 }
 
-/** The rows the check deliberately does not judge, named rather than netted out of the count. */
-function unmatched(f: Facts): string {
-  const n = f.remittanceRegisterRows - f.remittanceRegisterOwed;
-  return n === 0 ? "" : `; ${n} more carry no payment number, so no cash is owed for ${n === 1 ? "it" : "them"} yet`;
+/** The rows since the books began with no payment number, said by what is known of each rather than netted out of the count. */
+function unnumberedSaid(f: Facts): string {
+  const stands = f.remittancesUnnumberedStanding;
+  const waits = f.remittancesWaiting.length;
+  const n = stands + waits;
+  if (n === 0) return "";
+  const parts: string[] = [];
+  if (stands > 0) parts.push(`${stands} ${stands === 1 ? "has a receipt standing for it" : "have a receipt standing for them"}, by remittance number or amount`);
+  if (waits > 0) {
+    const items = f.remittancesWaiting.map((r) => `${r.payer ?? "payer not captured"}, advised ${r.remitOn ?? "date not captured"}, ${money(r.amountCents)}`);
+    parts.push(`${waits} ${waits === 1 ? "has" : "have"} nothing standing for ${waits === 1 ? "it" : "them"} yet and ${waits === 1 ? "is" : "are"} waiting (${listed(items, waits)})`);
+  }
+  const noun = `${f.remittancesNumbered > 0 ? "other " : ""}remittance${n === 1 ? "" : "s"}`;
+  return `; ${n} ${noun} ${n === 1 ? "carries" : "carry"} no payment number yet: ${parts.join(", and ")}`;
+}
+
+/** Advices of nothing or less, said apart: they are not money sent, so they are in none of the counts or lists around this clause. */
+function notPositiveSaid(f: Facts): string {
+  const n = f.remittancesNotPositive;
+  if (n === 0) return "";
+  return `; ${n} ${n === 1 ? "advice" : "advices"} of nothing or less ${n === 1 ? "is" : "are"} not money sent and ${n === 1 ? "is" : "are"} not judged`;
+}
+
+/** What ProviderPay's account history on file can and cannot say of a remittance no receipt stands for: five states, not one. */
+function historySaid(h: History): string {
+  if (h.state === "none") return "no ProviderPay account history is on file to look in";
+  if (h.state === "holds a deposit") return `ProviderPay's account history holds a deposit under its payment number, dated ${h.on}, that is not shown reaching a bank line already placed`;
+  if (h.state === "ends too soon") return `the newest ProviderPay account history on file ends ${h.through}, too soon after it was advised to show its deposit either way`;
+  if (h.state === "has a gap") return `no ProviderPay account history on file covers ${h.month}, so it cannot show its deposit either way`;
+  return `ProviderPay's account history on file (to ${h.through}) holds no deposit under its payment number`;
+}
+
+/** Says how many remittances were shown banked by the account history rather than by a receipt, so the evidence is not hidden by the count. */
+function sweptSaid(f: Facts, who: "of them" | "other"): string {
+  const n = f.remittancesBankedBySweep;
+  if (n === 0) return "";
+  const subject = who === "of them" ? `${n} of them ${n === 1 ? "is" : "are"}` : `${n} ${n === 1 ? "other is" : "others are"}`;
+  return `; ${subject} shown banked by ProviderPay's account history, not by a receipt carrying the payment number`;
+}
+
+/** Says how many remittances were shown banked by a receipt keyed to the remittance number, so the evidence is not hidden by the count. */
+function namedSaid(f: Facts, who: "of them" | "other"): string {
+  const n = f.remittancesBankedByRemitNumber;
+  if (n === 0) return "";
+  const subject = who === "of them" ? `${n} of them ${n === 1 ? "is" : "are"}` : `${n} ${n === 1 ? "other is" : "others are"}`;
+  return `; ${subject} banked by a receipt keyed to the remittance number, not the payment number`;
 }
 
 const NAMED = 3;
@@ -220,17 +319,17 @@ function shortLink(f: Facts): string {
 }
 
 const TIE_SAID = {
-  "payment number": "a receipt carries its payment number, written in a way this check does not match",
-  "remittance number": "a receipt carries its remittance number, not its payment number",
   "amount in window": "a receipt of exactly that amount, near the advice date, stands for it by amount alone and not by its payment number",
 } as const;
 
+/** What stands for a remittance this check does not call banked, and then what the account history on file can say of it: the two things that settle it. */
 function unbankedNamed(f: Facts): string {
   if (f.unbankedRemittances.length === 0) return "";
   const lone = f.remittancesNotBanked === 1;
-  const items = f.unbankedRemittances.map(
-    (r) => `${r.payer ?? "payer not captured"}, advised ${r.remitOn ?? "date not captured"}${lone ? "" : `, ${money(r.amountCents)}`}: ${r.tie ? TIE_SAID[r.tie] : "no receipt stands for it, by payment number, remittance number or amount"}`,
-  );
+  const items = f.unbankedRemittances.map((r) => {
+    const standing = r.tie ? TIE_SAID[r.tie] : "no receipt stands for it, by payment number, remittance number or amount";
+    return `${r.payer ?? "payer not captured"}, advised ${r.remitOn ?? "date not captured"}${lone ? "" : `, ${money(r.amountCents)}`}: ${standing}, and ${historySaid(r.history)}`;
+  });
   return ` (${listed(items, f.remittancesNotBanked)})`;
 }
 
@@ -502,7 +601,7 @@ export function runDailyCheck(f: Facts): Check[] {
     href: "/remits",
     action: "See the remittances",
     shouldBe:
-      "A remittance carrying a payment number is the payer saying that deposit has been made, and the deposit is banked from the payer payment report under that same number. Every remittance with a payment number should therefore have cash banked against it. One without a payment number is not owed yet and is not counted here.",
+      "A remittance carrying a payment number is the payer saying that deposit has been made, and the deposit is banked from the payer payment report under that same number. Every such remittance advised since the books began should therefore have cash banked against it: a receipt carrying that number; or, where the receipt was banked under another remittance of the same amount, ProviderPay's account history showing the deposit under that number swept to a bank line of the same amount; or a receipt keyed to the remittance's own number. A receipt of the same amount near the advice date is not enough for one that has a payment number, because two remittances of one amount are two deposits. One with no payment number cannot be looked for by number: ProviderPay has not matched it to a payment yet, or its payer pays by cheque and never will. It is said apart from the count, with what stands for it, and joins the count if it is given a number.",
     observed:
       /*
        * Never measured comes first, because it is the answer that looks most like success.
@@ -515,16 +614,18 @@ export function runDailyCheck(f: Facts): Check[] {
         ? f.remittancePaymentsPosted === 0
           ? "no remittance has been read yet, so there is nothing to compare"
           : `${f.remittancePaymentsPosted} payments came from a remittance and the register holds none of them, so nothing can be compared`
-        : f.remittancesNotBanked === 0
-          ? `all ${f.remittanceRegisterOwed} remittances with a payment number have their cash${unmatched(f)}${horizon(f)}`
-          : `${f.remittancesNotBanked} remittance${f.remittancesNotBanked === 1 ? "" : "s"} advised as paid and not banked, ${money(f.remittancesNotBankedCents)}${f.remittancesNotBanked === 1 ? "" : " between them"}${unbankedNamed(f)}${horizon(f)}`,
+        : f.remittancesNotBanked > 0
+          ? `${f.remittancesNotBanked} of the ${f.remittancesNumbered} remittances with a payment number, advised since the books began, ${f.remittancesNotBanked === 1 ? "is" : "are"} advised as paid and not banked, ${money(f.remittancesNotBankedCents)}${f.remittancesNotBanked === 1 ? "" : " between them"}${unbankedNamed(f)}${sweptSaid(f, "other")}${namedSaid(f, "other")}${unnumberedSaid(f)}${notPositiveSaid(f)}${horizon(f)}`
+          : f.remittancesNumbered === 0
+            ? `no remittance advised since the books began carries a payment number, so there is nothing for this check to compare${unnumberedSaid(f)}${notPositiveSaid(f)}${horizon(f)}`
+            : `all ${f.remittancesNumbered} remittances with a payment number, advised since the books began, have their cash${sweptSaid(f, "of them")}${namedSaid(f, "of them")}${unnumberedSaid(f)}${notPositiveSaid(f)}${horizon(f)}`,
     ok: f.remittancesNotBanked === 0 && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
     difference:
       f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0
         ? "The register is empty while payments posted from remittances are on the books, so this check is measuring nothing. Re-read the Remit Summary export to fill it; until then neither this check nor the cash side can be trusted."
         : f.remittancesNotBanked === 0
           ? null
-          : `${money(f.remittancesNotBankedCents)} is advised as paid and nothing the site holds says it was deposited. Two causes look the same here: the deposit is on the bank statement or in the payer payment report and has not been tied to its payment number yet — the Payments export on the ProviderPay portal, read, ties it under the number it already carries — or the payer has advised it and not yet paid it. A deposit of that amount on the bank statement, on or after the advice date, settles which — unless that deposit already stands for another remittance of the same amount, because two remittances of one amount are two deposits.`,
+          : `${money(f.remittancesNotBankedCents)} is advised as paid and no receipt carries its payment number. Two causes look the same here: the deposit has reached the bank and has not been tied to this payment number yet, or the payer has advised it and not yet paid it. A deposit of that amount on the bank statement, on or after the advice date, settles which — unless that deposit already stands for another remittance of the same amount, because two remittances of one amount are two deposits. ProviderPay's account history for the month shows each deposit by its payment number and each sweep to the bank; where it shows this remittance's deposit reaching a bank line, the remittance is banked and leaves this list, so one that is on it is one the history on file does not show, or does not yet reach. The Payments export, read, can tie a deposit too, but the site can refuse its receipt as the same money as a receipt it already holds of that amount within a week, so where one is already there the account history is what settles it. Each remittance named above says what stands for it and what the history can show.`,
     kind: "money",
   });
 

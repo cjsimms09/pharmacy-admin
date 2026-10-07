@@ -614,8 +614,10 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
         });
         let sets = remitSetsFor(pool, line.amountCents);
         /*
-         * Two sets, different days: the deposit follows its remittances by a day, so the set remitted nearest the
-         * deposit is the one — SS&C's $2,008.00 of 23 September was the deposit of the 24th, not its twin of the 15th.
+         * Two sets, different days: a deposit usually follows its remittances by a day, so the set remitted nearest the
+         * deposit is taken to be the one. It is a guess, and it was wrong once: SS&C's $2,008.00 of 15 September and its twin
+         * of the 23rd, where ProviderPay's account history shows the 24th's deposit under the 15th's payment number.
+         * The standing computation (engine/remit-standing.ts) reads that history, so the correction is made there and not here.
          */
         if (sets.length > 1) {
           const latest = (s: RegisterRemit[]) => s.map((r) => r.remitOn).sort().at(-1)!;

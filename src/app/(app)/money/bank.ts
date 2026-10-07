@@ -21,6 +21,7 @@ import { CARD_STATEMENT_BILL } from "@/lib/card-statement";
 import { readBankDescriptor } from "@/lib/bank-descriptors";
 import { paymentFromBankDebit } from "@/lib/supplier-payments";
 import { matchContext } from "@/lib/bank-match-context";
+import { remitReceiptKey } from "@/lib/engine/remit-standing";
 import { engineAfter } from "@/lib/engine/run";
 import { recordMonthBalances } from "@/lib/engine/month";
 
@@ -320,7 +321,7 @@ async function placeStatementLines(
           notes: `From the bank statement line of ${line.on} (${line.description.replace(/\s+/g, " ").trim()}), tied to remittance ${r.remitNumber} of ${r.remitOn}.`,
           receivedOn: line.on,
           reference: r.paymentNumber ?? r.remitNumber,
-          sourceKey: `835|${r.payer.trim().toLowerCase()}|${r.paymentNumber ?? r.remitNumber}|${r.remitOn}`,
+          sourceKey: remitReceiptKey(r),
           documentId,
           createdBy: user.id,
         });

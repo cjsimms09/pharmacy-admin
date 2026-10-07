@@ -38,11 +38,19 @@ Every join is an identifier, not a guess:
 | fill → 835 | prescription number and fill number |
 | 835 → payment | the remittance's trace number; the portal prints the pairing both ways (*Payment match* on Remittances, *Remit match* on Payments) |
 | payment → sweep deposit | the payment number, which appears in the deposit's description |
-| deposit → transfer | same day; the transfer nets that day's deposits exactly |
+| deposit → transfer | the transfer takes everything deposited since the previous transfer, and the account history's own arithmetic says whether it did (a sweep that does not add up is not used) |
 | transfer → bank | date and amount — **the only inexact join in the whole map** |
 
-That last hop is inexact because a transfer carries no reference of its own. It is one lump a day,
-so the risk is small, but it is the place to look first when a month will not tie.
+That last hop is inexact because a transfer carries no reference of its own. It is one lump per
+sweep, so the risk is small, but it is the place to look first when a month will not tie.
+
+Where an account history on file holds a remittance's payment number on exactly one deposit, of the
+remittance's own amount, the site uses that hop, and only on these terms: the bank names the line
+as ProviderPay's own transfer, the line has been placed as payer money, its amount equals the
+sweep's transfer to the cent, it is dated 0 to 3 days after the sweep, and each line and each sweep
+serves one pairing (`src/lib/engine/remit-sweep.ts`). It is how two remittances of one amount
+advised days apart are told apart: the receipts cannot do it, and the payment number printed on the
+deposit can.
 
 - **Cash**: on the transfer date, in the operating account. Never on the deposit into the sweep —
   a payment landing 31 August and sweeping 1 September is September cash to the bank, and dating it
@@ -145,6 +153,8 @@ Each of these has been got wrong at least once:
 | Cash cost of goods, and the counted-once proof | `src/lib/cash-cogs.ts` |
 | Bank statement lines and what they mean | `src/lib/bank-descriptors.ts`, `src/lib/bank-statement.ts` |
 | The register of things that must be counted once | `src/lib/books-check.ts` |
+| Reading ProviderPay's account history, and which deposit reached which bank line | `src/lib/providerpay-account.ts`, `src/lib/engine/remit-sweep.ts` |
+| What stands for a remittance at the bank (read by the bank matcher, the Remits tab and the morning check) | `src/lib/engine/remit-standing.ts` |
 | Getting the month out of ProviderPay | `docs/PROVIDERPAY.md` |
 
 ## Two different problems that look identical on a claim

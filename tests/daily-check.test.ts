@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { runDailyCheck, summarise, type Facts } from "../src/lib/daily-check";
+import { runDailyCheck, summarise, type Facts, type History } from "../src/lib/daily-check";
 import { isRetired } from "../src/lib/retired";
 
 /** A day on which everything is as it should be. Each test spoils exactly one thing. */
@@ -25,9 +25,15 @@ const wellRun: Facts = {
   remittancesNotBanked: 0,
   remittancesNotBankedCents: 0,
   unbankedRemittances: [],
+  remittancesBankedBySweep: 0,
+  remittancesBankedByRemitNumber: 0,
   remittanceRegisterRows: 51,
-  remittanceRegisterOwed: 51,
+  remittancesNumbered: 51,
+  remittancesNotPositive: 0,
+  remittancesUnnumberedStanding: 0,
+  remittancesWaiting: [],
   remittanceRegisterThrough: "2026-09-17",
+  remittanceRegisterReadOn: "2026-09-17",
   remittancePaymentsPosted: 1346,
   today: "2026-09-17",
   now: "2026-09-17T17:00:00.000Z",
@@ -38,6 +44,10 @@ const check = (f: Partial<Facts>, what: string) => {
   assert.ok(c, `no check named ${what}`);
   return c;
 };
+
+const SHORT = "Invoices add up to what they say they come to";
+const BANKED = "Money the payer says it has sent has reached the cash account";
+type Tie = Facts["unbankedRemittances"][number]["tie"];
 
 describe("a well-run day", () => {
   test("nothing fails, and every check still states what it looked for", () => {
@@ -246,9 +256,9 @@ describe("money earned and money arriving", () => {
     );
     assert.equal(c.ok, false);
     assert.equal(c.kind, "money");
-    assert.match(c.observed, /9 remittances advised as paid and not banked/);
+    assert.match(c.observed, /^9 of the 51 remittances with a payment number, advised since the books began, are advised as paid and not banked, \$99,238\.84 between them/);
     assert.match(c.observed, /\$99,238\.84/);
-    assert.match(c.difference!, /nothing the site holds says it was deposited/, "says what is known, not that the money arrived");
+    assert.match(c.difference!, /^\$99,238\.84 is advised as paid and no receipt carries its payment number\. Two causes look the same here/, "says what is known, not that the money arrived");
     assert.match(c.difference!, /or the payer has advised it and not yet paid it/, "names the cause that is not the site's gap");
     assert.match(c.difference!, /Payments export/, "names the file that fixes it");
     assert.match(c.difference!, /unless that deposit already stands for another remittance of the same amount/, "two remittances of one amount are two deposits: a deposit of that amount settles it only when it is not already the other one's");
@@ -260,7 +270,7 @@ describe("money earned and money arriving", () => {
       "Money the payer says it has sent has reached the cash account",
     );
     assert.equal(c.ok, false);
-    assert.match(c.observed, /^1 remittance advised as paid and not banked, \$2,008\.00/);
+    assert.match(c.observed, /^1 of the 51 remittances with a payment number, advised since the books began, is advised as paid and not banked, \$2,008\.00/);
     assert.doesNotMatch(c.observed, /between them/);
   });
 
@@ -290,47 +300,148 @@ describe("money earned and money arriving", () => {
     assert.match(c.observed, /nothing to compare/);
   });
 
-  test("a remittance with no payment number is not counted as unbanked", () => {
-    // ProviderPay writes "Not matched" until a deposit is tied to the remittance. That is the payer
-    // saying the money has not moved, so there is nothing for the cash account to be missing.
-    const c = check({}, "Money the payer says it has sent has reached the cash account");
+  /*
+   * ProviderPay writes "Not matched" until it has tied a remittance to a payment. That is not the payer saying the money has not moved:
+   * a cheque payer's remittance never gets a number and its cash is banked at the counter. So the check cannot look for such a
+   * remittance by number, does not count it as unbanked, and does not call it "not owed" either; it says each one apart, by what
+   * stands for it.
+   */
+  test("a remittance with no payment number is not counted as unbanked, and is not called not owed", () => {
+    const c = check({ remittancesNumbered: 40, remittancesUnnumberedStanding: 1 }, BANKED);
     assert.equal(c.ok, true);
-    assert.match(c.shouldBe, /not owed yet/);
+    assert.match(c.shouldBe, /One with no payment number cannot be looked for by number: ProviderPay has not matched it to a payment yet, or its payer pays by cheque and never will\. It is said apart from the count, with what stands for it/);
+    assert.doesNotMatch(c.shouldBe, /not owed/);
+    assert.doesNotMatch(c.observed, /owed/);
   });
 
   /*
    * What the green line claims to have looked at.
    *
-   * On 28 September it read "all 51 remittances with a payment number have their cash" when 46
-   * carried one and the newest was eleven days old — the pull being monthly and by hand, which is
-   * his decision and not a fault. The money was right; the sentence described a wider and more
-   * recent look than had happened, and that is the sentence somebody acts on.
+   * On 28 September it read "all 51 remittances with a payment number have their cash" when 46 carried one and the newest was eleven
+   * days old: the pull being monthly and by hand, which is his decision and not a fault. On 6 October it read "all 62" when 22 of them
+   * were advised before the books began, which the figure it was compared with did not count. The money was right; the sentence
+   * described a wider and more recent look than had happened, and that is the sentence somebody acts on.
    */
   test("it counts the remittances it judges, not every row in the register", () => {
-    const c = check({ remittanceRegisterRows: 51, remittanceRegisterOwed: 46 }, "Money the payer says it has sent has reached the cash account");
+    const c = check({ remittanceRegisterRows: 69, remittancesNumbered: 40 }, BANKED);
     assert.equal(c.ok, true);
-    assert.match(c.observed, /all 46 remittances/);
-    assert.match(c.observed, /5 more carry no payment number/);
+    assert.match(c.observed, /^all 40 remittances with a payment number, advised since the books began, have their cash/);
+    assert.doesNotMatch(c.observed, /69/, "the size of the register is not the population judged");
   });
 
-  test("it says how far back the last export reaches, so a green line cannot read as today's", () => {
-    const c = check({ remittanceRegisterThrough: "2026-09-06", today: "2026-09-17" }, "Money the payer says it has sent has reached the cash account");
+  test("the rows with no payment number are said apart, by what stands for each, and not netted out of the count", () => {
+    const c = check(
+      {
+        remittanceRegisterRows: 69,
+        remittancesNumbered: 40,
+        remittancesUnnumberedStanding: 4,
+        remittancesWaiting: [
+          { payer: "Invented Payer B", remitOn: "2026-09-30", amountCents: 2_700_000 },
+          { payer: "Invented Payer A", remitOn: "2026-09-23", amountCents: 150_000 },
+        ],
+        remittanceRegisterThrough: "2026-09-30",
+        remittanceRegisterReadOn: "2026-10-01",
+        today: "2026-10-06",
+      },
+      BANKED,
+    );
+    assert.equal(c.ok, true, "a remittance that cannot be looked for by number does not fail the check");
+    assert.equal(
+      c.observed,
+      "all 40 remittances with a payment number, advised since the books began, have their cash; 6 other remittances carry no payment number yet: 4 have a receipt standing for them, by remittance number or amount, and 2 have nothing standing for them yet and are waiting (Invented Payer B, advised 2026-09-30, $27,000.00; Invented Payer A, advised 2026-09-23, $1,500.00); the last ProviderPay export was read 2026-10-01 (5 days ago) and holds advice to 2026-09-30",
+    );
+  });
+
+  test("one with a receipt standing for it, and one waiting, are each said in the singular", () => {
+    const stands = check({ remittancesNumbered: 40, remittancesUnnumberedStanding: 1 }, BANKED).observed;
+    assert.match(stands, /; 1 other remittance carries no payment number yet: 1 has a receipt standing for it, by remittance number or amount; the last ProviderPay export/);
+    const waits = check({ remittancesNumbered: 40, remittancesWaiting: [{ payer: "Invented Payer A", remitOn: "2026-09-23", amountCents: 150_000 }] }, BANKED).observed;
+    assert.match(waits, /; 1 other remittance carries no payment number yet: 1 has nothing standing for it yet and is waiting \(Invented Payer A, advised 2026-09-23, \$1,500\.00\); the last ProviderPay export/);
+  });
+
+  test("with none standing and none waiting it says nothing about remittances without a number", () => {
+    assert.doesNotMatch(check({ remittancesNumbered: 40 }, BANKED).observed, /no payment number yet/);
+  });
+
+  test("a waiting remittance whose payer or date was never captured is said, not left blank", () => {
+    const c = check({ remittancesWaiting: [{ payer: null, remitOn: null, amountCents: 150_000 }] }, BANKED);
+    assert.match(c.observed, /\(payer not captured, advised date not captured, \$1,500\.00\)/);
+  });
+
+  test("more waiting than it names are counted: the first three in the order given, and how many it left out", () => {
+    const waiting = [4, 3, 2, 1].map((n) => ({ payer: `Invented Payer ${n}`, remitOn: `2026-09-2${n}`, amountCents: n * 100_000 }));
+    const c = check({ remittancesWaiting: waiting }, BANKED);
+    assert.match(
+      c.observed,
+      /; 4 other remittances carry no payment number yet: 4 have nothing standing for them yet and are waiting \(Invented Payer 4, advised 2026-09-24, \$4,000\.00; Invented Payer 3, advised 2026-09-23, \$3,000\.00; Invented Payer 2, advised 2026-09-22, \$2,000\.00; and 1 more\)/,
+    );
+    assert.doesNotMatch(c.observed, /Invented Payer 1,/, "the fourth is counted, not named");
+  });
+
+  test("where no remittance since the books began carries a payment number it says there is nothing to compare, and what the rest are", () => {
+    const waiting = [
+      { payer: "Invented Payer A", remitOn: "2026-09-23", amountCents: 150_000 },
+      { payer: "Invented Payer B", remitOn: "2026-09-30", amountCents: 90_000 },
+    ];
+    const c = check({ remittancesNumbered: 0, remittancesWaiting: waiting }, BANKED);
+    assert.match(
+      c.observed,
+      /^no remittance advised since the books began carries a payment number, so there is nothing for this check to compare; 2 remittances carry no payment number yet: 2 have nothing standing for them yet and are waiting \(/,
+    );
+    assert.doesNotMatch(c.observed, /other remittances/, "there is no other kind for these to be other than");
+    assert.equal(c.ok, true, "waiting for a number is not a failure: how long an advice may wait before it is late is the owner's to say, and this check does not guess");
+  });
+
+  /*
+   * An advice of $0.00 or less is not money sent. Counted among the remittances with a payment number it would be "advised as paid and not
+   * banked" for ever, because no bank line holds nothing; so it is left out of every count and said apart, in whichever sentence the check
+   * ends up saying, and it is not a failure.
+   */
+  test("an advice of nothing or less is said apart in every branch, is in no count, and is not a failure", () => {
+    const apart = /; 2 advices of nothing or less are not money sent and are not judged/;
+    assert.match(check({ remittancesNotPositive: 2 }, BANKED).observed, apart, "everything else banked");
+    assert.match(check({ remittancesNumbered: 0, remittancesNotPositive: 2 }, BANKED).observed, apart, "no other advice carries a number");
+    const unbanked = check(
+      {
+        remittancesNotBanked: 1,
+        remittancesNotBankedCents: 150_000,
+        unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-09-20", amountCents: 150_000, tie: null, history: { state: "none" } }],
+        remittancesNumbered: 40,
+        remittancesNotPositive: 2,
+      },
+      BANKED,
+    );
+    assert.match(unbanked.observed, apart, "one unbanked");
+    assert.match(unbanked.observed, /^1 of the 40 remittances with a payment number/, "the two are not in the 40");
+    assert.match(check({ remittancesNotPositive: 1 }, BANKED).observed, /; 1 advice of nothing or less is not money sent and is not judged/);
+    assert.doesNotMatch(check({}, BANKED).observed, /of nothing or less/, "said only where there is one");
+    assert.equal(check({ remittancesNotPositive: 2 }, BANKED).ok, true, "being advised nothing is not a failure");
+  });
+
+  test("it says when the last export was read and how far its advice reaches, so a green line cannot read as today's", () => {
+    const c = check({ remittanceRegisterThrough: "2026-09-06", remittanceRegisterReadOn: "2026-09-10", today: "2026-09-17" }, BANKED);
     assert.equal(c.ok, true, "a monthly pull is the design, so a gap is not a failure");
-    assert.match(c.observed, /reading to 2026-09-06 \(11 days ago\)/);
+    assert.match(c.observed, /; the last ProviderPay export was read 2026-09-10 \(7 days ago\) and holds advice to 2026-09-06$/);
   });
 
-  test("an export read today says so rather than counting nought days", () => {
-    const c = check({ remittanceRegisterThrough: "2026-09-17", today: "2026-09-17" }, "Money the payer says it has sent has reached the cash account");
-    assert.match(c.observed, /reading to 2026-09-17 \(today\)/);
+  test("an export read today, or yesterday, says so rather than counting nought days", () => {
+    assert.match(check({ remittanceRegisterReadOn: "2026-09-17", today: "2026-09-17" }, BANKED).observed, /was read 2026-09-17 \(today\)/);
+    assert.match(check({ remittanceRegisterReadOn: "2026-09-16", today: "2026-09-17" }, BANKED).observed, /was read 2026-09-16 \(yesterday\)/);
   });
 
   test("the horizon is named on a failing line too, not only a passing one", () => {
     const c = check(
-      { remittancesNotBanked: 3, remittancesNotBankedCents: 250_000, remittanceRegisterThrough: "2026-09-06", today: "2026-09-17" },
-      "Money the payer says it has sent has reached the cash account",
+      { remittancesNotBanked: 3, remittancesNotBankedCents: 250_000, remittanceRegisterThrough: "2026-09-06", remittanceRegisterReadOn: "2026-09-10", today: "2026-09-17" },
+      BANKED,
     );
     assert.equal(c.ok, false);
-    assert.match(c.observed, /reading to 2026-09-06/);
+    assert.match(c.observed, /; the last ProviderPay export was read 2026-09-10 \(7 days ago\) and holds advice to 2026-09-06$/);
+  });
+
+  test("a date it was never given is not invented: only the one it has, or neither", () => {
+    assert.match(check({ remittanceRegisterReadOn: null, remittanceRegisterThrough: "2026-09-06" }, BANKED).observed, /; the last ProviderPay export holds advice to 2026-09-06$/);
+    assert.match(check({ remittanceRegisterReadOn: "2026-09-10", remittanceRegisterThrough: null, today: "2026-09-17" }, BANKED).observed, /; the last ProviderPay export was read 2026-09-10 \(7 days ago\)$/);
+    assert.doesNotMatch(check({ remittanceRegisterReadOn: null, remittanceRegisterThrough: null }, BANKED).observed, /ProviderPay export/);
   });
 });
 
@@ -341,10 +452,6 @@ describe("money earned and money arriving", () => {
  * shows a finding belongs to the check that found it, so the check carries it, and a finding that has a thing to look at names it.
  * Every name and amount below is invented.
  */
-const SHORT = "Invoices add up to what they say they come to";
-const BANKED = "Money the payer says it has sent has reached the cash account";
-type Tie = Facts["unbankedRemittances"][number]["tie"];
-
 describe("where each finding sends him", () => {
   test("every check names a page that exists and has not been retired", () => {
     for (const c of runDailyCheck(wellRun)) {
@@ -367,8 +474,9 @@ describe("where each finding sends him", () => {
       shortInvoices: [{ supplier: "Invented Wholesale Co", invoiceOn: "2026-10-06", shortCents: 2031 }],
       remittancesNotBanked: 1,
       remittancesNotBankedCents: 200_800,
-      unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-09-15", amountCents: 200_800, tie: "amount in window" }],
+      unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-09-15", amountCents: 200_800, tie: "amount in window", history: { state: "none" } }],
       remittanceRegisterThrough: "2026-09-30",
+      remittanceRegisterReadOn: "2026-10-01",
     }).filter((c) => !c.ok);
     assert.equal(failing.length, 3);
     assert.deepEqual(failing.map((c) => c.href.split("?")[0]).sort(), ["/inventory/invoices", "/remits", "/settings/email"]);
@@ -423,41 +531,51 @@ describe("a short invoice is named, so it can be found in a drawer", () => {
 });
 
 describe("a remittance not banked is named, with what the bank matcher says of it", () => {
+  const NO_HISTORY: History = { state: "none" };
   const advised = (tie: Tie, over: Partial<Facts["unbankedRemittances"][number]> = {}): Partial<Facts> => ({
     remittancesNotBanked: 1,
     remittancesNotBankedCents: 200_800,
-    unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-09-15", amountCents: 200_800, tie, ...over }],
+    unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-09-15", amountCents: 200_800, tie, history: NO_HISTORY, ...over }],
+    remittancesNumbered: 40,
     remittanceRegisterThrough: "2026-09-30",
+    remittanceRegisterReadOn: "2026-10-01",
     today: "2026-10-06",
   });
 
   /*
-   * This check ties a remittance to its cash by the payment number alone; the bank matcher and the Remits tab also accept a receipt of
-   * exactly that amount near the advice date. Where only that weakest tie exists the other page shows the remittance as standing, so a
-   * card that said only "not banked" would contradict it. It still FAILS: whether that receipt is this remittance or the next one cannot
-   * be settled from the amount or the days, only from the payer record.
+   * The card judges a remittance banked by the computation the Remits tab uses (engine/remit-standing.ts), except that a receipt of exactly
+   * its amount near its advice date does not count: two remittances of one amount are two deposits, and one receipt cannot be both. Where
+   * only that weakest tie exists the Remits tab shows the remittance as standing, so a card that said only "not banked" would contradict
+   * it. It still FAILS, and says what stands for it.
    */
   test("a receipt that stands for it by amount alone is said, and the check still fails", () => {
     const c = check(advised("amount in window"), BANKED);
     assert.equal(c.ok, false);
     assert.equal(
       c.observed,
-      "1 remittance advised as paid and not banked, $2,008.00 (Invented Payer A, advised 2026-09-15: a receipt of exactly that amount, near the advice date, stands for it by amount alone and not by its payment number), reading to 2026-09-30 (6 days ago) — the last ProviderPay export",
+      "1 of the 40 remittances with a payment number, advised since the books began, is advised as paid and not banked, $2,008.00 (Invented Payer A, advised 2026-09-15: a receipt of exactly that amount, near the advice date, stands for it by amount alone and not by its payment number, and no ProviderPay account history is on file to look in); the last ProviderPay export was read 2026-10-01 (5 days ago) and holds advice to 2026-09-30",
     );
     assert.equal(c.href, "/remits");
     assert.equal(c.action, "See the remittances");
   });
 
-  test("a receipt that names its remittance number is said", () => {
-    assert.match(check(advised("remittance number"), BANKED).observed, /advised 2026-09-15: a receipt carries its remittance number, not its payment number\)/);
-  });
-
-  test("a receipt that carries its payment number in a form this check does not match is said", () => {
-    assert.match(check(advised("payment number"), BANKED).observed, /advised 2026-09-15: a receipt carries its payment number, written in a way this check does not match\)/);
-  });
-
-  test("where the matcher finds nothing either, it says so in the three ways it looked", () => {
-    assert.match(check(advised(null), BANKED).observed, /advised 2026-09-15: no receipt stands for it, by payment number, remittance number or amount\)/);
+  /*
+   * A receipt of the same amount cannot say whose money it is; the account history can, because it names each deposit by its payment
+   * number. So a remittance that only an amount stands for says what the history holds as well, or the card tells him there is a question
+   * and not where the answer is. None of these makes it banked (the history would have banked it), so each still fails.
+   */
+  test("a receipt that stands for it by amount alone also says what the account history holds", () => {
+    const cases: [History, RegExp][] = [
+      [{ state: "reaches past", through: "2026-09-30" }, /by its payment number, and ProviderPay's account history on file \(to 2026-09-30\) holds no deposit under its payment number\)/],
+      [{ state: "holds a deposit", on: "2026-09-24" }, /by its payment number, and ProviderPay's account history holds a deposit under its payment number, dated 2026-09-24, that is not shown reaching a bank line already placed\)/],
+      [{ state: "ends too soon", through: "2026-09-24" }, /by its payment number, and the newest ProviderPay account history on file ends 2026-09-24, too soon after it was advised to show its deposit either way\)/],
+      [{ state: "has a gap", month: "2026-09" }, /by its payment number, and no ProviderPay account history on file covers 2026-09, so it cannot show its deposit either way\)/],
+    ];
+    for (const [history, words] of cases) {
+      const c = check(advised("amount in window", { history }), BANKED);
+      assert.equal(c.ok, false, history.state);
+      assert.match(c.observed, words, history.state);
+    }
   });
 
   test("a payer or a date that was never captured is said, not left blank", () => {
@@ -465,22 +583,175 @@ describe("a remittance not banked is named, with what the bank matcher says of i
     assert.match(c.observed, /\(payer not captured, advised date not captured: /);
   });
 
+  /*
+   * "No receipt stands for it" is four different things, and the card used to say one of them for all four. On 6 October 2026 the
+   * remittance advised on the 15th had its deposit in ProviderPay's September account history under its own payment number, and the
+   * card said no history showed it. Each sentence below is what is true of that state and no other.
+   */
+  test("where nothing stands for it and no account history is on file, it says there is none to look in", () => {
+    assert.match(
+      check(advised(null, { history: { state: "none" } }), BANKED).observed,
+      /advised 2026-09-15: no receipt stands for it, by payment number, remittance number or amount, and no ProviderPay account history is on file to look in\)/,
+    );
+  });
+
+  test("where the newest history ends too soon after the advice, it says so rather than that nothing was found", () => {
+    assert.match(
+      check(advised(null, { history: { state: "ends too soon", through: "2026-09-24" } }), BANKED).observed,
+      /and the newest ProviderPay account history on file ends 2026-09-24, too soon after it was advised to show its deposit either way\)/,
+    );
+  });
+
+  test("where no history on file covers the month the deposit would fall in, it says there is a gap and not that nothing was found", () => {
+    const c = check(advised(null, { history: { state: "has a gap", month: "2026-08" } }), BANKED);
+    assert.match(c.observed, /and no ProviderPay account history on file covers 2026-08, so it cannot show its deposit either way\)/);
+    assert.doesNotMatch(c.observed, /holds no deposit|too soon|is on file to look in/, "a month with no file is not a month with nothing in it");
+    assert.equal(c.ok, false);
+  });
+
+  test("where the history reaches past the advice and holds nothing under its payment number, it says that", () => {
+    assert.match(
+      check(advised(null, { history: { state: "reaches past", through: "2026-09-30" } }), BANKED).observed,
+      /and ProviderPay's account history on file \(to 2026-09-30\) holds no deposit under its payment number\)/,
+    );
+  });
+
+  test("where the history holds the deposit and no placed bank line was shown to carry it, it says the deposit is there", () => {
+    const c = check(advised(null, { history: { state: "holds a deposit", on: "2026-09-24" } }), BANKED);
+    assert.match(c.observed, /and ProviderPay's account history holds a deposit under its payment number, dated 2026-09-24, that is not shown reaching a bank line already placed\)/);
+    assert.doesNotMatch(c.observed, /holds no deposit|too soon|no ProviderPay account history is on file/, "it must not also say the history does not show it");
+  });
+
   test("several are named largest first with their amounts, three at most, and the rest counted", () => {
+    const here = (payer: string, remitOn: string, amountCents: number, tie: Tie) => ({ payer, remitOn, amountCents, tie, history: NO_HISTORY });
     const c = check(
       {
         remittancesNotBanked: 5,
         remittancesNotBankedCents: 600_000,
+        remittancesNumbered: 40,
         unbankedRemittances: [
-          { payer: "Invented Payer A", remitOn: "2026-09-15", amountCents: 200_800, tie: "amount in window" },
-          { payer: "Invented Payer D", remitOn: "2026-09-18", amountCents: 120_000, tie: null },
-          { payer: "Invented Payer E", remitOn: "2026-09-12", amountCents: 90_000, tie: null },
-          { payer: "Invented Payer C", remitOn: "2026-09-10", amountCents: 75_500, tie: null },
+          here("Invented Payer A", "2026-09-15", 200_800, "amount in window"),
+          here("Invented Payer D", "2026-09-18", 120_000, null),
+          here("Invented Payer E", "2026-09-12", 90_000, null),
+          here("Invented Payer C", "2026-09-10", 75_500, null),
         ],
       },
       BANKED,
     );
-    assert.match(c.observed, /^5 remittances advised as paid and not banked, \$6,000\.00 between them \(Invented Payer A, advised 2026-09-15, \$2,008\.00: /);
+    assert.match(c.observed, /^5 of the 40 remittances with a payment number, advised since the books began, are advised as paid and not banked, \$6,000\.00 between them \(Invented Payer A, advised 2026-09-15, \$2,008\.00: /);
     assert.match(c.observed, /Invented Payer E, advised 2026-09-12, \$900\.00: no receipt stands for it[^;]*; and 2 more\)/);
     assert.doesNotMatch(c.observed, /Invented Payer C/, "the fourth is counted, not named");
+  });
+});
+
+describe("a remittance banked by the account history is said, so the evidence is not hidden by the count", () => {
+  /*
+   * ProviderPay's account history can show a remittance's deposit reaching a placed bank line when no receipt carries its payment number
+   * (a deposit labelled with the next remittance of the same amount). Those are banked, so they are in neither count; the card has to
+   * say how it knew, because "all 46 have their cash" would otherwise read as receipts when it is a file.
+   */
+  const through = { remittanceRegisterRows: 51, remittancesNumbered: 46, remittanceRegisterThrough: "2026-09-30", remittanceRegisterReadOn: "2026-10-01", today: "2026-10-06" };
+  const unbanked = (over: Partial<Facts> = {}): Partial<Facts> => ({
+    ...through,
+    remittancesNotBanked: 1,
+    remittancesNotBankedCents: 150_000,
+    unbankedRemittances: [{ payer: "Invented Payer B", remitOn: "2026-09-20", amountCents: 150_000, tie: null, history: { state: "reaches past", through: "2026-09-30" } }],
+    ...over,
+  });
+
+  test("one swept remittance passes, and the line says it was the account history", () => {
+    const c = check({ ...through, remittancesBankedBySweep: 1 }, BANKED);
+    assert.equal(c.ok, true);
+    assert.equal(
+      c.observed,
+      "all 46 remittances with a payment number, advised since the books began, have their cash; 1 of them is shown banked by ProviderPay's account history, not by a receipt carrying the payment number; the last ProviderPay export was read 2026-10-01 (5 days ago) and holds advice to 2026-09-30",
+    );
+  });
+
+  test("several swept remittances are said in the plural", () => {
+    assert.match(check({ ...through, remittancesBankedBySweep: 3 }, BANKED).observed, /; 3 of them are shown banked by ProviderPay's account history, not by a receipt carrying the payment number;/);
+  });
+
+  test("none swept says nothing about the account history, so a passing line does not claim evidence it does not have", () => {
+    assert.doesNotMatch(check({ ...through, remittancesBankedBySweep: 0 }, BANKED).observed, /account history/);
+    assert.doesNotMatch(check({}, BANKED).observed, /account history/);
+  });
+
+  test("swept remittances do not hide one that is still not banked, and the card counts them apart", () => {
+    const c = check(unbanked({ remittancesBankedBySweep: 1 }), BANKED);
+    assert.equal(c.ok, false);
+    assert.equal(
+      c.observed,
+      "1 of the 46 remittances with a payment number, advised since the books began, is advised as paid and not banked, $1,500.00 (Invented Payer B, advised 2026-09-20: no receipt stands for it, by payment number, remittance number or amount, and ProviderPay's account history on file (to 2026-09-30) holds no deposit under its payment number); 1 other is shown banked by ProviderPay's account history, not by a receipt carrying the payment number; the last ProviderPay export was read 2026-10-01 (5 days ago) and holds advice to 2026-09-30",
+    );
+    assert.match(check(unbanked({ remittancesBankedBySweep: 2 }), BANKED).observed, /; 2 others are shown banked by ProviderPay's account history, not by a receipt/);
+  });
+
+  test("the rule names what banks a remittance and says an amount alone is not enough", () => {
+    const c = check(unbanked(), BANKED);
+    assert.match(
+      c.shouldBe,
+      /a receipt carrying that number; or, where the receipt was banked under another remittance of the same amount, ProviderPay's account history showing the deposit under that number swept to a bank line of the same amount; or a receipt keyed to the remittance's own number\. A receipt of the same amount near the advice date is not enough for one that has a payment number, because two remittances of one amount are two deposits\./,
+    );
+  });
+
+  test("the way out says what settles it, and says only what the site does", () => {
+    const c = check(unbanked(), BANKED);
+    assert.match(
+      c.difference!,
+      /ProviderPay's account history for the month shows each deposit by its payment number and each sweep to the bank; where it shows this remittance's deposit reaching a bank line, the remittance is banked and leaves this list, so one that is on it is one the history on file does not show, or does not yet reach\./,
+    );
+    assert.match(c.difference!, /the site can refuse its receipt as the same money as a receipt it already holds of that amount within a week, so where one is already there the account history is what settles it\./);
+    assert.match(c.difference!, /Each remittance named above says what stands for it and what the history can show\.$/);
+    assert.doesNotMatch(c.difference!, /settles it by payment number/, "the old way out promised a history that may already be on file");
+    assert.doesNotMatch(c.difference!, /Payments export[^.]*\bties\b/, "the old way out promised the Payments export would tie the deposit; the site can refuse its receipt");
+  });
+});
+
+describe("a remittance banked by a receipt keyed to its remittance number is said, as the swept ones are", () => {
+  /*
+   * When the register first holds a remittance without its payment number the bank matcher keys the receipt it makes to the remittance
+   * number; ProviderPay's later export gives the remittance its payment number and no receipt carries that number. The money is in the cash
+   * account and the evidence is a key, so a passing line that only said "have their cash" would hide how it was known.
+   */
+  const through = { remittanceRegisterRows: 51, remittancesNumbered: 46, remittanceRegisterThrough: "2026-09-30", remittanceRegisterReadOn: "2026-10-01", today: "2026-10-06" };
+
+  test("one such remittance passes, and the line says how it was known", () => {
+    const c = check({ ...through, remittancesBankedByRemitNumber: 1 }, BANKED);
+    assert.equal(c.ok, true);
+    assert.equal(
+      c.observed,
+      "all 46 remittances with a payment number, advised since the books began, have their cash; 1 of them is banked by a receipt keyed to the remittance number, not the payment number; the last ProviderPay export was read 2026-10-01 (5 days ago) and holds advice to 2026-09-30",
+    );
+  });
+
+  test("several are said in the plural", () => {
+    assert.match(check({ ...through, remittancesBankedByRemitNumber: 3 }, BANKED).observed, /; 3 of them are banked by a receipt keyed to the remittance number, not the payment number;/);
+  });
+
+  test("none says nothing about it, so a passing line does not claim evidence it does not have", () => {
+    assert.doesNotMatch(check({ ...through, remittancesBankedByRemitNumber: 0 }, BANKED).observed, /remittance number/);
+    assert.doesNotMatch(check({}, BANKED).observed, /remittance number/);
+  });
+
+  test("both kinds are said together with their own counts, and neither hides one still not banked", () => {
+    const both = check({ ...through, remittancesBankedBySweep: 1, remittancesBankedByRemitNumber: 2 }, BANKED);
+    assert.equal(both.ok, true);
+    assert.match(
+      both.observed,
+      /have their cash; 1 of them is shown banked by ProviderPay's account history, not by a receipt carrying the payment number; 2 of them are banked by a receipt keyed to the remittance number, not the payment number; the last/,
+    );
+    const failing = check(
+      {
+        ...through,
+        remittancesBankedByRemitNumber: 1,
+        remittancesNotBanked: 1,
+        remittancesNotBankedCents: 150_000,
+        unbankedRemittances: [{ payer: "Invented Payer B", remitOn: "2026-09-20", amountCents: 150_000, tie: null, history: { state: "reaches past", through: "2026-09-30" } }],
+      },
+      BANKED,
+    );
+    assert.equal(failing.ok, false);
+    assert.match(failing.observed, /; 1 other is banked by a receipt keyed to the remittance number, not the payment number; the last ProviderPay export/);
   });
 });

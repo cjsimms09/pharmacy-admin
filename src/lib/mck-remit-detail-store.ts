@@ -1,10 +1,9 @@
 import "server-only";
 import { db, schema } from "@/db";
-import { and, like, ne, eq, isNotNull } from "drizzle-orm";
+import { and, like, ne, eq } from "drizzle-orm";
 import { readRemitDetail, detailAgreesWithSummary, type DetailRead } from "./mck-remit-detail";
 import { readRemitSummary, type SummaryRow } from "./mck-remit-csv";
 import { recordClaimPayment } from "./claim-payments";
-import { SITE_STARTS_ON } from "./books-start";
 import { newId } from "./crypto";
 
 /**
@@ -154,48 +153,6 @@ export async function fillRegisterFromFiledSummaries(): Promise<{ read: number; 
     remembered += summary.rows.length;
   }
   return { read, remembered };
-}
-
-/**
- * Remittances whose money the payer says it has sent and which no cash receipt carries.
- *
- * The question nothing could ask on 18 September, when $99,238.84 of deposits had reached the bank
- * and the cash account knew about none of them. A remittance with no payment number is left out:
- * that is ProviderPay saying the deposit has not happened, which is money not yet owed to the cash
- * account rather than money missing from it.
- *
- * Reads only. It judges nothing and changes nothing — it reports a disagreement between two feeds
- * that should agree.
- */
-export async function remittancesNotBanked(): Promise<{ remitNumber: string; payerName: string; remitOn: string | null; amountCents: number; paymentNumber: string }[]> {
-  const rows = await db
-    .select()
-    .from(schema.remittanceRegister)
-    .where(isNotNull(schema.remittanceRegister.paymentNumber));
-  if (rows.length === 0) return [];
-
-  const banked = await db
-    .select({ sourceKey: schema.cashReceipts.sourceKey })
-    .from(schema.cashReceipts)
-    .where(eq(schema.cashReceipts.outOfBooks, false));
-  const keys = banked.map((b) => (b.sourceKey ?? "").toLowerCase());
-
-  return rows
-    .filter((r) => {
-      /*
-       * Remittances from before the books begin are not money the cash account is missing.
-       *
-       * The owner: "I do not want to track or keep track of payments from before 09/01.. these are
-       * test only and should not show up on any AR reports or anything." Their deposits are banked
-       * out of books or not at all, by design, so counting them here reported $251,539.57 when the
-       * real figure was $97,554.15 — and a check wrong by two thirds is one nobody reads twice.
-       */
-      if (r.remitOn !== null && r.remitOn < SITE_STARTS_ON) return false;
-      const n = (r.paymentNumber ?? "").trim().toLowerCase();
-      return n.length > 0 && !keys.some((k) => k.includes(n));
-    })
-    .map((r) => ({ remitNumber: r.remitNumber, payerName: r.payerName, remitOn: r.remitOn, amountCents: r.amountCents, paymentNumber: r.paymentNumber! }))
-    .sort((a, b) => b.amountCents - a.amountCents);
 }
 
 /**

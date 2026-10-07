@@ -1187,13 +1187,190 @@ place, and an arithmetic check before anything is stored.
   are fixed, with a test that fails when a screen links to one (HANDOFF, top item; OPEN-ITEMS, "Found 5 October"). A
   page the site retires next must be added to `src/lib/retired.ts`, or that test cannot know.
 
-- **6 October, his words:** "fix issues" · then, the morning check: "The morning check found 3 things — Should be: invoices
-  add up to what they say they come to. Found: 1 short by $20.31 in total. · Should be: the mailbox is being swept.
-  Found: last swept 7 hours ago. · Should be: money the payer says it has sent has reached the cash account. Found: 1
-  remittance advised as paid and not banked, $2,008.00, reading to 2026-09-30 (6 days ago) — the last ProviderPay
-  export." · then, on the Compliance page: "1 period went by without being covered. Those do not become fine because a
-  later one was done — they are what an inspector finds. Closing one now records the date it was actually done, which
-  is honest and still better than a gap I think Ij ust did this and still getting alert". Done in the working copy, not
-  deployed: the Compliance banner, the mailbox line and the $20.31 invoice were the site's own mistakes and are fixed;
-  the $2,008.00 is a real question for him to answer in ProviderPay, and the card now says what it is (OPEN-ITEMS,
-  "Found 6 October"; HANDOFF, top item).
+- **6 October, his words:** "fix issues" · then, the morning check: "The morning check found 3 things — Should be:
+  invoices add up to what they say they come to. Found: 1 short by $20.31 in total. · Should be: the mailbox is being
+  swept. Found: last swept 7 hours ago. · Should be: money the payer says it has sent has reached the cash account.
+  Found: 1 remittance advised as paid and not banked, $2,008.00, reading to 2026-09-30 (6 days ago) — the last
+  ProviderPay export." · then, on the Compliance page: "1 period went by without being covered. Those do not become
+  fine because a later one was done — they are what an inspector finds. Closing one now records the date it was
+  actually done, which is honest and still better than a gap I think Ij ust did this and still getting alert". Done in
+  the working copy, not deployed: the Compliance banner, the mailbox line and the $20.31 invoice were the site's own
+  mistakes and are fixed; the $2,008.00 was first written up as a real question for him to answer in ProviderPay; it
+  was not one, because ProviderPay's September account history, filed on 1 October, already showed it banked on 24
+  September, and the card now reads that (OPEN-ITEMS, "Found 6 October"; HANDOFF, top item).
+
+- **6 October, later, his words:** "Are we learning from all these mistakes it makes and making sure it knows how do
+  to it correctly.. we need to get to the point where this site doesn't have all these mistakes all the time.." The
+  record behind the answer: the five wrong alarms he was shown that morning were written on 4 Sept, 10 Sept, 17 Sept,
+  15 Sept to 1 Oct and 2 Oct, three of them after the rules of 12 Sept; of 417 commits since, 4 record another
+  session reading the change, so he has been the second reader. Queued, in this order: (1) a reader who is not the
+  author on every change he will read, named in the commit; (2) every check, alert and banner that can reach him
+  audited for the stand-in shape (it says one thing and reads a neighbour of it while the real thing is on file), on
+  live data, read-only, and fixed where it does; (3) the one-press "this is wrong" on the morning-check card, stored,
+  and read at the start of every session (Rule 4); (4) the lesson written where every session reads it. The measure
+  is how many alarms he has to tell us about: five on 6 October.
+  - **Status when the remittance-line commit was written:** (1) done for this one change and not yet a procedure: a
+    second Claude, with none of the author's reasoning, read an earlier version of the sweep-deposit change cold, and
+    the commit names what only the author read. (2) five cold readers have reported (the checks and proofs, Today with
+    its alerts and feeds, the money pages, Compliance, and the sweep change itself); what they reported is listed
+    below as leads, none of them checked. (3) and (4) are not started.
+  - **Status on 7 October, when the remittance-line change was finished:** the sweep-deposit change was read cold by a
+    second Claude twice, once at six points and once, after the month-coverage and non-positive-advice rules had been
+    added, at ten. Each point was checked against the code, and where it depends on data against the live database
+    read-only (counts only), before it was used: what held became code and tests or a row in OPEN-ITEMS ("Found 6
+    October", from the SS&C HEALTH row to "Eight edges of the remittance line"); what was a choice, or has no instance
+    on file, is said in those rows as such. One claim could not be checked, that no screen reads the Remits view's
+    standings, because the folder holding it is read-denied to the session that wrote this; it is asked of the cloud
+    session in HANDOFF. What only the author read is the code written after the second report. **A reader's lead can be
+    wrong: two of the leads below (A2-4 and A2-6) were refuted when checked, and A2-3 is true in the code and dormant;
+    each says so in its own entry.** Nothing here is registered as a fact until it has been checked this way.
+
+- **6 October, the cold readers' leads: LEADS, NOT FINDINGS.** Nobody but the reader who wrote each one has checked it
+  against the code or the live data, and a cold reader's claim is something to verify, not a fact (CLAUDE.md, rule 1:
+  a finding is written in three lines and its SHOULD BE comes from the business, not from what the reader saw). Each
+  was reported by a reader who had not seen the morning's work, looking for the shape that put five wrong alarms in
+  front of him: a check that reads a neighbour of the thing its sentence names while the real thing is on file.
+  Prefixes: A2 is the morning check and the nightly proofs, A3 is Today with its alerts and feeds, A4 is Compliance,
+  A5 is the money pages. To take one: read the code it names, and where it depends on data read the live database
+  read-only (counts and sums, never rows), then write it in three lines in OPEN-ITEMS or drop it, and fix it with a
+  test that fails without the fix. Order: what he can see now that is a false alarm (A3-2, A2-5, A3-3, A3-5, A3-6),
+  then false all-clears (A3-1, A3-4, A2-3, A2-4, A2-6, A2-7, A2-8, A5-1 to A5-4), then Compliance (A4). Questions for
+  him that came out of them are marked Q; none has been asked.
+  - **A3-1** `dashboard/page.tsx` near line 131 wraps `dailyCheck()` in a `.catch` that returns no checks and no
+    failures, so if the morning check cannot run, Today looks clean; a check that did not run is never-measured and
+    should say so (rule 5).
+  - **A3-2** `feeds.ts` near lines 253-258 judges the 835 feed on the newest advice date after 14 days, while
+    ProviderPay is pulled by hand once a month; the feed would read "stopped arriving" for about half of every month.
+    The morning check's `horizon()` already tells the day the export was read from the newest advice date.
+    Checked 6 October against the live database (dates and counts only): NOT a false alarm today. The newest 835
+    payment is dated 6 October, the widest gap between days an 835 payment was dated since 1 September is 5 days,
+    and payments arrive between the monthly pulls (an Access Health EFT and single 835s were loaded on 2, 3 and 6
+    October). What remains is the reverse: the feed is judged on the payer's paid date and not on when the file
+    arrived, so a missed monthly pull would be hidden by a stray 835 paid in the days after it (check 10's horizon
+    covers the export's own currency). Not fixed, and not a finding until a month shows it.
+  - **A3-3** `mail-health.ts` near lines 49-56 reports the mailbox failing when the last send failed or when any
+    training assignment carries a send error, so a stale bounce pins "the last attempt did not get through"; which
+    failure it names is unordered.
+  - **A3-4** `feeds.ts` near line 286 judges the MTF feed on `mtf_last_pull`; `mtf.ts` writes it near line 298 before
+    `if (!r.ok) return`, and again near line 589 after "Could not fetch", so a failed pull reads as on time.
+    Checked 7 October (the code, and the settings and counts read-only): the stamp is written whatever the outcome in
+    both places, so it says when the site last tried and not when it last succeeded. Not a false alarm today: the last
+    result reads "Ran successfully. Nothing new to download for that range. Nothing new to post." and the newest of
+    the 57 MTF payments ($14,088.14 in all) was received on 5 October. Latent, not fixed: a pull that failed would
+    leave the feed reading on time. The fix is to stamp `mtf_last_pull` only on success, or to let the feed say the
+    last pull failed; `mtf.ts` has CRLF line endings, so it is edited with a tool that keeps them.
+  - **A3-5** `alerts.ts` near lines 692-702: the monthly-checklist alert links "See the list" to `/money`; the list is
+    on `/expected`.
+  - **A3-6** (also reported as A2-1) `dashboard/page.tsx` near lines 521-523: the claims-proof alert links "See the
+    checks" to `/money`, which shows no proofs; Data health was retired on 2 October; and a proof that has never run
+    is silent.
+    Checked 6 October against the live database (counts only): the nightly claims proof ran today and found 0
+    disagreements across 41 stored reports and no file problems, so the alert is not firing and there is no
+    false alarm to see. The link still goes to a page that does not show the proof, and a proof that never ran is
+    still silent; both matter only on the day it fails. Beside it: the proof's other direction counts 474 paid
+    claims that no stored report accounts for, shown nowhere since Data health was retired. 442 of them belong
+    to the imports named "PioneerRx backfill", which carry no transaction key by design; 32 are rows from daily
+    reports whose key is in no stored daily report (cause not examined; it needs a look at the rows). Not fixed.
+  - **A3-7** `alerts.ts` near lines 417-419 says "No backup has run for two days" when none has ever run; its
+    threshold is 50 hours.
+  - **A3-8** the rebate feed is judged on `filedAt` (`feeds.ts` near lines 365 and 468) and the morning check's check
+    3 on `periodTo`; they can disagree.
+  - **A3-9** `dashboard/page.tsx` near line 155 requires `pharmacy_dea`; `setup-store.ts` does not.
+  - **A3-Q** `feeds.ts` near line 124 judges the claims feed on the newest fill date, `automation-status` on
+    `claim_imports.created_at`; which one Today should mean is for him to say.
+  - **A3-10** loose ends: `MAX_QUIET_HOURS` in `automation-status` is an orphan comment; `cqi` and `reminders` are
+    `enabled: true` unconditionally; `mail-health.ts` near line 45 decides success by testing a stored string for
+    "FAILED". Not a lead for action, and not to be re-added: `alerts.ts` near line 937 holds a pattern that drops "N
+    supplies need ordering", correctly, because purchasing was cut on 2 October.
+  - **A2-2** `instrumentation.ts` near lines 527-595: the nightly proofs for NADAC, the catalogue, invoices and the
+    directory write only to the retired data-health page; only `claims_proof` has a reader that is still live.
+  - **A2-3** check 4, "every invoice on file reconciles", reads only invoices where `lines_short_cents` is not null;
+    an invoice with a total and no lines read is outside it (`invoices.ts` near line 2994 returns before the write).
+    Checked 7 October (the code, and counts read-only): true in the code and dormant today. The check counts the
+    invoices that have a short figure recorded (two today, $51.32 in all); `storeInvoiceLines` returns before it
+    writes one when the text is under 200 characters or no line parsed, so an invoice whose text could not be read
+    keeps no figure and is counted with the ones that add up. All 219 invoices on file have lines read and none has a
+    total and no lines, so nothing is hidden now. The small fix is a never-measured count beside the short one
+    (invoices with a total and no lines read), said on the card in its own words. Not built.
+  - **A2-4** check 8 groups by supplier, eligibility and ratio measure; `rebate-view.ts` `sumOver` filters on
+    eligibility only and sums every current ladder, so a doubled rate can pass the check.
+    Checked 7 October (the code, and the ladders read-only): refuted. Of the four current ladders on file, the one
+    (supplier, eligibility) pair that `sumOver` adds across measures is the contract-generic basket's two statement
+    rebates, one measured by generic compliance and one by the generic purchase ratio; they are paid together, so
+    adding them is right, and check 8 groups by measure so that it flags only a second ladder on the same measure,
+    which is the renamed-programme doubling it was written for. Zero baskets are flagged. One question stays open and
+    is not a finding: the all-generics ladder (current from 1 July 2026) is added to the contract rate in the
+    purchasing comparison and the rate explainer, while the monthly estimate prices flagged lines on the contract
+    rate alone, so if that ladder pays on top of the statement's two rebates the estimate is low, not high. Not asked
+    of him yet.
+  - **A2-5** `engine/proofs.ts` near line 67: `claimsEqualPioneer` is scoped to `c.coverTo`, which moves, and
+    `needs-you.ts` near line 246 takes the latest proof per (proof, scope), so the failing line ("PioneerRx holds 38
+    fills the site does not") never resolves.
+    Checked 6 October against the live database (counts and dates only): real and dormant. Five
+    `claims_eq_pioneer` lines are open on five moving scopes (30 September to 5 October); the oldest still says
+    "PioneerRx holds 42 fills the site does not" although every run since 2 October found none missing, and its
+    link, `/claims`, does not show the comparison (the Checks card on `/money` does). But no screen reads the
+    needs-you list (`engine/read.ts` is imported only by `scripts/support/engine-run.ts`, and the engine's screens
+    were retired on 2 October), so nobody sees them. Fix before those screens come back: keep only the newest
+    run of a proof whose scope moves, give the line an id without the date, link it to `/money`. Not fixed.
+  - **A2-6** check 3's no-statement branch says the boot correction fixes it; `correctStandingRebateStatement` returns
+    `{ moved: false }` first when none is standing, so the instruction cannot clear the line.
+    Checked 7 October (the code): refuted as written. The no-statement branch of check 3 says only that nothing is
+    setting the contract rate; it does not mention the boot correction. The branch that does ("the correction at boot
+    puts the newest statement on file back in charge") is true: `correctStandingRebateStatement` moves a standing
+    statement more than 60 days old to a newer one that reads and passes its own checks. The corner left: a newer
+    statement that is on file and fails its own checks is not moved, and the card then says it "has not arrived" when
+    it has arrived and was refused. Dormant (check 3 passes today). Not fixed.
+  - **A2-7** `expectedArrived` (`proofs.ts` near line 206) and `readerArithmetic` (near line 76) pass on an empty
+    population, and `needs-you.ts` near line 250 drops both. The same family as the morning check's "no remittance has
+    been read yet" branch, which passes and is deferred with it.
+  - **A2-8** check 9 joins `claim_payments` to `claims` on `rx_number` and `date_filled` and lacks `fill_number`,
+    which `fills.ts` `fillKey` includes.
+  - **A2-9** loose ends: `paymentsOnce` pairs only rows that share a source (MTF against plan); `receipts_to_bank` is
+    a permanent Today line for a past month with no statement; check 2 says "can be removed" while
+    `duplicatesToRemove` leaves a residue; `data_health_last` is stamped before the child process spawns; check 5 uses
+    6 hours where `feeds.ts` uses 26.
+  - **A2-Q** check 6 counts only `REBATE|%` expenses while its sentence says "money booked off a statement"; should it
+    cover what the other statement readers book?
+  - **A5-1** `needs-you.ts` near line 220 and `money/page.tsx` near line 256 say "Every line placed and every proof
+    passed"; `month.ts` near line 128, `closeState`, reads no proof. A known carry-forward, and the September
+    remit-to-claim proof fails.
+  - **A5-2** `money/page.tsx` near line 421 says "the cash account equals the bank to the cent", which holds by
+    construction over the rows it reads; only `bank_to_cent` proves the rows equal the statement, and the page's
+    upload path (`bank.ts` near lines 43-51) does not call `recordMonthBalances`.
+  - **A5-3** a cheque matched to an expected cheque is stored `placedAs` `noted` with a why that begins "Invoice N: ";
+    `cash-from-bank-rules.ts` near lines 188-193 looks the text before the colon up as a category, finds none and says
+    "Not yet named", while the bank page shows the line confirmed with no button: two states at once.
+  - **A5-4** `bank.ts` near line 520 prints "Read from the scan and proved against its daily balances." only when
+    `o.notes?.length`, which looks inverted.
+  - **A5-5** loose ends: `cash-from-bank.ts` near line 58 decides "not yet at the bank" and "credit memos" by a
+    pattern on the source key, and near lines 115-116 returns `missing: []` with `usable: true`; `month.ts` near line
+    199, `statementOnFile`, is unused.
+  - **A5-Q** a receipt typed on the books page gets a month and no received day, so `month.ts` near line 87 leaves it
+    out and `cash-from-bank.ts` near line 54 keys on the month; should the form ask for the day?
+  - **A4-1** `compliance/register/page.tsx` near lines 27 and 41-45: a cell is green ("satisfied") unless its period
+    is still open, and `openItems()` skips duties that need confirming (`compliance-status.ts` near line 282), so
+    every period of the six unanswered duties would render green; the main page's `clean` (near line 55) ignores
+    `summary.unanswered`.
+  - **A4-2** "Test that a backup restores": the duty's detail names "the dispensing system and this desk"
+    (`obligations.ts` near lines 489-493) but its witness is only this desk's rehearsal archive, and
+    `instrumentation.ts` near lines 269-275 rehearses every 30 days, so the quarter would always cover itself. Q for
+    him: does anyone test the PioneerRx backup, and should the duty be about this desk only?
+  - **A4-3** `ks_pharmacy_registration` and `dea_registration` are kind "renewal"; `witnessed()` has no renewal case,
+    `hrefFor` is null, the page renders nothing for a renewal with no link, and `completeObligation()` has no caller;
+    the 2026 period is open with `dueOn` 2026-06-30 and would sit under "not due yet" / "Nothing here". To see what he
+    sees.
+  - **A4-4** `compliance-status.ts` near lines 123-154 judges training periods on today's on-site roster; an empty
+    population reads as missed for most duties and as satisfied for `immunization_protocol_review` (near line 148).
+  - **A4-5** a witnessed period recorded wrongly cannot be corrected (`page.tsx` near lines 341-351 has no form);
+    `imonnit.ts` near lines 505-507, `monthsSatisfied`, is false for every month when no sensor is tracked.
+  - **A4-Q** the "CQI program" duty's witness is a staff member who holds a `cqi_program_review` training record, a
+    different act from reviewing the written programme: which does the duty mean?
+  - **A4-6** loose ends: `startedUsingSite()` (`compliance-status.ts` near lines 57-60) and the register page's start
+    (`register/page.tsx` near lines 29-30) each take the first obligations row, not the earliest `created_at`;
+    `inspection.ts` near lines 408-420 says "ready" from the last completed walk with no period test and would
+    disagree with the register from 1 January 2027; `periods.ts` near lines 102-105 re-chooses the judged years of a
+    biennial or triennial duty as today moves; the controlled-substance inventory line appears twice ("also late" and
+    "Nothing here is late"). The readers report reading these sound, on their word and not mine: `periods.ts`,
+    `backup.ts` near lines 423-446 and 480-522, `self-inspection.ts` near lines 133-176, `compliance-status.ts` near
+    lines 366-403, `obligations.ts` near lines 566-645, `imonnit.ts` near lines 504-513.

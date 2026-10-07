@@ -2,9 +2,11 @@ import "server-only";
 import { db, schema } from "@/db";
 import { sql } from "drizzle-orm";
 import { getSettings } from "./settings";
-import { todayIso } from "./dates";
-import { runDailyCheck, summarise, type Check, type Facts, type Tie } from "./daily-check";
-import { remitStanding } from "./engine/remit-standing";
+import { addDays, atLocal, todayIso } from "./dates";
+import { SITE_STARTS_ON } from "./books-start";
+import { runDailyCheck, summarise, type Check, type Facts, type History, type Tie } from "./daily-check";
+import { remitStanding, STANDING_WINDOW_DAYS } from "./engine/remit-standing";
+import { digits, loadHistoryReach } from "./engine/remit-sweep";
 
 /**
  * Gathering what the morning check judges.
@@ -104,39 +106,81 @@ async function gather(): Promise<Facts> {
   ).map((r) => ({ supplier: r.supplier, invoiceOn: r.invoice_date, shortCents: Number(r.short ?? 0) }));
 
   /*
-   * Asked of the register rather than written as SQL here, because the rule for what counts as
-   * "not banked" belongs beside the register that answers it — and a second copy of that rule is
-   * how two places end up disagreeing about the same money.
-   */
-  const { remittancesNotBanked: notBankedRows } = await import("./mck-remit-detail-store");
-  const notBanked = await notBankedRows();
-  /*
-   * What the bank matcher says of those same remittances. This check ties a remittance to its cash by the payment number alone; the matcher
-   * and the Remits tab also accept the remittance number and, weakest, the same amount near the advice date. Where the matcher finds a
-   * receipt this check does not, the card says which kind, so he is not left to find it on the other page; where the matcher finds none
-   * either, the card says that, which tells him the deposit is not sitting under some other reference. Asked of that one computation
-   * (engine/remit-standing.ts) and only when there is something to ask about; the register is keyed by remittance number, which is
-   * unique, so the payment number never has to leave this function.
-   */
-  const stood = new Map<string, Tie>();
-  if (notBanked.length > 0) for (const s of await remitStanding()) stood.set(s.row.remitNumber, s.banked);
-  const unbankedRemittances = notBanked.map((r) => ({ payer: r.payerName, remitOn: r.remitOn, amountCents: r.amountCents, tie: stood.get(r.remitNumber) ?? null }));
-
-  const registerRows = await one(sql`select count(*) as n from remittance_register`);
-  /*
-   * The two facts that say what the check below is actually able to see.
+   * What the check is actually able to see.
    *
-   * It compares remittances that carry a payment number against banked cash, so the population it
-   * covers is those rows and not the whole register — and it can only see as far as the last export,
-   * because the pull is monthly and by hand. Both were absent, and the sentence it wrote said "all
-   * 51 remittances with a payment number have their cash" on a morning when 46 carried one and the
-   * newest of them was eleven days old. Right about the money, wrong about what it had looked at.
+   * It compares remittances that carry a payment number against banked cash, so the population it covers is those rows advised since the
+   * books began and not the whole register, and "of N" and "N not banked" count one population. The rows it cannot compare are not
+   * netted out of the sentence: each is said as one of two things, a receipt already stands for it (a cheque payer's, banked at the
+   * counter, never gets a payment number) or nothing does yet and it is waiting. And it can only see as far as the last export, because
+   * the pull is monthly and by hand: the newest advice it holds and the day it was read are both said, because they are not the same day.
+   *
+   * Which remittances the cash account is missing the money of is asked of the one computation the bank matcher and the Remits tab
+   * already use (engine/remit-standing.ts), and not worked out again here: a second copy of a rule about the same money is how two pages
+   * come to disagree about it, and the copy this replaced did. `booksOnly`, because the question is whether money reached the cash
+   * account and a receipt the books do not count is not in it.
    */
-  const registerOwed = await one(sql`select count(*) as n from remittance_register where payment_number is not null`);
-  const registerThrough = await db
-    .select({ on: sql<string | null>`max(remit_on)` })
+  const registerRows = await one(sql`select count(*) as n from remittance_register`);
+  const standing = registerRows > 0 ? await remitStanding({ booksOnly: true }) : [];
+  const inBooks = standing.filter((s) => s.row.remitOn === null || s.row.remitOn >= SITE_STARTS_ON);
+  /* An advice of $0.00 or less is not money sent, so no bank line could ever stand for it: it is said apart (notPositiveSaid) and judged by nothing below. */
+  const positive = inBooks.filter((s) => s.row.amountCents > 0);
+  const notPositive = inBooks.length - positive.length;
+  const hasNumber = (s: (typeof standing)[number]) => (s.row.paymentNumber ?? "").trim().length > 0;
+
+  /*
+   * A remittance with a payment number is banked when a receipt carries that number, when ProviderPay's own account history shows its
+   * deposit swept to a bank line of the same amount (proof by the number, not by a receipt), or when a receipt is keyed to its remittance
+   * number. Banked by either of the last two is counted by itself, so that the card can say how it knew. The same amount near the advice
+   * date is not enough for a remittance that has a payment number: two remittances of one amount are two deposits, and a receipt of that
+   * amount may be the other one's. Where that is all there is the card says so, and where nothing stands for it at all, what ProviderPay's
+   * account history can say of it is one of five things (History, in daily-check.ts), worked out here because they turn on the payment
+   * number, which stays in this function, and on the fortnight the matcher allows. Where the history reaches past the fortnight it is
+   * also asked whether any file on file covers the month or months that fortnight falls in: the newest day on file says nothing of the
+   * months below it.
+   */
+  const reach = registerRows > 0 ? await loadHistoryReach() : null;
+  const historyOf = (paymentNumber: string, remitOn: string | null): History => {
+    if (reach === null || reach.through === null) return { state: "none" };
+    const held = reach.depositDays.get(paymentNumber);
+    if (held) return { state: "holds a deposit", on: held };
+    /* An advice with no date cannot be said to end too soon after it, or to fall in a month, so it is said by what the history holds. */
+    if (remitOn === null) return { state: "reaches past", through: reach.through };
+    const fortnightEnds = addDays(remitOn, STANDING_WINDOW_DAYS);
+    if (reach.through < fortnightEnds) return { state: "ends too soon", through: reach.through };
+    const uncovered = [remitOn.slice(0, 7), fortnightEnds.slice(0, 7)].find((m) => !reach.months.has(m));
+    return uncovered ? { state: "has a gap", month: uncovered } : { state: "reaches past", through: reach.through };
+  };
+
+  const unbankedRemittances: { payer: string | null; remitOn: string | null; amountCents: number; tie: Tie; history: History }[] = [];
+  let unbankedCents = 0;
+  let bankedBySweep = 0;
+  let bankedByRemitNumber = 0;
+  for (const s of positive.filter(hasNumber).sort((a, b) => b.row.amountCents - a.row.amountCents)) {
+    if (s.banked === "payment number") continue;
+    if (s.banked === "sweep deposit") {
+      bankedBySweep++;
+      continue;
+    }
+    if (s.banked === "remittance number") {
+      bankedByRemitNumber++;
+      continue;
+    }
+    unbankedRemittances.push({ payer: s.row.payerName, remitOn: s.row.remitOn, amountCents: s.row.amountCents, tie: s.banked, history: historyOf(digits(s.row.paymentNumber), s.row.remitOn) });
+    unbankedCents += s.row.amountCents;
+  }
+  const numbered = positive.filter(hasNumber).length;
+  const unnumbered = positive.filter((s) => !hasNumber(s));
+  const unnumberedStanding = unnumbered.filter((s) => s.banked !== null).length;
+  const waiting = unnumbered
+    .filter((s) => s.banked === null)
+    .map((s) => ({ payer: s.row.payerName as string | null, remitOn: s.row.remitOn, amountCents: s.row.amountCents }))
+    .sort((a, b) => b.amountCents - a.amountCents);
+  const seen = await db
+    .select({ through: sql<string | null>`max(remit_on)`, readAt: sql<string | null>`max(last_seen_at)` })
     .from(schema.remittanceRegister)
-    .then((r) => r[0]?.on ?? null);
+    .then((r) => r[0]);
+  const registerThrough = seen?.through ?? null;
+  const registerReadOn = seen?.readAt ? atLocal(seen.readAt).slice(0, 10) : null;
   const remitSourced = await one(sql`select count(*) as n from claim_payments where reference like 'ProviderPay %'`);
 
   const settings = await getSettings();
@@ -166,13 +210,19 @@ async function gather(): Promise<Facts> {
     doubledRebateLadders,
     paymentsCountedTwice,
     paymentsCountedTwiceCents,
-    remittancesNotBanked: notBanked.length,
+    remittancesNotBanked: unbankedRemittances.length,
+    remittancesBankedBySweep: bankedBySweep,
+    remittancesBankedByRemitNumber: bankedByRemitNumber,
     unbankedRemittances,
     remittanceRegisterRows: registerRows,
-    remittanceRegisterOwed: registerOwed,
+    remittancesNumbered: numbered,
+    remittancesNotPositive: notPositive,
+    remittancesUnnumberedStanding: unnumberedStanding,
+    remittancesWaiting: waiting,
     remittanceRegisterThrough: registerThrough,
+    remittanceRegisterReadOn: registerReadOn,
     remittancePaymentsPosted: remitSourced,
-    remittancesNotBankedCents: notBanked.reduce((n, r) => n + r.amountCents, 0),
+    remittancesNotBankedCents: unbankedCents,
     today: todayIso(),
     now: new Date().toISOString(),
   };

@@ -8,6 +8,71 @@ file is how they talk.
 
 ## Open items
 
+- **6 October, pharmacy session (the commit after `d486e94`; NOT deployed or pushed): the morning check's remittance
+  line read receipts, a stand-in, while ProviderPay's own account history held the answer; the site now reads that
+  history, and the card and the Remits tab judge a remittance by one computation, not two.** His words: *"1 remittance
+  advised as paid and not banked, $2,008.00"* and then *"Are we learning from all these mistakes it makes ... we need to
+  get to the point where this site doesn't have all these mistakes all the time.."* **What it was.** Two SS&C HEALTH
+  remittances of $2,008.00 (advised 15 and 23 September; only the 15th has a payment number) and one deposit of
+  $2,008.00 (24 September). The bank matcher keyed that deposit's receipt to the 23rd, the nearer advice (its own
+  comment calls that a guess), so no receipt stood for the 15th and the check flagged it, while its money was in the
+  cash account all along. ProviderPay's September account history (a `report` document filed on 1 October; its 14 sweeps
+  each add up to their transfer, and deposits equal transfers at $249,930.60) lists that one deposit under the 15th's
+  payment number, in the 24 September sweep, whose transfer is the one bank line of that amount that day. **What
+  changed.** `engine/remit-sweep.ts` (new) reads the account histories on file and says which bank line carries each
+  deposit: the payment number (six or more digits) is on exactly one deposit across the files, that deposit's amount is
+  the remittance's, its sweep adds up to its transfer, and the transfer equals, to the cent, a bank line the bank names
+  as ProviderPay's own (Access Health excluded) that is already placed as payer money and dated 0 to 3 days after the
+  sweep; each line and each sweep is used once. `engine/remit-standing.ts` reads that first: a remittance whose payment
+  number the history proves takes its receipt before any other remittance's weaker claim can (the receipt carrying the
+  number if one does, standing "payment number"; else the receipt that bank line made, standing "sweep deposit"), and
+  then the rest in order: payment number, remittance number inside a receipt's key, the same amount within a fortnight.
+  Each receipt stands for one remittance. `remitStanding({ booksOnly: true })` leaves out the receipts the books do not
+  count; the morning check passes it and the bank matcher and the Remits tab do not (their default is unchanged). **The
+  morning check now judges from that one computation.** It takes the remittances advised since 1 September (or with no
+  date) that carry a payment number and asks `remitStanding` of each: "payment number", "sweep deposit" and "remittance
+  number" are banked ("remittance number" is counted and said apart, because that receipt is keyed to the remittance and
+  not to the payment number); "amount in window" and nothing are not, because two remittances of one amount are two
+  deposits. The key-substring judge it had before (`remittancesNotBanked` in `mck-remit-detail-store.ts`) is deleted, so
+  the card and the Remits tab's data can no longer disagree about one remittance (the Remits view, `remitsView` in
+  `engine/read.ts`, reads the same computation). Each unbanked remittance it names says what stands for it (a receipt of
+  exactly its amount near its advice date stands for it by amount alone and not by its number; or none) and what the
+  account history can show of it (none on file; the newest ends too soon; no file covers a month between the advice
+  and a fortnight after it, "has a gap"; it reaches past and holds nothing under the number; it holds a deposit not
+  shown reaching a bank line). An advice of nothing or less is not money sent and is not judged, and the card says how
+  many it left out. The sentence says what is known, not that the money did not arrive, and it shows the day the export
+  was read, not the newest advice. `bank-match-context.ts` no longer offers
+  the bank page a remittance whose receipt key a receipt already holds, and `money/bank.ts` builds that key with
+  `remitReceiptKey(r)`, one definition. Comment only: `bank-statement.ts`, `db/schema.ts`. **Live, read-only, 7
+  October:** the remittance line passes through the new code path: 40 remittances with a payment number in the books,
+  all 40 banked (1 by the account history, none by a remittance number); 6 without a number, 4 with a receipt standing
+  for them and 2 waiting, $29,812.61, advised and not yet in any export (SS&C HEALTH 23 September $2,008.00 and Health
+  Mart Atlas 30 September $27,804.61: expected-not-yet); the export was read 1 October. One of ten checks still fails,
+  the short invoice, until the deploy and the nightly re-read. **Said aloud, not done:** the matcher (`psao_remittance`
+  branch of `bank-statement.ts`) still keys a deposit to the nearer of two same-amount advices and does not read the
+  account history, so the 24 September receipt keeps the 23rd's key; a later $2,008.00 deposit is not offered the 23rd
+  until it has a payment number or that receipt is re-keyed to the 15th (a write to the live database, optional, waiting
+  for his word). Whether the deposit gate's seven-day same-amount refusal could stop the 23rd's own deposit is not
+  checked. Seven more edges of this line are written in OPEN-ITEMS ("Eight edges of the remittance line"): none moves
+  money today, and one is live (the 23rd is not offered to the matcher until its key is free). **Tests:**
+  `engine-remit-sweep` (new), `bank-match-context-remits` (new), `daily-check-store`, `daily-check`,
+  `engine-remit-standing`; each rule was mutated to see a test fail (one mutant is equivalent and kept as intent: the
+  kind test in `isProviderPayTransfer`), and so were the tier order, `booksOnly`, the remittance-number count and
+  sentences, the history clause, the month-coverage state, the non-positive filter, the amount-alone sentence, the
+  books boundary and the matcher's two filters; typecheck clean; the full suite 4,625 of 4,625. **Read by:** a second
+  Claude, with none of the author's reasoning, read the change cold twice (six points, then ten, the second after the
+  month-coverage and non-positive rules were added); each point was checked against the code and the live data before
+  it was used. The code written after the second report was read only by its author. **Asked of the cloud session:**
+  `/remits` is unreadable here (a read-deny on the remits folder covers that
+  page): say whether it shows a remittance's standing at all (the card links there), and if it does, confirm it shows
+  "sweep deposit" as the standing of a remittance the account history proves banked, that nothing there assumes only the
+  three older values, and that nothing there depends on the old order (`remitStanding` now reads the account history
+  first and takes an optional `booksOnly` that the Remits tab does not pass). **Files changed on `feature/compliance`,
+  so say so on your pull request before editing one:** `engine/remit-sweep.ts` (new), `engine/remit-standing.ts`,
+  `daily-check.ts`, `daily-check-store.ts`, `bank-match-context.ts`, `money/bank.ts`, `bank-statement.ts`,
+  `db/schema.ts`, `mck-remit-detail-store.ts`, `docs/OPEN-ITEMS.md`, `docs/MONEY-TRACE.md`,
+  `docs/reference/data-dictionary.md`, and the tests named above.
+
 - **6 October, pharmacy session (the commit after `d1891c3`; NOT deployed or pushed): the morning check's three
   findings and the Compliance banner, what each was, and what is asked of you.** His words, after "fix issues": *"The
   morning check found 3 things ... invoices add up to what they say they come to. Found: 1 short by $20.31 in total
@@ -26,29 +91,31 @@ file is how they talk.
   `KI` and `KD` after a price, so a McKesson entry flagged `V` was dropped whole; any one or two capitals are now a
   flag, `K` still means on the rebate contract, any other letter stores `rebated = null` ("not stated", which is not
   "not rebated"), and `schema.ts` carries a comment only (data dictionary: the rebated-flag row and pitfall 15). (4)
-  The $2,008.00 is a real question for him, not ours: two SS&C HEALTH remittances of that amount (15 September with a
-  payment number, 23 September without) and one deposit (24 September) whose receipt carries the 23rd's remittance
-  number, so nothing stands for the 15th by payment number, remittance number or amount (OPEN-ITEMS, "Found 6 October"
-  and the SS&C row in "Waiting on him"); only the card changed. (5) The dashboard sent all three findings to `/money`,
-  because it chose the page by looking for "remit", "payment" or "banked" in the findings and the third finding's
-  wording has none; `dashboard/page.tsx` now shows one line per failing check with that check's own page and action,
-  and the invoice and remittance findings name the supplier and date, or the payer and advice date (`daily-check.ts`,
-  `daily-check-store.ts`). **Tests:** `daily-check`, `daily-check-store` (new: the store against a scratch database,
-  because the dashboard swallows an error in it and then shows nothing), `backup-restore-cover` (new) and
-  `invoice-lines-flag` (new); typecheck clean, the full suite 4,550 of 4,550. **Asked of the cloud session:** (a)
-  `/remits` is unreadable here (the `./remits/**` deny covers `src/app/(app)/remits`), and the card now links to it
-  for the remittance finding: confirm it lists a remittance with a payment number and nothing standing for it, with
-  payer, advice date, amount and the `remitStanding()` result; (b) `feeds.ts` (`judgeFeed`, 26 hours) and
-  `automation-status.ts` judge the mailbox by `mail_last_sweep` alone, so a sweep that errors every time reads "on
-  time" there while the morning check now catches it; (c) `scripts/prove-invoices.ts` compares stored lines with the
-  goods subtotal or the total without the charges the importer counts, so on 6 October it called 3 of 213 invoices
-  disagreeing, two of them $7.50 above their lines; its only reader is the retired data-health page, so fix it (add
-  the charges) or retire it; (d) `src/app/(app)/settings/backups/page.tsx` is unreadable here (the `./backups/**`
-  deny): if it shows the last restore test from the single setting, `restoreRehearsalDates()` can show every proved
-  test. **Files changed on `feature/compliance`, so say so on your pull request before editing one:** `backup.ts`,
-  `compliance-status.ts`, `obligations.ts`, `instrumentation.ts`, `compliance/page.tsx`, `dashboard/page.tsx`,
-  `daily-check.ts`, `daily-check-store.ts`, `invoice-lines.ts`, `db/schema.ts` (a comment),
-  `docs/reference/data-dictionary.md`, and the tests named above.
+  The $2,008.00 was ours too, and not a question for him (corrected the same day; the commit that does it is the
+  bullet above this one): two SS&C HEALTH remittances of that amount (15 September with a payment number, 23 September
+  without) and one deposit (24 September) whose receipt carries the 23rd's remittance number, so no receipt stood for
+  the 15th by payment number, remittance number or amount, and the check, which reads receipts, flagged it while its
+  money sat in the cash account. ProviderPay's own September account history, on file since 1 October, lists that one
+  deposit under the 15th's payment number (OPEN-ITEMS, "Found 6 October"); in this commit only the card's wording
+  changed. (5) The dashboard sent all three findings to `/money`, because it chose the page by looking for "remit",
+  "payment" or "banked" in the findings and the third finding's wording has none; `dashboard/page.tsx` now shows one
+  line per failing check with that check's own page and action, and the invoice and remittance findings name the
+  supplier and date, or the payer and advice date (`daily-check.ts`, `daily-check-store.ts`). **Tests:**
+  `daily-check`, `daily-check-store` (new: the store against a scratch database, because the dashboard swallows an
+  error in it and then shows nothing), `backup-restore-cover` (new) and `invoice-lines-flag` (new); typecheck clean,
+  the full suite 4,550 of 4,550. **Asked of the cloud session:** (a) `/remits` is unreadable here (the `./remits/**`
+  deny covers `src/app/(app)/remits`), and the card links to it for the remittance finding: what it must show is asked
+  in the bullet above this one; (b) `feeds.ts` (`judgeFeed`, 26 hours) and `automation-status.ts` judge the mailbox by
+  `mail_last_sweep` alone, so a sweep that errors every time reads "on time" there while the morning check now catches
+  it; (c) `scripts/prove-invoices.ts` compares stored lines with the goods subtotal or the total without the charges
+  the importer counts, so on 6 October it called 3 of 213 invoices disagreeing, two of them $7.50 above their lines;
+  its only reader is the retired data-health page, so fix it (add the charges) or retire it; (d)
+  `src/app/(app)/settings/backups/page.tsx` is unreadable here (the `./backups/**` deny): if it shows the last restore
+  test from the single setting, `restoreRehearsalDates()` can show every proved test. **Files changed on
+  `feature/compliance`, so say so on your pull request before editing one:** `backup.ts`, `compliance-status.ts`,
+  `obligations.ts`, `instrumentation.ts`, `compliance/page.tsx`, `dashboard/page.tsx`, `daily-check.ts`,
+  `daily-check-store.ts`, `invoice-lines.ts`, `db/schema.ts` (a comment), `docs/reference/data-dictionary.md`, and the
+  tests named above.
 
 - **5 October, pharmacy session (the commit after `bdfcc56`; NOT deployed or pushed): eleven real payment numbers
   stood in twelve tracked files, and the commit hook now refuses the shape.** A payer's payment number (for Health
@@ -190,39 +257,45 @@ file is how they talk.
   **Superseded 5 October (the first item):** the page has its press, the 33 are 7, and the nightly proof reads the page's
   causes and links to it; still open from this item: what a sale date on a reversed claim means, and the monthly AR email.
 
-- **4 October, pharmacy session (85144ed): what the payers take off a remittance is counted once, from one record.** Three
-  records carry the same fee: the Health Mart Atlas payment report for each EFT (AH and CS rows, booked as expenses), the
-  835's provider-level segments (`remittance_holdbacks`) and the reconciliation service's adjustment report. September
-  accrual had subtracted two of them ($146.73 twice); October carried a $46.95 RedSail balance forward as income on both
-  accounts; and the 30 September EFT's payment report had been refused whole over one word-coded row ("Adj-Fee"). All three are in
-  OPEN-ITEMS ("Found 4 October") in three lines each, with the pre-flight and what was not checked. **Files changed on
-  `feature/compliance`, so say so on your pull request before editing one:** `src/lib/payer-fees.ts` and
-  `payer-fees-store.ts` (new: one record per remittance, the sign converted in one place), `profit-and-loss.ts` (the fee
-  line is accrual only; `PLInputs.remitFeesCents`, `remitFeesKept`, `remitFeesHeld`), `books-check.ts` (a register entry),
-  `adjustment-report.ts` (`adjustmentsByMonth` is gone; read `payerFeesByMonth()` from `payer-fees-store.ts`),
-  `accesshealth-payment.ts` (word-coded adjustment rows are read), the Money page's help paragraph, and the data
-  dictionary (trap 13, section 9). The remits page was not touched (its path is read-denied on this machine): if it
-  shows fees it should call `payerFeesByMonth()`, not sum the holdbacks or the adjustment report, or the same fee is
-  counted twice again. **Then, the same day:** the Money page has a "Payer fees on remittances" card under "The account":
-  every 835 and adjustment-report fee line with its source, who decided it and when, and one press to count it, leave it
-  out or undo that, kept across every import (audit events `payer_fee.*`; `decideFee` in `payer-fees-store.ts`). New:
-  `src/lib/payer-fees-view.ts` (the card's words, tested), `src/app/(app)/money/fee-decisions.ts` (the server action) and
-  `payer-fees-card.tsx`; changed: the Money `page.tsx` (loads the lines, renders the card), `payer-fees.ts` (decisions,
-  `feeKey`, `lineSays`), `books-check.ts` and `profit-and-loss.ts` (caveats for waiting, not-a-fee and decided lines).
-  **Open:** whether OutcomesMTM's $9.00 "Adj-Fee" is a fee or something else (his call; it sits in a payment report's
-  notes, so it has no press until payment-report adjustment rows have a table); the Health Mart Atlas 835 re-pull needs
-  his login. Stored month accounts recompute on the engine's next pass after the deploy or after a press, so a page read in
-  the first minutes can still show the old figure. **Also found that day, in the morning check's one failing line:** SS&C
-  HEALTH's 15 September remittance of $2,008.00 carries a payment number and no deposit (OPEN-ITEMS, "Waiting on him": one
-  question, for his ProviderPay login). The check's closing sentence said a deposit of that amount on the statement "settles
-  which" cause, which is wrong where two remittances share an amount: September's one $2,008.00 deposit, on the 24th, is
-  carried by a receipt under another number. It now says a deposit settles it only if it does not already stand for another
-  remittance of that amount (`daily-check.ts`, pinned in `tests/daily-check.test.ts`). **And from the scan the same day:**
-  3,821 payments received since 1 September tie to no claim ($393,948.45 net). The reading written here that day split them
-  by the fill's date alone, called 3,637 of them "before the claims feed" and said no screen lists any; the item above
-  corrects it (3,597 are that, and `/claims/no-claim` lists the rest with a reason). `reversed-fill-payments.ts` and
-  `claimsView` (`engine/read.ts`) have no callers in `src/`, so do not assume either is live. Two claims that were sold and
-  then reversed, $1,072.74 paid and $1,182.07 unpaid, are a question to him (OPEN-ITEMS, "Waiting on him").
+- **4 October, pharmacy session (85144ed): what the payers take off a remittance is counted once, from one record.**
+  Three records carry the same fee: the Health Mart Atlas payment report for each EFT (AH and CS rows, booked as
+  expenses), the 835's provider-level segments (`remittance_holdbacks`) and the reconciliation service's adjustment
+  report. September accrual had subtracted two of them ($146.73 twice); October carried a $46.95 RedSail balance
+  forward as income on both accounts; and the 30 September EFT's payment report had been refused whole over one
+  word-coded row ("Adj-Fee"). All three are in OPEN-ITEMS ("Found 4 October") in three lines each, with the pre-flight
+  and what was not checked. **Files changed on `feature/compliance`, so say so on your pull request before editing
+  one:** `src/lib/payer-fees.ts` and `payer-fees-store.ts` (new: one record per remittance, the sign converted in one
+  place), `profit-and-loss.ts` (the fee line is accrual only; `PLInputs.remitFeesCents`, `remitFeesKept`,
+  `remitFeesHeld`), `books-check.ts` (a register entry), `adjustment-report.ts` (`adjustmentsByMonth` is gone; read
+  `payerFeesByMonth()` from `payer-fees-store.ts`), `accesshealth-payment.ts` (word-coded adjustment rows are read),
+  the Money page's help paragraph, and the data dictionary (trap 13, section 9). The remits page was not touched (its
+  path is read-denied on this machine): if it shows fees it should call `payerFeesByMonth()`, not sum the holdbacks or
+  the adjustment report, or the same fee is counted twice again. **Then, the same day:** the Money page has a "Payer
+  fees on remittances" card under "The account": every 835 and adjustment-report fee line with its source, who decided
+  it and when, and one press to count it, leave it out or undo that, kept across every import (audit events
+  `payer_fee.*`; `decideFee` in `payer-fees-store.ts`). New: `src/lib/payer-fees-view.ts` (the card's words, tested),
+  `src/app/(app)/money/fee-decisions.ts` (the server action) and `payer-fees-card.tsx`; changed: the Money `page.tsx`
+  (loads the lines, renders the card), `payer-fees.ts` (decisions, `feeKey`, `lineSays`), `books-check.ts` and
+  `profit-and-loss.ts` (caveats for waiting, not-a-fee and decided lines). **Open:** whether OutcomesMTM's $9.00
+  "Adj-Fee" is a fee or something else (his call; it sits in a payment report's notes, so it has no press until
+  payment-report adjustment rows have a table); the Health Mart Atlas 835 re-pull needs his login. Stored month
+  accounts recompute on the engine's next pass after the deploy or after a press, so a page read in the first minutes
+  can still show the old figure. **Also found that day, in the morning check's one failing line:** SS&C HEALTH's 15
+  September remittance of $2,008.00 carries a payment number and no deposit (OPEN-ITEMS, "Waiting on him": one
+  question, for his ProviderPay login). The check's closing sentence said a deposit of that amount on the statement
+  "settles which" cause, which is wrong where two remittances share an amount: September's one $2,008.00 deposit, on
+  the 24th, is carried by a receipt under another number. It now says a deposit settles it only if it does not already
+  stand for another remittance of that amount (`daily-check.ts`, pinned in `tests/daily-check.test.ts`). **Corrected 6
+  October:** the first sentence of this passage was wrong. The 15 September remittance did have its deposit, on 24
+  September: ProviderPay's September account history, on file since 1 October, lists it under that payment number, and
+  the site had labelled the deposit's receipt with the 23rd's remittance, so nothing the receipts held could stand for
+  the 15th. The question for his ProviderPay login is answered (the 6 October bullet at the top of this section;
+  OPEN-ITEMS, "Found 6 October"). **And from the scan the same day:** 3,821 payments received since 1 September tie to
+  no claim ($393,948.45 net). The reading written here that day split them by the fill's date alone, called 3,637 of
+  them "before the claims feed" and said no screen lists any; the item above corrects it (3,597 are that, and
+  `/claims/no-claim` lists the rest with a reason). `reversed-fill-payments.ts` and `claimsView` (`engine/read.ts`)
+  have no callers in `src/`, so do not assume either is live. Two claims that were sold and then reversed, $1,072.74
+  paid and $1,182.07 unpaid, are a question to him (OPEN-ITEMS, "Waiting on him").
 
 - **2 October, 20:24: second deploy, the morning-check screen, and what the first deploy's printouts could not show.**
   The three pages were not rendered after the first deploy: the render logs in by writing a short-lived session row into
@@ -426,9 +499,12 @@ bank placement or a Today answer (`engineAfter`), and proves the books nightly a
 with their answers, Cash ahead (0135, `engine/cash-ahead.ts`), Close. The second: Suppliers, Order from, Remits,
 Spending and Deliveries as lookups over `engine/read.ts` (`suppliersView`, `remitsView`, `spendingView`,
 `deliveriesView`), rendered by `src/app/(site)/v2/money/tabs.tsx`. Three things the second slice settled:
-- **What stands for a remittance at the bank is computed in one place**, `engine/remit-standing.ts` (payment number,
-  then remittance number inside a receipt's key, then same amount inside the deposit window), read by both the bank
-  matcher and the Remits tab. The matcher used to carry its own copy of the test.
+- **What stands for a remittance at the bank is computed in one place**, `engine/remit-standing.ts` (since 6 October
+  the deposit under the remittance's payment number in ProviderPay's account history, swept to a bank line a receipt
+  confirmed, which is `engine/remit-sweep.ts`, is read first, because it alone names the deposit; then payment
+  number; then remittance number inside a receipt's key; then same amount inside the deposit window), read by the
+  bank matcher, the Remits tab and, since 6 October, the morning check (which passes `booksOnly`). The matcher used to
+  carry its own copy of the test, and the morning check a second.
 - **Order from is computed on the nightly pass** (`engine/order-from.ts`, settings key `engine_order_from`) from the
   old minimum filler, and the screen reads the stored answer. It is too heavy to run on a page load.
 - A supplier's statements are counted from `supplier_statement_lines` (distinct `statement_date`), not from document

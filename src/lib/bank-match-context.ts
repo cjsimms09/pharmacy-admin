@@ -8,7 +8,7 @@ import { CARD_STATEMENT_BILL } from "./card-statement";
 import { cadences } from "./draw-cadence-store";
 import { chequeExpectations } from "./cheque-expectations";
 import { openStatementDebits } from "./engine/statement-debits";
-import { remitStanding } from "./engine/remit-standing";
+import { remitStanding, remitReceiptKey } from "./engine/remit-standing";
 import { SITE_STARTS_ON } from "./books-start";
 
 /**
@@ -43,7 +43,7 @@ export async function matchContext(months: string[] = []): Promise<MatchContext>
     vendors(),
     unpaid(),
     db.query.supplierInvoices.findMany({ columns: { id: true, invoiceNumber: true, supplierId: true, supplier: true, totalCents: true, invoiceDate: true, paidOn: true } }),
-    db.query.cashReceipts.findMany({ columns: { payer: true } }),
+    db.query.cashReceipts.findMany({ columns: { payer: true, sourceKey: true } }),
   ]);
   const payers = new Set<string>();
   for (const c of claims) for (const n of [c.pbmName, c.payerLabel]) if (n && n.trim().length >= 4) payers.add(n.trim());
@@ -81,10 +81,18 @@ export async function matchContext(months: string[] = []): Promise<MatchContext>
   /* PioneerRx receiving, as payables: the pool that actually covers the deliveries. */
   const receiving = await db.query.pioneerPurchases.findMany({ columns: { id: true, invoiceNumber: true, supplier: true, totalCents: true, invoiceDate: true } });
 
-  /* Remittances in the register no receipt stands for — the gate's own test, applied in engine/remit-standing.ts. */
+  /*
+   * Remittances in the register no receipt stands for — the gate's own test, applied in engine/remit-standing.ts.
+   *
+   * Never one whose own receipt key is already taken: the gate would refuse a second receipt under it as the same money, and the line
+   * would be placed as banking the remittance with nothing behind it. A receipt can hold a remittance's key while standing for another,
+   * when the account history shows its money was that other remittance's.
+   */
+  const keyed = new Set(receipts.map((r) => r.sourceKey).filter((k): k is string => !!k));
   const remits = (await remitStanding())
     .filter(({ row, banked }) => row.remitOn && row.amountCents > 0 && !banked)
-    .map(({ row: r }) => ({ id: r.id, payer: r.payerName ?? "payer", remitOn: r.remitOn!, amountCents: r.amountCents, paymentNumber: r.paymentNumber && /\d{6}/.test(r.paymentNumber) ? r.paymentNumber : null, remitNumber: r.remitNumber }));
+    .map(({ row: r }) => ({ id: r.id, payer: r.payerName ?? "payer", remitOn: r.remitOn!, amountCents: r.amountCents, paymentNumber: r.paymentNumber && /\d{6}/.test(r.paymentNumber) ? r.paymentNumber : null, remitNumber: r.remitNumber }))
+    .filter((r) => !keyed.has(remitReceiptKey(r)));
   /* The rebate statement's receipts no bank line has confirmed: what a day's HEW credits add up to. */
   /* Every receipt a line confirmed: the column holds the first, bank_line_receipts the whole set (0133). */
   const confirmedReceipts = new Set([
