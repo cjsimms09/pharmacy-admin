@@ -28,10 +28,11 @@ report. Any answer of "not checked" is said out loud rather than skipped.
 1. Physical act named? 2. Time dimension — this month, next three, next eleven? 3. What a pharmacist
 knows that the tables do not? 4. Whose money, which basis, which period, already counted elsewhere?
 5. Units verified — pack size, strength, days supply? 6. "Same drug" disambiguated *for this
-purpose*? 7. Worst case ranked — patient harm > board > PBM relationship > money? 8. Could the check
-pass for the wrong reason? 9. When does he need to know, and is that when it appears? 10. Registers
-updated? 11. **What else reads this figure** — the costliest faults have been two correct things
-meeting. 12. **What did I not check, and have I said so?**
+purpose*? 7. Worst case ranked — patient harm > board > PBM relationship > money? 8. **Could the
+check pass, or fail, for the wrong reason — what does it read, and is that where the thing its
+sentence names is recorded (rule 7)?** 9. When does he need to know, and is that when it appears?
+10. Registers updated? 11. **What else reads this figure** — the costliest faults have been two
+correct things meeting. 12. **What did I not check, and have I said so?**
 
 **3. Proactive scan, every session, unprompted.** Scan the open findings register and the four
 channels for a dollar that can fall between them; look at the newest import, remits and expenses for
@@ -56,8 +57,13 @@ arithmetic and passing tests; none could have failed one. Four more of the same 
 the same day after the clause was written, which is why this says *the three that earned it* and not
 a count of a day: the day kept moving. **Ask what the number
 would make him do, not whether it is right.** Where another session exists it reads the words before
-they ship; where none does — usually — the author reads it cold, as him. That is the weaker form, and
-a figure shipped without a second reader says so in the same breath.
+they ship. Usually none does, and then a fresh subagent reads them: it is given the change itself —
+not the commit message, not the author's reasoning — and told to find the sentence that is false or
+would make him act wrongly. What it hands back is a lead, not a finding: it is checked against the
+code, or against the live rows read-only where only they can settle it, before anyone acts on it,
+because some of it is wrong. Only where that was not done does the author read the words cold, as
+him. That is the weaker form, and a figure shipped without a second reader says so in the same
+breath.
 
 **Record it with a `Read-By:` trailer**, same shape as `Co-Authored-By:`. It is **trustworthy only in
 the negative**: a commit without one is reliable evidence that **nobody recorded a reading** — and
@@ -69,6 +75,25 @@ reading and proves nothing about whether the sentence is true. So it is an instr
 unread work, never for certifying read work, and it must never be described as the second. It cannot
 cover the commonest case either — a review that happens after the push and changes nothing leaves no
 commit to carry it; that one goes in `docs/OPEN-ITEMS.md` as a line, or it is not recorded at all.
+
+**7. A check says what it reads, and reads what its sentence names.** For every alarm, banner,
+badge or "found / should be" line added or changed, answer pre-flight item 8 in the commit message
+(and in the finding's row in `docs/OPEN-ITEMS.md`, where there is one) — the report's one line says
+only that it was answered — in two parts: what the code reads, and where the thing its sentence
+names is recorded, which is the document, setting or bank line itself and not a table made from it.
+Two places means the check reads a stand-in: it is right until the day the two differ, and nothing
+in its arithmetic or its tests can show that day coming. Read the place the sentence names, not the
+stand-in, before the sentence is written; then either the check reads it, or the sentence says what
+it does read. If the thing is recorded nowhere, record it first. Five wrong alarms on 6 October
+were this, each reaching him on a screen. Four read a stand-in: the age of the newest mail for the
+time of the last sweep; the one latest date a duty was done for whether each quarter was covered;
+the invoice lines a reader managed to parse for the lines on the invoice; a receipt's key for its
+deposit. The fifth had nothing to read: a link guessed from words in a check's name, because no
+check recorded the page its finding is dealt with on. Three corollaries. A check that could not
+run says so, with the reason: never silence, and never a pass. A time that moves when something
+fails — the last try, not the last success — is not a clock for whether it worked. And a claim about
+what else reads a figure, that nothing outside one file calls a function, or what an earlier commit
+said, is read back from the code or the output, never carried from memory or from a summary.
 
 Full reasoning and the failures that earned each clause: `docs/CONSTITUTION.md`. The questions in
 long form and what they found: `docs/FOUNDATIONS.md`. The registers, generated from the data by

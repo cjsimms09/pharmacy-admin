@@ -150,7 +150,8 @@ already cost this project money:
 5. Units verified — pack size, strength, days supply?
 6. "Same drug" disambiguated *for this purpose*?
 7. Worst case ranked: **patient harm > board finding > PBM relationship > money**?
-8. Could the check pass for the wrong reason?
+8. Could the check pass, or fail, for the wrong reason? What does it read, and is that where the thing its sentence
+   names is recorded? Two places is a stand-in (7d).
 9. When does he need to know, and is that when it appears?
 10. Registers updated, with a state against every line?
 11. **What else reads this figure?** The costliest faults here have all been two correct things
@@ -213,6 +214,17 @@ a rule that pretends its fallback is as good as its control is a rule that quiet
 followed. Where a sentence carries a number he would act on and no second reader exists, the honest
 options are to hold it until there is one, or to ship it and say in the same breath that nobody else
 has read it.
+
+Since 6 October there is a middle form between the two: a fresh subagent that is given the change and none of the
+author's reasoning, and told to find the sentence that is false or would make him act wrongly. It is a second reader
+and it is not a session. It sees what the author did not: a second Claude read the three commits of one morning, from
+the commits alone, and sent six leads; four were true faults the author had not seen, one of them in code older than
+the commits (`2de8157`). That reader was given the commit messages, which carry the author's reasoning, so it was less
+cold than this paragraph asks for. And it is wrong often enough that nothing it returns is registered until the code,
+or the live rows read-only, have been checked: two of the leads the five cold readers brought on 6 October were
+refuted that way, and a third was true and dormant (`docs/BACKLOG.md`); one of those six was wrong, and only the live
+rows could show it. It narrows the weaker form and does not replace the second session. The `Read-By:` line records
+which of them the author says read the words; it can be typed without the reading, so it proves nothing (below).
 
 **What this control cannot do, said here so nobody mistakes it for a proof.** Every other check on
 this site re-reads a file and compares, and each can show its working. This one has no source to
@@ -301,6 +313,49 @@ The same reasoning covers a tool fault we cannot prevent: an editor that writes 
 one into this file, which git then called binary. The only thing that has ever caught it is git marking a file binary
 and somebody looking, so `looksBinary` is that defence written down — and any file the identifier check exempts is a
 file nothing is watching.
+
+## 7d. A check that reads a stand-in is wrong the day the two differ
+
+7c is about checks that cannot fail. This is the other half: checks that can fail, and fail about the wrong thing. On
+6 October five alarms reached him, each on a screen, each with correct arithmetic and passing tests. In four of them
+the code read something that usually travels with the thing its sentence named, while the thing itself was on file. In
+the fourth item below there was nothing on file to read: no check recorded the page its finding is dealt with on, and
+the card guessed one from the words in the check's name.
+
+1. **The Compliance banner** said a quarter had gone uncovered. The register read the one latest date the restore test
+   was done, so pressing the button in October took the third quarter's cover away. Each test is its own row in the
+   audit trail, and each belongs to the quarter it was done in. (`d486e94`)
+2. **"Last swept 7 hours ago."** The check read the age of the newest mail in the inbox, which is when mail last
+   arrived. The last sweep is a setting written whether or not any mail comes, and it had run 23 minutes earlier. The
+   reverse was worse: a sweep that had died would have passed until the newest stored mail was six hours old. (`d486e94`)
+3. **An invoice "short by $20.31."** The check read the lines a reader had managed to parse for the lines printed on
+   the invoice. The reader accepted only the contract-rebate flags in one column and threw out a line carrying any
+   other, whole. The invoice was not short; the reader was. (`d486e94`)
+4. **One card, three findings, one link.** The dashboard chose where to send him by testing the words "remit",
+   "payment" and "banked" against the names of the failing checks, and none of the three names held one, so all three
+   went to Money. Where a finding is seen and dealt with is a fact about the check, not about its name. (`d486e94`)
+5. **$2,008.00 "advised as paid and not banked."** The check read a receipt's key for the deposit, and ProviderPay's
+   own account history holds the deposit under the earlier advice's payment number. My first reading of it
+   (`d486e94`) called it a real question for him and read the same stand-in: whoever finds one can repeat it.
+   (`006d971`)
+
+The same shape turned up twice more while those were being fixed, and both were found by reading, not by anything
+failing. The facilitator (MTF) feed was judged on the time a pull was last *tried*, so every failed pull reset the clock
+and it would have read "on time" for ever (`0eeead0`). An alert said "See the list" and opened a page that does not
+show it (`206c87b`).
+
+What is now in the code and not only in habit: one line per finding, each with its own link and press (`d486e94`); the
+morning-check card says "not measured" when the check could not run, and offers to run it again (`2bfd4c6`); the
+facilitator feed's clock is the last pull that worked, and it says when none is on record (`0eeead0`, `2de8157`) and
+when the key's day is not on record (`ef43c0c`); a test reads the monthly-checklist alert's link and the source of the
+page it opens, and fails if the link changes or the text `monthClose(` leaves that page's source (`206c87b`). That
+last test is itself a stand-in: a comment holding the text would keep it passing, and the page was not rendered.
+
+What is still habit, so it is the weaker form: the question in pre-flight 8, and rule 7 in `CLAUDE.md`. A check that
+cannot run is still silent in places: the nightly run swallows its own failure, and on Today the contract-deadline items
+and the claims-proof warning turn an error into an empty list or nothing; no other reader has been looked at for this.
+The morning-check card does not yet say what each check reads, so he cannot see a stand-in; he can only find one by
+being wrong about it.
 
 ## 8. How I report
 
