@@ -259,8 +259,8 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
             {notYetDue.length} thing{notYetDue.length === 1 ? "" : "s"} for the current period — not due yet
           </summary>
           <p className="mt-1 text-xs text-ink-3">
-            These become due when the period ends. Nothing here is late, and nothing here will be counted against you
-            until then — but a five-minute job is often easier done now than remembered later.
+            Each one shows the day it is due. Nothing here is late, and nothing here will be counted against you
+            until that day has passed — but a five-minute job is often easier done now than remembered later.
           </p>
           <div className="mt-3 space-y-3">
             {notYetDue.map((i) => (
@@ -350,8 +350,15 @@ function Item({
         </div>
       )}
 
-      {i.kind === "renewal" && i.href && (
-        <Link href={i.href} className="btn btn-sm btn-primary mt-3">Open</Link>
+      {/* ── renewal: closed by the renewed certificate being on file, so the one thing to do is go and file it ── */}
+      {i.kind === "renewal" && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {i.missing && <span className="text-sm text-ink-2">{i.missing}</span>}
+          {i.href && <Link href={i.href} className="btn btn-sm btn-primary">Open Licences</Link>}
+          <span className="text-xs text-ink-3">
+            There is nothing here to tick. It closes itself once a certificate that runs past the end of {i.periodLabel} is entered under Licences.
+          </span>
+        </div>
       )}
     </article>
   );

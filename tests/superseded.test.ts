@@ -110,6 +110,8 @@ describe("inForce, the one a reader should look at", () => {
     assert.equal(inForce([...rows].reverse(), on.endsOn)?.id, "never");
   });
 
+  // Which of two equal rows is taken decides nothing about the date. The rule is only that it is the same one every time, so a page does not
+  // show one number on one load and another on the next.
   test("of two that end together the first one given is the one in force", () => {
     const rows: Row[] = [
       { id: "a", type: "licence", ends: "2027-06-30" },

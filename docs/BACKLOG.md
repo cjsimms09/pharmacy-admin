@@ -1523,10 +1523,28 @@ place, and an arithmetic check before anything is stored.
     (`obligations.ts` near lines 489-493) but its witness is only this desk's rehearsal archive, and
     `instrumentation.ts` near lines 269-275 rehearses every 30 days, so the quarter would always cover itself. Q for
     him: does anyone test the PioneerRx backup, and should the duty be about this desk only?
-  - **A4-3** `ks_pharmacy_registration` and `dea_registration` are kind "renewal"; `witnessed()` has no renewal case,
-    `hrefFor` is null, the page renders nothing for a renewal with no link, and `completeObligation()` has no caller;
-    the 2026 period is open with `dueOn` 2026-06-30 and would sit under "not due yet" / "Nothing here". To see what he
-    sees.
+  - **A4-3** (read in code 7 October; fixed in code the same day, committed, not deployed.) OBSERVATION: the Kansas
+    pharmacy registration and DEA registration duties are kind "renewal"; `witnessed()` had no case for them, `hrefFor`
+    returned nothing, `completeObligation()` has no caller in `src`, `scripts` or `tests`; by the code the 2026 Kansas
+    period was "open" with `dueOn` 2026-06-30 and sat under "not yet due" / "Nothing here is late" 99 days after that
+    date, and would have become a missed period nothing could clear on 1 January 2027, while the Kansas certificate on
+    file runs on into the first half of 2027. SHOULD BE: a registration renewal is done when a certificate that runs
+    past the end of the period is on file, and is late from the day after the date the certificate on file runs to.
+    DIFFERENCE: the duty could not see the certificate and was judged by the calendar year alone. Fixed:
+    `renewal-cover.ts` reads the pharmacy's certificate rows; `openItems()` makes a period "missed" once its own date
+    has passed; the item says what is on file and links to Licences; the register reads the list's state
+    (`openStates`); Today's quiet list prints its own sentence for a renewal (`comingSentence`); the row is in
+    `docs/OPEN-ITEMS.md`. Left, each a lead: (a) a late renewal covers only the period it is filed in, so the stretch
+    before it is not shown (the question below). (b) One lapse shows as several missed periods from the same date, and
+    as two rows, the duty and the certificate in the due list, on Today and in the digest. (c) "N days late" counts
+    from the date on the certificate, so an old certificate reads in thousands of days. (d) A certificate with no date
+    reads as late with its own sentence; there is no separate state for a date nobody recorded. (e) The duty reads every
+    row of the type, and the due list groups by type and label. (f) No form makes a pharmacy certificate "does not
+    expire" and a Licences edit-save sets that to false, so the `noExpiry` branch is reachable only by a row written
+    some other way. (g) The live Compliance, Today and register pages have not been read through `openItems()` (it
+    seeds rows); the first real look is after a deploy.
+    **A4-Q2, for him:** after a registration lapses and is renewed late, must the unregistered stretch stay visible on
+    the register, or does the late renewal close it? Today it closes the period it is filed in.
   - **A4-4** `compliance-status.ts` near lines 123-154 judges training periods on today's on-site roster; an empty
     population reads as missed for most duties and as satisfied for `immunization_protocol_review` (near line 148).
   - **A4-5** a witnessed period recorded wrongly cannot be corrected (`page.tsx` near lines 341-351 has no form);

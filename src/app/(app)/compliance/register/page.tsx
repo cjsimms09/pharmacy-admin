@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { db } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { openItems } from "@/lib/compliance-status";
+import { openItems, openStates } from "@/lib/compliance-status";
 import { ensureObligations, CLOSURES } from "@/lib/obligations";
-import { periodsBetween, periodLabel, stateOf, periodKeyFor } from "@/lib/periods";
+import { periodsBetween, periodLabel, periodKeyFor } from "@/lib/periods";
 import { todayIso, fmt } from "@/lib/dates";
 import { PageHeader, BackLink } from "@/components/ui";
 
@@ -24,7 +24,7 @@ export default async function RegisterPage() {
   const obligations = (await db.query.obligations.findMany()).filter((o) => o.active);
   const completions = await db.query.obligationCompletions.findMany();
   const open = await openItems();
-  const openKeys = new Set(open.map((i) => `${i.obligationId}|${i.periodKey}`));
+  const states = openStates(open);
 
   const [first] = obligations;
   const start = (first?.createdAt ?? new Date().toISOString()).slice(0, 10);
@@ -38,11 +38,11 @@ export default async function RegisterPage() {
         closure,
         cells: periods.map((p) => {
           const filed = completions.filter((c) => c.obligationId === o.id && (c.periodKey ?? periodKeyFor(o.cadence, c.completedOn)) === p);
-          const stillOpen = openKeys.has(`${o.id}|${p}`);
           return {
             key: p,
             label: periodLabel(p),
-            state: stillOpen ? stateOf(filed.length, o.expectedPerPeriod, p, today) : ("satisfied" as const),
+            // The state the list on Compliance decided for a period still outstanding; a period it does not list is covered.
+            state: states.get(`${o.id}|${p}`) ?? ("satisfied" as const),
             on: filed[0]?.completedOn ?? null,
             by: filed[0]?.completedBy ?? null,
           };
@@ -80,7 +80,12 @@ export default async function RegisterPage() {
                   {o.kind === "attest" && <span>you confirm it{closure?.minutes ? ` · ~${closure.minutes} min` : ""}</span>}
                   {o.kind === "evidence" && <span>a document{o.expectedPerPeriod > 1 ? ` (${o.expectedPerPeriod} per period)` : ""}</span>}
                   {o.kind === "witnessed" && <span className="text-emerald-700">closes itself</span>}
-                  {o.kind === "renewal" && <span>renewal</span>}
+                  {o.kind === "renewal" && (
+                    <>
+                      <span className="text-emerald-700">closes itself</span>
+                      <div className="mt-0.5 text-ink-3">when a certificate that runs past the end of the period is entered under Licences</div>
+                    </>
+                  )}
                   {o.witnessSource && <div className="mt-0.5 text-ink-3">{o.witnessSource}</div>}
                 </td>
                 <td className="px-3 py-2">
@@ -111,7 +116,7 @@ export default async function RegisterPage() {
       </div>
 
       <p className="mt-4 text-xs text-ink-3">
-        Green is covered, red is a period that went by, amber is part done, grey is not due yet. Hover a period to see
+        Green is covered, red is late (its day has passed and nothing covers it), amber is part done, grey is not due yet. Hover a period to see
         when it was closed and by whom. <Link href="/compliance" className="underline">Back to what needs you</Link>
       </p>
     </>

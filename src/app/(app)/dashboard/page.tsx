@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { cqiSnapshot, csInventoryStatus } from "@/lib/compliance";
 import { dueList, type DueItem } from "@/lib/due";
-import { complianceSummary, type OpenItem } from "@/lib/compliance-status";
+import { complianceSummary, comingSentence, type OpenItem } from "@/lib/compliance-status";
 import { staffMatrix } from "@/lib/staff-matrix";
 import { StaffBoard } from "@/components/staff-board";
 import { invoiceIssues } from "@/lib/invoices";
@@ -241,7 +241,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       .map((i) => ({
         key: `${i.obligationId}-${i.periodKey}`,
         title: i.title,
-        why: `${i.periodLabel}. Not late, and will not count against you until the period ends.`,
+        why: comingSentence(i),
         badge: `due ${fmt(i.dueOn)}`,
         tone: "muted" as Tone,
         href: i.href ?? "/compliance",

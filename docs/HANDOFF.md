@@ -8,6 +8,27 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after `e8e9c93`; NOT deployed or pushed): the two registration renewals on
+  Compliance now read the certificate on file, so entering it closes them, and they go late the day after the date on
+  it and not at the end of the year.** (1) New `src/lib/renewal-cover.ts` (pure): a period is covered when a
+  pharmacy-level certificate of the type runs past its end or is marked "does not expire"; a row with no date covers
+  nothing. (2) `src/lib/compliance-status.ts`: `openItems(today)` takes a test date, reads the certificate for the two
+  renewal duties, makes an open period "missed" once its own date has passed (the date is the end of the period for
+  every other duty, so nothing changes for them), says what is on file and links to Licences; new `openStates` (the
+  register reads the list's state for a cell still open) and `comingSentence` (the line under an open item on Today's
+  quiet list, which told him a renewal counts against him only when the year ends). (3) The Compliance page's "not yet
+  due" paragraph says each item shows its own date. No renewal is listed live today, because the 2026 certificates on
+  file run past 31 December; the first to appear will be the Kansas renewal for 2027, when 2027 begins. **Registered,
+  not fixed, in `docs/BACKLOG.md` as A4-3 (leads a to g) with one question for him, A4-Q2:** whether the unregistered
+  stretch before a late renewal must stay visible. **Files changed on `feature/compliance`, so say so on your pull
+  request before editing one:** `src/lib/compliance-status.ts`, new `src/lib/renewal-cover.ts`,
+  `src/app/(app)/compliance/page.tsx`, `src/app/(app)/compliance/register/page.tsx`, `src/app/(app)/dashboard/page.tsx`,
+  `tests/superseded.test.ts`, new `tests/renewal-cover.test.ts`, and `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`,
+  `docs/HANDOFF.md`. **Read by:** a fresh Claude subagent read the first version cold and raised nine points, which
+  were checked against the code and are this commit and the one before it. It is a model: no person has read this,
+  nothing was rendered in a browser, the live pages were not read through `openItems()`, and he has not seen the new
+  sentences. Nothing is asked of him or of you beyond the note on a pull request.
+
 - **7 October, pharmacy session (the commit after `ef96b48`; NOT deployed or pushed): the pharmacy's own certificates are
   now read one way everywhere: the one in force is the one that runs the longest, and a blank date is no longer "never
   expires".** (1) `src/lib/superseded.ts`: new `credentialEnd(row)` and `inForce(rows, endsOn)`; `splitSuperseded` ranks a

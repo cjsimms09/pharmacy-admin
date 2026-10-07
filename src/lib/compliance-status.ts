@@ -5,6 +5,8 @@ import { newId } from "./crypto";
 import { onSiteToday } from "./roster";
 import { atLocal, todayIso } from "./dates";
 import { ensureObligations, CLOSURES, OBLIGATION_SEEDS, RENEWAL_CREDENTIAL } from "./obligations";
+import { readRenewal, renewalMissing } from "./renewal-cover";
+import { CREDENTIAL_LABEL } from "./labels";
 import { periodsBetween, periodKeyFor, periodLabel, periodEnds, stateOf, type PeriodState } from "./periods";
 import type { ObligationKind, ObligationCadence } from "@/db/schema";
 
@@ -216,7 +218,6 @@ export async function answerObligation(
   return { title: o.title };
 }
 
-/** Everything outstanding, worst first. */
 /**
  * When a duty is actually due inside its period.
  *
@@ -239,14 +240,11 @@ function deadlineFor(
 
   const credentialType = RENEWAL_CREDENTIAL[seedKey];
   if (credentialType) {
-    const held = pharmacyCredentials
-      .filter((c) => c.type === credentialType && !c.noExpiry && c.expiresOn)
-      .map((c) => c.expiresOn!)
-      .sort();
-    // The one that falls inside this period is this period's deadline. A registration expiring in
-    // a later year says nothing about when the duty for this year was due.
-    const inPeriod = held.find((d) => d.startsWith(periodKey.slice(0, 4)));
-    if (inPeriod) return inPeriod;
+    // Asked only of a period the certificate on file does not cover, so the latest date on file falls inside it or before it. Inside it,
+    // that is the day the renewal is due. Before it, with nothing renewed since, the renewal has been due since that day: a registration
+    // that ran out in 2028 does not make a 2029 renewal "due 31 December 2029".
+    const runsTo = readRenewal(credentialType, periodKey, pharmacyCredentials).runsTo;
+    if (runsTo) return runsTo;
   }
 
   const seed = OBLIGATION_SEEDS.find((s) => s.key === seedKey);
@@ -256,9 +254,13 @@ function deadlineFor(
   return end;
 }
 
-export async function openItems(): Promise<OpenItem[]> {
+/**
+ * Everything outstanding, worst first.
+ *
+ * `today` is the pharmacy's own day. Only a test passes another, to put the same rows on a date the clock will not reach for months.
+ */
+export async function openItems(today: string = todayIso()): Promise<OpenItem[]> {
   await ensureObligations();
-  const today = todayIso();
   const start = await startedUsingSite();
   const obligations = (await db.query.obligations.findMany()).filter((o) => o.active);
   const completions = await db.query.obligationCompletions.findMany();
@@ -289,15 +291,21 @@ export async function openItems(): Promise<OpenItem[]> {
     const closure = o.seedKey ? CLOSURES[o.seedKey] : undefined;
     const mine = completions.filter((c) => c.obligationId === o.id);
     const witnessCounts = o.kind === "witnessed" && o.seedKey ? await witnessed(o.seedKey, periods, o.cadence) : null;
+    const renewalType = o.seedKey ? RENEWAL_CREDENTIAL[o.seedKey] : undefined;
 
     for (const periodKey of periods) {
       const filed = mine.filter((c) => (c.periodKey ?? periodKeyFor(o.cadence, c.completedOn)) === periodKey).length;
-      const seen = witnessCounts?.counts.get(periodKey) ?? 0;
+      // A renewal is witnessed by the certificate on file (renewal-cover.ts); every other witnessed duty by its own records.
+      const reading = renewalType ? readRenewal(renewalType, periodKey, pharmacyCredentials) : null;
+      const seen = reading ? (reading.covered ? 1 : 0) : (witnessCounts?.counts.get(periodKey) ?? 0);
       const have = filed + seen;
-      const state = stateOf(have, o.expectedPerPeriod, periodKey, today);
+      let state = stateOf(have, o.expectedPerPeriod, periodKey, today);
       if (state === "satisfied") continue;
 
       const dueOn = deadlineFor(o.seedKey, periodKey, pharmacyCredentials);
+      // A renewal's own date is the one on the certificate and the year is only where it falls: past that date with nothing renewed it is
+      // late, whatever the year still says. Every other duty's date is the end of its period, so this changes nothing for them.
+      if (state === "open" && dueOn < today) state = "missed";
       const daysLate = dueOn < today ? Math.round((Date.parse(today) - Date.parse(dueOn)) / 86_400_000) : 0;
 
       out.push({
@@ -316,7 +324,7 @@ export async function openItems(): Promise<OpenItem[]> {
         expected: o.expectedPerPeriod,
         minutes: closure?.minutes ?? null,
         statement: o.attestationTemplate ? fill(o.attestationTemplate, periodKey, today) : null,
-        missing: witnessCounts?.missing ?? null,
+        missing: witnessCounts?.missing ?? (reading && renewalType ? renewalMissing(CREDENTIAL_LABEL[renewalType], periodKey, reading) : null),
         href: hrefFor(o.seedKey),
       });
     }
@@ -326,6 +334,25 @@ export async function openItems(): Promise<OpenItem[]> {
   // inspector finds. Then whatever is open now.
   const rank: Record<PeriodState, number> = { missed: 0, partial: 1, open: 2, satisfied: 3 };
   return out.sort((a, b) => rank[a.state] - rank[b.state] || a.dueOn.localeCompare(b.dueOn));
+}
+
+/**
+ * The state of every period still outstanding, keyed "obligationId|periodKey", exactly as the list above decided it. The register reads
+ * the cells it shows as still open from here and works none out for itself: a second derivation from the filings alone says "not due yet"
+ * about a witnessed period that is part done, and about a renewal this list has already called late.
+ */
+export function openStates(open: ReadonlyArray<Pick<OpenItem, "obligationId" | "periodKey" | "state">>): Map<string, PeriodState> {
+  return new Map(open.map((i) => [`${i.obligationId}|${i.periodKey}`, i.state]));
+}
+
+/**
+ * The sentence under an item that is open and not yet late, on Today's quiet list. For most duties the date it falls due is the end of the
+ * period, so "until the period ends" is true. A renewal falls due on the date the certificate runs to, which comes before its year ends, so
+ * the same words would tell him a registration is safe on days it is not; it says what is on file and what to enter instead.
+ */
+export function comingSentence(i: Pick<OpenItem, "kind" | "periodLabel" | "missing">): string {
+  if (i.kind === "renewal" && i.missing) return `${i.periodLabel} — ${i.missing}`;
+  return `${i.periodLabel}. Not late, and will not count against you until the period ends.`;
 }
 
 function hrefFor(seedKey: string | null): string | null {
@@ -339,6 +366,8 @@ function hrefFor(seedKey: string | null): string | null {
     case "cqi_program_document": return "/compliance/training";
     case "immunization_protocol_review": return "/staff";
     case "technician_list": return "/staff/technician-list";
+    case "ks_pharmacy_registration":
+    case "dea_registration": return "/licenses";
     default: return null;
   }
 }
