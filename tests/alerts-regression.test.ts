@@ -90,3 +90,28 @@ describe("the CQI summary alert", () => {
     assert.equal((await alerts()).find((x) => x.key === key), undefined, "filed and final: the period stops being asked for");
   });
 });
+
+describe("the monthly checklist alert", () => {
+  test("its link goes to the page that lists what it names, on any day of the month", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("../src/lib/alerts.ts", import.meta.url), "utf8");
+    const href = /key: `monthly-checklist-[^`]*`[\s\S]*?href: "([^"]+)"/.exec(source)?.[1];
+    assert.equal(href, "/expected", "the alert says 'See the list': that list is the month's checklist, which the page below shows");
+    const page = readFileSync(new URL("../src/app/(app)/expected/page.tsx", import.meta.url), "utf8");
+    assert.match(page, /monthClose\(/, "the page the alert sends him to must be the one that reads the month's checklist");
+  });
+
+  test("from the 5th it asks for what the month still needs, and not before", async () => {
+    const today = todayIso();
+    const day = Number(today.slice(8, 10));
+    const key = `monthly-checklist-${monthJustFinished(today)}`;
+    const a = (await alerts()).find((x) => x.key === key);
+    if (day < 5) {
+      assert.equal(a, undefined, "nothing is asked before the statements can exist");
+      return;
+    }
+    assert.ok(a, `${key} on an empty database: nothing the month needs has arrived`);
+    assert.equal(a.level, day >= 15 ? "now" : "soon");
+    assert.equal(a.href, "/expected");
+  });
+});

@@ -8,6 +8,16 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after `006d971`; NOT deployed or pushed): the alert "September 2026: 1
+  thing still to upload" said "See the list" and opened the Money page, which does not hold that list; it now opens
+  `/expected`, which does.** One link in `src/lib/alerts.ts` (a CRLF file) and a test in
+  `tests/alerts-regression.test.ts` that reads the link from the source and checks that the page it names asks
+  `monthClose`, plus one that proves the alert appears from the 5th and not before. **Files changed on
+  `feature/compliance`, so say so on your pull request before editing one:** `src/lib/alerts.ts`,
+  `tests/alerts-regression.test.ts`, `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`. **Read by:** its author only, no second
+  reader. Nothing is asked of you. A question for him, whether he still wants ProviderPay's payment report pulled every
+  month (September's close is waiting on it), is written under A3-5 in `docs/BACKLOG.md` and has not been asked.
+
 - **6 October, pharmacy session (the commit after `d486e94`; NOT deployed or pushed): the morning check's remittance
   line read receipts, a stand-in, while ProviderPay's own account history held the answer; the site now reads that
   history, and the card and the Remits tab judge a remittance by one computation, not two.** His words: *"1 remittance

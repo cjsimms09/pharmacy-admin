@@ -1261,6 +1261,22 @@ place, and an arithmetic check before anything is stored.
     last pull failed; `mtf.ts` has CRLF line endings, so it is edited with a tool that keeps them.
   - **A3-5** `alerts.ts` near lines 692-702: the monthly-checklist alert links "See the list" to `/money`; the list is
     on `/expected`.
+    Checked 7 October (the site's own `alerts()`, read-only): live on 5 and 7 October, "September 2026: 1 thing still
+    to upload" at level "soon" with the link `/money`; the one open item is ProviderPay's payment report, pulled to 18
+    September. Fixed in code on 7 October and not deployed: the link is `/expected`; one test reads the alert's link
+    from the source and checks the page asks `monthClose`, so it does not depend on the day of the month, and one
+    proves the alert appears from the 5th and not before. Registered in OPEN-ITEMS, "Found 6 October".
+    **Q for him, not asked:** September cannot be checked or closed while that report is outstanding. The month close
+    makes every checklist item a document that must arrive and asks whether the bank lines mean something only when
+    none is outstanding (`month-close-store.ts`), so `/expected` reads "N thing(s) still to arrive before September
+    can be checked at all". The two sentences that say why, the checklist's "Until it is in, none of the month's payer
+    money is on the account at all" and the alert's "Until they are in, September 2026's cash account is not the
+    bank's", were written on 11 September, before his 2 October rule that the cash account is the bank statement.
+    What the report still does, as far as the code shows, is create the cash receipts that bank lines are tied to
+    (the header of `payer-payments-store.ts`); what the placement of ProviderPay's transfers needs without those
+    receipts has not been traced. The question is whether he still wants that report pulled every month, now that the
+    account history the site already reads lists deposits by payment number, or whether the month's check should stop
+    waiting for it. The checklist and the alert are left as they are until he says.
   - **A3-6** (also reported as A2-1) `dashboard/page.tsx` near lines 521-523: the claims-proof alert links "See the
     checks" to `/money`, which shows no proofs; Data health was retired on 2 October; and a proof that has never run
     is silent.

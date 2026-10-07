@@ -697,7 +697,7 @@ export async function alerts(): Promise<Alert[]> {
             `${names.join(", ")}. ` +
             `These are the only files the site cannot fetch for itself — everything else arrives by email or by its own feed. ` +
             `Until they are in, ${list.label}'s cash account is not the bank's.`,
-          href: "/money",
+          href: "/expected",
           action: "See the list",
         });
       }
