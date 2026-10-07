@@ -3,7 +3,7 @@ import { isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
-import { splitSuperseded } from "@/lib/superseded";
+import { credentialEnd, inForce, splitSuperseded } from "@/lib/superseded";
 import { daysUntil, fmt, todayIso } from "@/lib/dates";
 import { CREDENTIAL_LABEL, CREDENTIAL_TYPES_FOR_PHARMACY, CREDENTIAL_HINT } from "@/lib/labels";
 import { PageHeader, Notice, StatusBadge, Field, Figure, Card, Empty, History } from "@/components/ui";
@@ -48,7 +48,7 @@ export default async function LicensesPage({ searchParams }: { searchParams: Pro
    */
   const split = splitSuperseded(creds, todayIso(), {
     key: (c) => `${c.type}:${c.label ?? ""}`,
-    endsOn: (c) => (c.noExpiry ? null : (c.expiresOn ?? null)),
+    endsOn: credentialEnd,
   });
 
   // Counted on what is in force, never on the history behind it: a renewed registration must not
@@ -60,11 +60,12 @@ export default async function LicensesPage({ searchParams }: { searchParams: Pro
   const noDate = live.filter((c) => !c.expiresOn);
   const noDoc = live.filter((c) => credDocs(c.id).length === 0);
 
-  // The two the pharmacy cannot open without. Worth naming rather than leaving in a list.
+  // The two the pharmacy cannot open without. Worth naming rather than leaving in a list. Each shows the certificate in force, the one
+  // that runs the longest, and not the first one filed: once a registration has been renewed on a new row, the first is the one it replaced.
   const critical = [
     { type: "pharmacy_registration" as const, label: "Kansas pharmacy registration", number: s.pharmacy_registration_number },
     { type: "dea_registration" as const, label: "DEA registration", number: s.pharmacy_dea },
-  ].map((k) => ({ ...k, cred: creds.find((c) => c.type === k.type) }));
+  ].map((k) => ({ ...k, cred: inForce(creds.filter((c) => c.type === k.type), credentialEnd) }));
 
   const credRow = (c: (typeof creds)[number]) => (
                 <tr key={c.id}>

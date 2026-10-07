@@ -18,9 +18,26 @@
 export type Superseding<T> = {
   /** What makes two rows the same thing over time — a person's pharmacist licence, say. */
   key: (row: T) => string;
-  /** When the row stops being in force. Null means it does not expire, which always wins. */
+  /**
+   * When the row stops being in force. Null means it does not expire, which always wins. `UNKNOWN_END` means nobody recorded when, which
+   * loses to every date.
+   */
   endsOn: (row: T) => string | null;
 };
+
+/** What `endsOn` returns for a row that carries no date and is not said to be permanent: nobody has recorded when it stops. */
+export const UNKNOWN_END = "";
+
+/**
+ * What a credential row says about when it stops, in the terms `inForce` and `splitSuperseded` rank by: null when it is said never to
+ * expire, its date when it has one, and `UNKNOWN_END` when it has neither. A blank date is not "never expires" — it is something nobody
+ * entered, so it must never outrank a date somebody did, and the three screens that read these rows (Licences, the inspection list and the
+ * due list) must not each decide it differently.
+ */
+export function credentialEnd(c: { noExpiry?: boolean | null; expiresOn?: string | null }): string | null {
+  if (c.noExpiry) return null;
+  return c.expiresOn || UNKNOWN_END;
+}
 
 export type Split<T> = {
   /** In force, or lapsed with nothing to replace it — either way, on the page. */
@@ -32,11 +49,13 @@ export type Split<T> = {
 /**
  * Splits rows into what belongs on the page and what belongs behind a fold.
  *
- * Within each group the row that runs the longest is the one in force — a row with no end date
+ * Within each group the row that runs the longest is the one in force — a row said never to expire
  * beats any dated one, and a later date beats an earlier one. Every *other* row in that group that
  * has already ended is history. The consequence worth stating: a group whose best row has already
  * expired keeps that row in `current`, because a lapsed licence with no replacement is the thing
- * somebody needs to see.
+ * somebody needs to see. A row whose date nobody recorded loses to every date and is never put in
+ * history: it stays in view until somebody records one, because hiding it would hide that the
+ * date is missing.
  */
 export function splitSuperseded<T>(rows: T[], today: string, on: Superseding<T>): Split<T> {
   const groups = new Map<string, T[]>();
@@ -48,17 +67,27 @@ export function splitSuperseded<T>(rows: T[], today: string, on: Superseding<T>)
   const current: T[] = [];
   const history: T[] = [];
   for (const group of groups.values()) {
-    const best = group.reduce((a, b) => (rank(on.endsOn(b)) > rank(on.endsOn(a)) ? b : a));
+    const best = inForce(group, on.endsOn);
     for (const row of group) {
       const end = on.endsOn(row);
-      if (row !== best && end !== null && end < today) history.push(row);
+      if (row !== best && end !== null && end !== UNKNOWN_END && end < today) history.push(row);
       else current.push(row);
     }
   }
   return { current, history };
 }
 
-/** No end date outranks every date; otherwise the later date wins. */
+/**
+ * The row of a group that is in force: the one that runs the longest, a row said never to expire beating any dated one, a row with no
+ * date recorded losing to every date, and the first of two that end together. A reader that wants "the certificate on file" takes it
+ * from here and not from the first row the database returns, because once a record has been renewed the first row is the one it replaced.
+ */
+export function inForce<T>(rows: T[], endsOn: (row: T) => string | null): T | undefined {
+  if (rows.length === 0) return undefined;
+  return rows.reduce((a, b) => (rank(endsOn(b)) > rank(endsOn(a)) ? b : a));
+}
+
+/** Never expiring outranks every date and an unrecorded date ranks below every one; otherwise the later date wins. */
 function rank(end: string | null): string {
   return end === null ? "9999-99-99" : end;
 }

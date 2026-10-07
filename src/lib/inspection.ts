@@ -9,6 +9,7 @@ import { registerStatus } from "./business-associates";
 import { onSiteToday, rotations } from "./roster";
 import { getSettings } from "./settings";
 import { periodKeyFor } from "./periods";
+import { credentialEnd, inForce } from "./superseded";
 
 /**
  * Could you hand an inspector what they ask for, today?
@@ -76,7 +77,13 @@ export async function inspectionReport(): Promise<InspectionReport> {
   const checks: Check[] = [];
   const add = (c: Check) => checks.push(c);
 
-  const pharmacyCred = (type: string) => creds.find((c) => !c.personId && c.type === type);
+  // The certificate in force, as the Licences page counts it: the one that runs the longest, not the first filed (once a registration is
+  // renewed on a new row, the first is the one it replaced).
+  const pharmacyCred = (type: string) =>
+    inForce(
+      creds.filter((c) => !c.personId && c.type === type),
+      credentialEnd,
+    );
   const expiryState = (iso: string | null | undefined): CheckState => {
     if (!iso) return "gap";
     const d = daysBetween(today, iso);

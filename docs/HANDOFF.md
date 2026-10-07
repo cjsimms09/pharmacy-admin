@@ -8,6 +8,27 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after `ef96b48`; NOT deployed or pushed): the pharmacy's own certificates are
+  now read one way everywhere: the one in force is the one that runs the longest, and a blank date is no longer "never
+  expires".** (1) `src/lib/superseded.ts`: new `credentialEnd(row)` and `inForce(rows, endsOn)`; `splitSuperseded` ranks a
+  row with no date that is not marked "does not expire" below every date and never puts it in history. (2) The due list
+  (`src/lib/due.ts`) now gives one item per kind of pharmacy certificate (type and label) for the one in force and sends
+  him to Licences; before, it gave one for every dated row and sent him to Documents, which makes no certificate row for
+  the pharmacy, so a replaced registration would have sat on Today as overdue and its link could not clear it. (3) The
+  inspection list (`src/lib/inspection.ts`), the fact sheet handed to the manual reviewer (`src/lib/pharmacy-facts.ts`)
+  and the two "must have" boxes on Licences read the one in force; each took the first row filed before. Nothing fires
+  on the live rows today (one dated row per kind); the first renewal entered as a new row would have. **Registered, not
+  fixed, in `docs/BACKLOG.md` as A4-7:** the person-level readers still disagree about a blank date, the inspection list
+  still links to Documents, the inventory print page takes the first DEA row, and Intake's replace takes the first row
+  of the type. **Files changed on `feature/compliance`, so say so on your pull request before editing one:**
+  `src/lib/superseded.ts`, `src/lib/due.ts`, `src/lib/inspection.ts`, `src/lib/pharmacy-facts.ts`,
+  `src/app/(app)/licenses/page.tsx`, `tests/superseded.test.ts`, new `tests/inspection-certificates.test.ts`,
+  `tests/due-pharmacy-credentials.test.ts`, `tests/pharmacy-facts-credentials.test.ts`, and `docs/OPEN-ITEMS.md`,
+  `docs/BACKLOG.md`, `docs/HANDOFF.md`. **Read by:** a fresh Claude subagent given the separate Compliance change read it
+  cold and raised nine points, three of which are this commit; each was checked against the code before it was acted on.
+  It is a model: no person has read this, nothing was rendered in a browser, and he has not seen the new due item's
+  sentence. Nothing is asked of him or of you beyond the note on a pull request.
+
 - **7 October, pharmacy session (the commit after `fc962e0`; NOT deployed or pushed): the morning-check card can now
   be told that a line is wrong or settled, and the site remembers it (CLAUDE.md rule 4).** On 6 October five of the
   morning's alarms were wrong, and the card had no way to be told; each was put right only when he noticed and wrote

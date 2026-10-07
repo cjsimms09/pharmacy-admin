@@ -1541,3 +1541,17 @@ place, and an arithmetic check before anything is stored.
     "Nothing here is late"). The readers report reading these sound, on their word and not mine: `periods.ts`,
     `backup.ts` near lines 423-446 and 480-522, `self-inspection.ts` near lines 133-176, `compliance-status.ts` near
     lines 366-403, `obligations.ts` near lines 566-645, `imonnit.ts` near lines 504-513.
+  - **A4-7** (found 7 October by a cold reader of the A4-3 change; each point read against the code by the author.) The
+    readers of a pharmacy's own certificate rows each decided which row is current for themselves, and read a blank date
+    three ways. Fixed for the pharmacy-level readers (`credentialEnd` and `inForce` in `superseded.ts`, used by the due
+    list, the inspection list, the fact sheet and Licences; the row is in `docs/OPEN-ITEMS.md`). Left, each a lead:
+    (a) the person-level readers still disagree about a blank date: `staff/[id]/page.tsx` near lines 60-108 (`heldFor`
+    ranks it highest, `extraSplit` reads it as never expiring) and the person loop of `dueList()` (ranks it lowest);
+    dormant live, where the only undated person-level rows are two powers of attorney. (b) The inspection list's
+    registration, DEA and CSOS checks link to `/documents` (`inspection.ts`), where an upload makes no certificate row
+    for the pharmacy, so their state can stay blocking after he has uploaded the certificate; the link should go to
+    Licences, as the due item's now does. (c) `inventory/[id]/print/page.tsx` near line 20 takes the DEA number from the
+    first DEA row. (d) Intake's `replaceExisting` (ticked by default) replaces the first row of the type, not the one in
+    force, and a blank date there wipes the date. (e) Two kinds of one type with different labels get due items with the
+    same title. (f) A pharmacy certificate with no date recorded gets no due item (the inspection list says no expiry
+    date is on file; Today says nothing); a "no expiry date recorded" item was not built.

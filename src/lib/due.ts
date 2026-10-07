@@ -4,6 +4,7 @@ import { db, schema } from "@/db";
 import { onSiteToday } from "./roster";
 import { todayIso, daysBetween, addDays } from "./dates";
 import { CREDENTIAL_LABEL, TRAINING_LABEL, PERSON_ROLE_LABEL } from "./labels";
+import { credentialEnd, inForce } from "./superseded";
 import type { CredentialType, TrainingType } from "@/db/schema";
 
 /**
@@ -402,7 +403,20 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
   }
 
   // ── Pharmacy-level credentials (no person attached) ──
-  for (const c of creds.filter((c) => !c.personId && c.expiresOn)) {
+  //
+  // One item per kind, for the certificate in force. Once a registration has been renewed on a new row the first row is the one it replaced
+  // and owes nothing, so listing every dated row would keep last year's certificate "overdue" for as long as it is kept. Two rows are the
+  // same kind the way the Licences page counts them (type and label) and the one in force is picked the way that page picks it, so this
+  // list and that page cannot disagree about which certificate is the pharmacy's. The place to renew is Licences: a file put under
+  // Documents does not make a credential row for the pharmacy, so it would leave the item exactly as it was.
+  const ours = new Map<string, typeof creds>();
+  for (const c of creds.filter((c) => !c.personId)) {
+    const kind = `${c.type}:${c.label ?? ""}`;
+    ours.set(kind, [...(ours.get(kind) ?? []), c]);
+  }
+  for (const rows of ours.values()) {
+    const c = inForce(rows, credentialEnd);
+    if (!c || c.noExpiry || !c.expiresOn) continue;
     push({
       id: `cred-${c.id}`,
       kind: "credential",
@@ -411,8 +425,8 @@ export async function dueList(opts: { horizonDays?: number } = {}): Promise<DueI
       personId: null,
       citation: null,
       dueOn: c.expiresOn,
-      action: `Renew and file the replacement.`,
-      href: `/documents`,
+      action: `Renew it, then enter the new certificate and its expiry date under Licences.`,
+      href: `/licenses`,
     });
   }
 

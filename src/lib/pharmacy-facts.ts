@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "@/db";
 import { getSettings } from "./settings";
 import { onSiteToday } from "./roster";
+import { credentialEnd, inForce } from "./superseded";
 
 /**
  * What this pharmacy actually is, told to the reviewer.
@@ -57,7 +58,9 @@ export async function pharmacyFacts(): Promise<FactSheet> {
   ]);
 
   const ours = credentials.filter((c) => !c.personId);
-  const held = (type: string) => ours.find((c) => c.type === type) ?? null;
+  // The certificate in force, which is the one that runs the longest and not the first one filed: once a registration has been renewed on a
+  // new row the first row is the one it replaced, and the date it carries is last year's.
+  const held = (type: string) => inForce(ours.filter((c) => c.type === type), credentialEnd) ?? null;
   const missing: FactSheet["missing"] = [];
   const lines: string[] = [];
 
@@ -107,7 +110,7 @@ export async function pharmacyFacts(): Promise<FactSheet> {
   // ── Who is accountable ──────────────────────────────────────────
   const pic = people.find((p) => p.isPic) ?? null;
   if (pic) {
-    const licence = credentials.find((c) => c.personId === pic.id && c.type === "pharmacist_license");
+    const licence = inForce(credentials.filter((c) => c.personId === pic.id && c.type === "pharmacist_license"), credentialEnd);
     lines.push(
       `The pharmacist in charge is ${pic.firstName} ${pic.lastName}` +
         (licence?.number ? `, Kansas pharmacist licence ${licence.number}` : "") +
