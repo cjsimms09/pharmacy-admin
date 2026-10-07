@@ -351,6 +351,9 @@ export const SETTING_KEYS = [
   "mtf_auto",
   "mtf_last_pull",
   "mtf_last_result",
+  /* When a pull last worked and when one last failed. The feed is judged on the first; `mtf_last_pull` is only when one was tried. */
+  "mtf_last_ok",
+  "mtf_last_failed",
 
   // Where a supply order from the Supplies page is sent. The pharmacy orders bags, labels and
   // vials by emailing a rep, so the address is the whole of the integration.

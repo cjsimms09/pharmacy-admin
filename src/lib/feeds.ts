@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/db";
 import { getSettings, type Settings } from "./settings";
-import { judgeFeed, missingDays, type FeedState } from "./feed-rules";
+import { judgeFeed, missingDays, mtfPull, MTF_QUIET_DAYS, type FeedState } from "./feed-rules";
 
 /**
  * Is everything arriving?
@@ -277,15 +277,16 @@ async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds
       probe = await withTimeout(testMtf().then((x) => ({ ok: x.ok, says: x.message })), 60_000, { ok: false, says: "The facilitator's tool did not answer within a minute." });
     }
     const keyLeft = s.mtf_key_set_on ? keyDays(s.mtf_key_set_on, today) : null;
+    const pull = mtfPull({ lastOk: s.mtf_last_ok || null, lastFailed: s.mtf_last_failed || null, lastResult: s.mtf_last_result || null, newestPaymentOn: lastAt, now });
     feeds.push({
       key: "mtf",
       label: "Facilitator payments (MTF)",
       group: "arriving",
-      cadence: "weekly, pulled by the facilitator's tool",
+      cadence: "tried about once a day by the facilitator's tool, each time looking back three weeks",
       lastAt,
-      state: !hasKey && lastAt === null ? "off" : probe && !probe.ok ? "broken" : judgeFeed({ maxQuietHours: 14 * 24, lastAt: s.mtf_last_pull ?? lastAt, now, enabled: true }),
+      state: !hasKey && lastAt === null ? "off" : probe && !probe.ok ? "broken" : judgeFeed({ maxQuietHours: MTF_QUIET_DAYS * 24, lastAt: pull.clockAt, now, enabled: true }),
       detail: hasKey
-        ? `${num(r.rows[0]?.n).toLocaleString()} payments held, ${money(num(r.rows[0]?.cents))} in all${lastAt ? `; newest received ${lastAt}` : ""}. Last pull: ${s.mtf_last_result ?? "never"}.${keyLeft !== null && keyLeft <= 14 ? ` The API key expires in ${plural(keyLeft, "day")}.` : ""}`
+        ? `${num(r.rows[0]?.n).toLocaleString()} payments held, ${money(num(r.rows[0]?.cents))} in all${lastAt ? `; newest received ${lastAt}` : ""}. ${pull.says}${keyLeft !== null && keyLeft <= 14 ? ` The API key expires in ${plural(keyLeft, "day")}.` : ""}`
         : "No facilitator key is stored, so nothing is pulled.",
       proof: null,
       probe,

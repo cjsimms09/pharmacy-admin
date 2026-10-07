@@ -49,3 +49,36 @@ export function agoWords(lastAt: string | null, now: Date): string {
   if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
   return `${Math.floor(days / 30)} months ago`;
 }
+
+/** How long the facilitator's feed may go without a pull that worked before it is called stopped. */
+export const MTF_QUIET_DAYS = 14;
+
+/**
+ * How the facilitator's pull is judged.
+ *
+ * Its payments come in bursts and some months not at all, so the newest payment says nothing about whether the channel works; the
+ * evidence is a pull that worked. The pull is tried about once a day and each try looks three weeks back, so one that fails loses
+ * nothing and a long run of them loses money. The clock is therefore the last pull that worked. A pull that failed does not move it,
+ * and the feed is called stopped, as before, after `MTF_QUIET_DAYS` without one. What a failure does is get said, in words, beside the
+ * badge, so a green badge never sits over a pull that is not working. Before any pull has been recorded as working the clock is the
+ * newest payment received, as it was.
+ */
+export function mtfPull(a: { lastOk: string | null; lastFailed: string | null; lastResult: string | null; newestPaymentOn: string | null; now: Date }): {
+  clockAt: string | null;
+  failing: boolean;
+  says: string;
+} {
+  const sentence = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
+  const failing = a.lastFailed !== null && (a.lastOk === null || a.lastFailed > a.lastOk);
+  const last = `Last pull: ${sentence(a.lastResult ?? "never")}`;
+  const worked = a.lastOk
+    ? `The last pull that worked was ${agoWords(a.lastOk, a.now)}; this feed is called stopped after ${MTF_QUIET_DAYS} days without one.`
+    : a.newestPaymentOn
+      ? `No pull has been recorded as working yet, so this feed is judged on its newest payment, and is called stopped after ${MTF_QUIET_DAYS} days without one.`
+      : "No pull has been recorded as working yet, and no payment has arrived through it.";
+  return {
+    clockAt: a.lastOk ?? a.newestPaymentOn,
+    failing,
+    says: failing ? `${last} ${worked}` : last,
+  };
+}

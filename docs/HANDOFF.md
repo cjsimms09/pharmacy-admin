@@ -8,6 +8,19 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after `2bfd4c6`; NOT deployed or pushed): the facilitator (MTF) feed is now
+  judged on the last pull that worked, not the last one tried.** Before, a pull that failed every day (a lapsed key, a
+  missing tool) reset the feed's clock each time and the feed read "on time" for ever. `mtf_last_pull` is still the time
+  of the last try, because the daily job reads it so that it does not run twice in a day; `recordMtfPull` in
+  `src/lib/mtf.ts` now also sets `mtf_last_ok` (only a pull that worked moves it) or `mtf_last_failed`, and
+  `src/lib/feeds.ts` judges the feed on the first and says a failed latest pull beside the badge. **For the cloud
+  session, who owns the remits-side MTF page (this session cannot read it):** `mtfStatus()` still returns `lastPull`,
+  the time of the last try; if that page's "last pull" should say when one last worked, read `mtf_last_ok` and
+  `mtf_last_failed`. **Files changed on `feature/compliance`, so say so on your pull request before editing one:**
+  `src/lib/mtf.ts`, `src/lib/feeds.ts` and `src/lib/feed-rules.ts` (all three CRLF), `src/lib/settings.ts`,
+  `tests/mtf-pull.test.ts`, `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`. **Read by:** its author only, no second reader.
+  Nothing is asked of you beyond that note.
+
 - **7 October, pharmacy session (the commit after the next one down; NOT deployed or pushed): Today's morning-check
   card can no longer go quiet when the check itself cannot run.** The dashboard turned any error the check raised into
   an empty list, which looks like a day on which every check passes; it now shows one line, "not measured", with a

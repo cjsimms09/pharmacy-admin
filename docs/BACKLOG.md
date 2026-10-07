@@ -1261,9 +1261,17 @@ place, and an arithmetic check before anything is stored.
     Checked 7 October (the code, and the settings and counts read-only): the stamp is written whatever the outcome in
     both places, so it says when the site last tried and not when it last succeeded. Not a false alarm today: the last
     result reads "Ran successfully. Nothing new to download for that range. Nothing new to post." and the newest of
-    the 57 MTF payments ($14,088.14 in all) was received on 5 October. Latent, not fixed: a pull that failed would
-    leave the feed reading on time. The fix is to stamp `mtf_last_pull` only on success, or to let the feed say the
-    last pull failed; `mtf.ts` has CRLF line endings, so it is edited with a tool that keeps them.
+    the 57 MTF payments ($14,088.14 in all) was received on 5 October. **Fixed in code 7 October (committed, not
+    deployed; `docs/OPEN-ITEMS.md` has the three lines and the pre-flight):** `mtf_last_pull` stays the time of the last
+    try, because the daily job reads it (`instrumentation.ts`, `mtfTick`, 20 hours) so it does not run twice in a day;
+    new settings `mtf_last_ok` (only a pull that worked moves it) and `mtf_last_failed`; the feed's clock is
+    `mtf_last_ok`, its allowance still 14 days, and a failed latest pull is said in the feed's sentence beside the badge,
+    with the last one that worked. Until the first pull after the deploy is recorded as working the clock is the newest
+    payment received (5 October), as before. `mtf.ts`, `feeds.ts` and `feed-rules.ts` have CRLF line endings; edit them
+    with a tool that keeps them. **For the cloud session, who owns the remits-side MTF page:** `mtfStatus()` still returns
+    `lastPull` (the time of the last try) and `lastResult`; if that page's "last pull" should show when one last worked,
+    read `mtf_last_ok` and `mtf_last_failed` (neither is exposed yet). **Not asked of him:** whether the badge should turn
+    before 14 days after several failures in a row.
   - **A3-5** `alerts.ts` near lines 692-702: the monthly-checklist alert links "See the list" to `/money`; the list is
     on `/expected`.
     Checked 7 October (the site's own `alerts()`, read-only): live on 5 and 7 October, "September 2026: 1 thing still

@@ -580,14 +580,12 @@ export async function mtfCycle(user: { name: string }, days = 21): Promise<{
   // has never been read is money sitting on the disk, and a network failure should not hide it.
   const read = await sweepRemittances(user);
 
-  const { setSetting } = await import("./settings");
   const message =
     (pulled.ok ? pulled.message : `Could not fetch: ${pulled.message}`) +
     (read.payments
       ? ` ${read.payments} payment${read.payments === 1 ? "" : "s"} worth $${(read.amountCents / 100).toFixed(2)} posted, ${read.matched} onto claims we hold.`
       : " Nothing new to post.");
-  await setSetting("mtf_last_pull", new Date().toISOString());
-  await setSetting("mtf_last_result", message.slice(0, 500));
+  await recordMtfPull({ ok: pulled.ok, message });
 
   return {
     ran: true,
@@ -598,4 +596,19 @@ export async function mtfCycle(user: { name: string }, days = 21): Promise<{
     unmatched: read.unmatched,
     message,
   };
+}
+
+/**
+ * What one unattended pull leaves behind, and which way it went.
+ *
+ * `mtf_last_pull` is when it was tried: the daily job reads it so it does not run twice in a day, and it moves whatever the outcome.
+ * It cannot also be the feed's clock. A pull that fails every day (a key that has lapsed, the tool gone) would then read as a feed
+ * that arrived today, for ever. So the feed is judged on `mtf_last_ok`, which only a pull that worked moves, and a failure is kept
+ * apart in `mtf_last_failed` so the feed can say the latest one did not work.
+ */
+export async function recordMtfPull(r: { ok: boolean; message: string; at?: Date }): Promise<void> {
+  const at = (r.at ?? new Date()).toISOString();
+  await setSetting("mtf_last_pull", at);
+  await setSetting("mtf_last_result", r.message.slice(0, 500));
+  await setSetting(r.ok ? "mtf_last_ok" : "mtf_last_failed", at);
 }
