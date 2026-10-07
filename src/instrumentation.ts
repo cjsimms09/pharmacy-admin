@@ -269,7 +269,10 @@ export async function register() {
        */
       const lastRehearsal = s.backup_restore_last ? Date.parse(s.backup_restore_last) : 0;
       if (!Number.isFinite(lastRehearsal) || Date.now() - lastRehearsal >= 30 * 24 * 60 * 60 * 1000) {
-        await rehearseRestore(status.destination);
+        const r = await rehearseRestore(status.destination);
+        // A press of the button audits itself; this one has to, or the next test would take its quarter's cover with it.
+        const { audit } = await import("./lib/audit");
+        await audit({ action: "backup.rehearse", userName: "Automatic check", details: r.message });
       }
     } catch {
       // The outcome is recorded in settings and shown on the backups page.

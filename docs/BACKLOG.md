@@ -1186,3 +1186,14 @@ place, and an arithmetic check before anything is stored.
   correctly, for the 27 payments ($2,127.47) that need him or the next claims load. Forty-one links to retired pages
   are fixed, with a test that fails when a screen links to one (HANDOFF, top item; OPEN-ITEMS, "Found 5 October"). A
   page the site retires next must be added to `src/lib/retired.ts`, or that test cannot know.
+
+- **6 October, his words:** "fix issues" · then, the morning check: "The morning check found 3 things — Should be: invoices
+  add up to what they say they come to. Found: 1 short by $20.31 in total. · Should be: the mailbox is being swept.
+  Found: last swept 7 hours ago. · Should be: money the payer says it has sent has reached the cash account. Found: 1
+  remittance advised as paid and not banked, $2,008.00, reading to 2026-09-30 (6 days ago) — the last ProviderPay
+  export." · then, on the Compliance page: "1 period went by without being covered. Those do not become fine because a
+  later one was done — they are what an inspector finds. Closing one now records the date it was actually done, which
+  is honest and still better than a gap I think Ij ust did this and still getting alert". Done in the working copy, not
+  deployed: the Compliance banner, the mailbox line and the $20.31 invoice were the site's own mistakes and are fixed;
+  the $2,008.00 is a real question for him to answer in ProviderPay, and the card now says what it is (OPEN-ITEMS,
+  "Found 6 October"; HANDOFF, top item).

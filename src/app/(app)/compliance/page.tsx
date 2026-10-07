@@ -158,8 +158,9 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
           {summary.missed.length > 0 && (
             <p className="mb-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
               <b>{summary.missed.length} period{summary.missed.length === 1 ? "" : "s"} went by without being covered.</b>{" "}
-              Those do not become fine because a later one was done — they are what an inspector finds. Closing one now
-              records the date it was actually done, which is honest and still better than a gap.
+              Those do not become fine because a later one was done — they are what an inspector finds. Where there is
+              something to sign or file, closing one now records the date it was actually done, which is honest and
+              still better than a gap.
             </p>
           )}
 
@@ -341,7 +342,11 @@ function Item({
         <div className="mt-3 flex flex-wrap items-center gap-3">
           {i.missing && <span className="text-sm text-ink-2">{i.missing}</span>}
           {i.href && <Link href={i.href} className="btn btn-sm btn-primary">Go and do it</Link>}
-          <span className="text-xs text-ink-3">This closes itself once done — there is nothing here to tick.</span>
+          <span className="text-xs text-ink-3">
+            {i.state === "missed"
+              ? "Doing it now is recorded on the day it is done, in the period that day falls in. It does not fill this one."
+              : "This closes itself once done — there is nothing here to tick."}
+          </span>
         </div>
       )}
 

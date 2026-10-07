@@ -8,6 +8,48 @@ file is how they talk.
 
 ## Open items
 
+- **6 October, pharmacy session (the commit after `d1891c3`; NOT deployed or pushed): the morning check's three
+  findings and the Compliance banner, what each was, and what is asked of you.** His words, after "fix issues": *"The
+  morning check found 3 things ... invoices add up to what they say they come to. Found: 1 short by $20.31 in total
+  ... the mailbox is being swept. Found: last swept 7 hours ago ... 1 remittance advised as paid and not banked,
+  $2,008.00"* and, of the Compliance page, *"1 period went by without being covered ... I think I just did this and
+  still getting alert."* **What each was.** (1) The banner was ours: `restoreRehearsalDates()` in `backup.ts` now
+  reads every rehearsal that proved a restore from the audit trail (action `backup.rehearse`, details beginning
+  `RESTORE_PROVED`), plus the `backup_restore_last` slot only when no audit row lies within five minutes of it, and
+  `compliance-status.ts` (`witnessed()`, case `backup_restore_test`) counts each in the quarter it was done in Central
+  time; it had read the one setting every success overwrites, so a press in October turned a September that had been
+  covered into a missed quarter. The automatic rehearsal in `instrumentation.ts` now writes its own audit row,
+  `obligations.ts` says each test counts in its quarter, and `compliance/page.tsx` says a duty done now does not fill
+  an earlier period. (2) The mailbox line was ours: `daily-check-store.ts` read `max(swept_at)` on `inbox_items`,
+  which is when mail last arrived; it now reads `mail_last_sweep` and `mail_last_result`, and the check fails on more
+  than six hours or on a result that reports errors. (3) The $20.31 was ours: `invoice-lines.ts` accepted only `K`,
+  `KI` and `KD` after a price, so a McKesson entry flagged `V` was dropped whole; any one or two capitals are now a
+  flag, `K` still means on the rebate contract, any other letter stores `rebated = null` ("not stated", which is not
+  "not rebated"), and `schema.ts` carries a comment only (data dictionary: the rebated-flag row and pitfall 15). (4)
+  The $2,008.00 is a real question for him, not ours: two SS&C HEALTH remittances of that amount (15 September with a
+  payment number, 23 September without) and one deposit (24 September) whose receipt carries the 23rd's remittance
+  number, so nothing stands for the 15th by payment number, remittance number or amount (OPEN-ITEMS, "Found 6 October"
+  and the SS&C row in "Waiting on him"); only the card changed. (5) The dashboard sent all three findings to `/money`,
+  because it chose the page by looking for "remit", "payment" or "banked" in the findings and the third finding's
+  wording has none; `dashboard/page.tsx` now shows one line per failing check with that check's own page and action,
+  and the invoice and remittance findings name the supplier and date, or the payer and advice date (`daily-check.ts`,
+  `daily-check-store.ts`). **Tests:** `daily-check`, `daily-check-store` (new: the store against a scratch database,
+  because the dashboard swallows an error in it and then shows nothing), `backup-restore-cover` (new) and
+  `invoice-lines-flag` (new); typecheck clean, the full suite 4,550 of 4,550. **Asked of the cloud session:** (a)
+  `/remits` is unreadable here (the `./remits/**` deny covers `src/app/(app)/remits`), and the card now links to it
+  for the remittance finding: confirm it lists a remittance with a payment number and nothing standing for it, with
+  payer, advice date, amount and the `remitStanding()` result; (b) `feeds.ts` (`judgeFeed`, 26 hours) and
+  `automation-status.ts` judge the mailbox by `mail_last_sweep` alone, so a sweep that errors every time reads "on
+  time" there while the morning check now catches it; (c) `scripts/prove-invoices.ts` compares stored lines with the
+  goods subtotal or the total without the charges the importer counts, so on 6 October it called 3 of 213 invoices
+  disagreeing, two of them $7.50 above their lines; its only reader is the retired data-health page, so fix it (add
+  the charges) or retire it; (d) `src/app/(app)/settings/backups/page.tsx` is unreadable here (the `./backups/**`
+  deny): if it shows the last restore test from the single setting, `restoreRehearsalDates()` can show every proved
+  test. **Files changed on `feature/compliance`, so say so on your pull request before editing one:** `backup.ts`,
+  `compliance-status.ts`, `obligations.ts`, `instrumentation.ts`, `compliance/page.tsx`, `dashboard/page.tsx`,
+  `daily-check.ts`, `daily-check-store.ts`, `invoice-lines.ts`, `db/schema.ts` (a comment),
+  `docs/reference/data-dictionary.md`, and the tests named above.
+
 - **5 October, pharmacy session (the commit after `bdfcc56`; NOT deployed or pushed): eleven real payment numbers
   stood in twelve tracked files, and the commit hook now refuses the shape.** A payer's payment number (for Health
   Mart Atlas, the EFT number of a deposit) names a real deposit into the pharmacy's bank account. 11 distinct ones

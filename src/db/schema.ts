@@ -921,9 +921,9 @@ export const invoiceLines = sqliteTable(
      * Whether the line was marked as earning the supplier's contract rebate.
      *
      * True where the invoice printed the mark, false where the invoice prints marks and this line
-     * had none, and null where the invoice prints no such mark at all — which is not the same as
-     * "not rebated", and treating it as such would strip a discount off a price in every
-     * comparison that followed.
+     * had none, and null where the invoice prints no such mark at all, or prints one this reader has
+     * no meaning for (a V on a McKesson line, say) — which is not the same as "not rebated", and
+     * treating it as such would strip a discount off a price in every comparison that followed.
      */
     rebated: integer("rebated", { mode: "boolean" }),
     /**

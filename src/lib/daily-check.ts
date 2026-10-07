@@ -32,6 +32,9 @@
  * six was proved to fire.
  */
 
+/** Why the bank matcher counts a remittance as banked, strongest evidence first; null where nothing stands for it. */
+export type Tie = "payment number" | "remittance number" | "amount in window" | null;
+
 export type Facts = {
   /** Inbox rows, and distinct delivered attachments behind them. */
   inboxRows: number;
@@ -44,8 +47,17 @@ export type Facts = {
   /** Invoices whose lines do not reach the total printed on them. */
   invoicesShort: number;
   invoicesShortCents: number;
-  /** When the mailbox was last swept, ISO. Null if it never has been. */
+  /** The invoices behind that count, largest shortfall first, as many as the store brings: who billed it and the date on it, which find an invoice in a drawer where a count does not. */
+  shortInvoices: { supplier: string | null; invoiceOn: string | null; shortCents: number }[];
+  /**
+   * When the sweep last ran, ISO, as the sweep itself recorded it. Null if it never has.
+   *
+   * Not when mail last arrived: an hour or a day with no post is normal for a pharmacy, and reading the newest
+   * inbox row made a healthy sweep look dead on every quiet evening.
+   */
   lastSweptAt: string | null;
+  /** What that run said it did. A run that failed still stamps `lastSweptAt`, so the stamp alone cannot say the post was collected. */
+  lastSweepResult: string | null;
   /** Money booked off a statement that does not point at the statement it came from. */
   bookedWithNoDocument: number;
   /**
@@ -88,6 +100,15 @@ export type Facts = {
   remittancesNotBanked: number;
   remittancesNotBankedCents: number;
   /**
+   * The remittances behind that count, largest first. Never the payment number: it is the payer's key to its own money.
+   *
+   * `tie` is what the bank matcher and the Remits tab already say of that remittance (engine/remit-standing.ts), asked of that one
+   * computation and not worked out again here. This check requires the payment number itself; the matcher also accepts the remittance
+   * number and, weakest, the same amount within a fortnight. Where the two differ the card has to say so, or it tells him something
+   * the Remits tab contradicts.
+   */
+  unbankedRemittances: { payer: string | null; remitOn: string | null; amountCents: number; tie: Tie }[];
+  /**
    * How many remittances the register holds at all, and how many claim payments came from one.
    *
    * Without these the check above passes when the register is empty, which is exactly what it did
@@ -125,6 +146,10 @@ export type Facts = {
 export type Check = {
   /** What is being checked, as a person would say it. */
   what: string;
+  /** The page where the thing found can be seen. The dashboard used to guess it from the words of the finding, and sent all three of 6 October 2026's to /money. */
+  href: string;
+  /** What that press is called, in the words of the page it lands on. */
+  action: string;
   /** What ought to be true, and why — written here, never derived from the observation. */
   shouldBe: string;
   /** What is, with numbers. */
@@ -166,6 +191,49 @@ function unmatched(f: Facts): string {
   return n === 0 ? "" : `; ${n} more carry no payment number, so no cash is owed for ${n === 1 ? "it" : "them"} yet`;
 }
 
+const NAMED = 3;
+
+/** Names up to NAMED of `total` things and says how many it left out. */
+function listed(items: string[], total: number): string {
+  const shown = items.slice(0, NAMED);
+  const rest = total - shown.length;
+  return rest > 0 ? `${shown.join("; ")}; and ${rest} more` : shown.join("; ");
+}
+
+function shortNamed(f: Facts): string {
+  if (f.shortInvoices.length === 0) return "";
+  const lone = f.invoicesShort === 1;
+  const items = f.shortInvoices.map(
+    (r) => `${r.supplier ?? "supplier not captured"}, ${r.invoiceOn ?? "date not captured"}${lone ? "" : `, ${money(r.shortCents)} short`}`,
+  );
+  return ` (${listed(items, f.invoicesShort)})`;
+}
+
+/** The invoices page has no "short" filter, so the first short invoice is reached by its supplier and its day. */
+function shortLink(f: Facts): string {
+  const first = f.shortInvoices[0];
+  const q = new URLSearchParams();
+  if (first?.supplier) q.set("supplier", first.supplier);
+  if (first?.invoiceOn) q.set("on", first.invoiceOn);
+  const query = q.toString();
+  return query ? `/inventory/invoices?${query}` : "/inventory/invoices";
+}
+
+const TIE_SAID = {
+  "payment number": "a receipt carries its payment number, written in a way this check does not match",
+  "remittance number": "a receipt carries its remittance number, not its payment number",
+  "amount in window": "a receipt of exactly that amount, near the advice date, stands for it by amount alone and not by its payment number",
+} as const;
+
+function unbankedNamed(f: Facts): string {
+  if (f.unbankedRemittances.length === 0) return "";
+  const lone = f.remittancesNotBanked === 1;
+  const items = f.unbankedRemittances.map(
+    (r) => `${r.payer ?? "payer not captured"}, advised ${r.remitOn ?? "date not captured"}${lone ? "" : `, ${money(r.amountCents)}`}: ${r.tie ? TIE_SAID[r.tie] : "no receipt stands for it, by payment number, remittance number or amount"}`,
+  );
+  return ` (${listed(items, f.remittancesNotBanked)})`;
+}
+
 export function runDailyCheck(f: Facts): Check[] {
   const checks: Check[] = [];
 
@@ -178,6 +246,8 @@ export function runDailyCheck(f: Facts): Check[] {
    */
   checks.push({
     what: "One inbox row per delivered attachment",
+    href: "/inbox",
+    action: "See the inbox",
     shouldBe:
       "An inbox row is keyed on the message and the file name together, so one attachment can only ever be one row. More than one means a dedupe has stopped working, and the arrivals list stops being able to show what is late.",
     observed: `${f.inboxRows.toLocaleString()} rows for ${f.inboxArrivals.toLocaleString()} arrivals`,
@@ -197,6 +267,8 @@ export function runDailyCheck(f: Facts): Check[] {
    */
   checks.push({
     what: "One record per invoice in the archive",
+    href: "/inventory/invoices",
+    action: "See the invoices",
     shouldBe:
       "An inspector counting Schedule II invoice records should get the number of Schedule II invoices. Duplicate records are not a breach, but they are the first thing asked about and the pharmacist has to explain them.",
     observed: `${f.invoiceDocumentRows.toLocaleString()} records for ${f.invoiceDocumentFiles.toLocaleString()} invoices`,
@@ -219,6 +291,8 @@ export function runDailyCheck(f: Facts): Check[] {
   const standingAgeDays = f.standingRebatePeriodTo === null ? null : daysBetween(f.standingRebatePeriodTo, f.today);
   checks.push({
     what: "The rebate statement standing is a current one",
+    href: "/suppliers",
+    action: "See where the rebate stands",
     shouldBe:
       "A rebate breakdown covers one month and is paid in arrears, so the newest one on file is at most about six weeks old. Anything older is either a statement that has not arrived or an older one standing in its place, and both change the rate every purchasing comparison uses.",
     observed:
@@ -244,9 +318,14 @@ export function runDailyCheck(f: Facts): Check[] {
    */
   checks.push({
     what: "Invoices add up to what they say they come to",
+    href: shortLink(f),
+    action: f.invoicesShort === 1 ? "See the invoice" : "See the invoices",
     shouldBe:
       "An invoice reconciles when its item lines plus its printed charges equal its printed total. That arithmetic is the only thing proving the reading, so a shortfall is either money billed and never booked, or a line the reader cannot see.",
-    observed: f.invoicesShort === 0 ? "every invoice on file reconciles" : `${f.invoicesShort} short by ${money(f.invoicesShortCents)} in total`,
+    observed:
+      f.invoicesShort === 0
+        ? "every invoice on file reconciles"
+        : `${f.invoicesShort} invoice${f.invoicesShort === 1 ? "" : "s"} short by ${money(f.invoicesShortCents)}${f.invoicesShort === 1 ? "" : " in total"}${shortNamed(f)}`,
     ok: f.invoicesShort === 0,
     difference:
       f.invoicesShort === 0
@@ -263,21 +342,29 @@ export function runDailyCheck(f: Facts): Check[] {
    * window has to survive a slow evening without crying wolf.
    */
   const hoursSinceSweep = f.lastSweptAt === null ? null : hoursBetween(f.lastSweptAt, f.now);
+  const sweptRecently = hoursSinceSweep !== null && hoursSinceSweep <= 6;
+  // The sweep writes ", N error(s)" into its result whenever anything went wrong (mailbox.ts).
+  const sweepErrored = f.lastSweepResult !== null && /\d+ error\(s\)/.test(f.lastSweepResult);
+  const sweptAgo =
+    hoursSinceSweep === null
+      ? "never swept"
+      : hoursSinceSweep < 1
+        ? "last swept within the hour"
+        : `last swept ${Math.round(hoursSinceSweep)} hour${Math.round(hoursSinceSweep) === 1 ? "" : "s"} ago`;
   checks.push({
     what: "The mailbox is being swept",
+    href: "/settings/email",
+    action: "See the mail settings",
     shouldBe:
-      "Every feed except PioneerRx arrives as email, so the sweep is the way almost all data reaches this site. It runs many times a day; more than six hours of silence means it is failing or being starved, and nothing else would say so.",
-    observed:
-      f.lastSweptAt === null
-        ? "never swept"
-        : hoursSinceSweep! < 1
-          ? "last swept within the hour"
-          : `last swept ${Math.round(hoursSinceSweep!)} hour${Math.round(hoursSinceSweep!) === 1 ? "" : "s"} ago`,
-    ok: hoursSinceSweep !== null && hoursSinceSweep <= 6,
+      "Every feed except PioneerRx arrives as email, so the sweep is the way almost all data reaches this site. It runs about every half hour whether or not any mail has come, so the measure is the time since it last ran cleanly, not the time since mail last arrived: a quiet mailbox is normal, and a sweep that has stopped or ended in an error is not. More than six hours without a clean run means it is failing or being starved, and nothing else would say so.",
+    observed: hoursSinceSweep !== null && sweepErrored ? `${sweptAgo}, and that run ended with an error` : sweptAgo,
+    ok: sweptRecently && !sweepErrored,
     difference:
-      hoursSinceSweep !== null && hoursSinceSweep <= 6
+      sweptRecently && !sweepErrored
         ? null
-        : "Nothing is arriving. Check the mail settings page for the last error, and that the site has not been left busy enough to starve the tick.",
+        : sweptRecently
+          ? "The last sweep ran but ended with an error, so mail may be sitting unread in the mailbox. The mail settings page shows the error."
+          : "Nothing is arriving. Check the mail settings page for the last error, and that the site has not been left busy enough to starve the tick.",
     kind: "feed",
   });
 
@@ -291,6 +378,8 @@ export function runDailyCheck(f: Facts): Check[] {
    */
   checks.push({
     what: "Money booked off a statement points at the statement",
+    href: "/expenses",
+    action: "See the expenses",
     shouldBe:
       "An expense read off a document should carry that document, so the figure can be produced when an accountant or an inspector asks where it came from. A booked amount with nothing behind it is correct and unprovable.",
     observed: f.bookedWithNoDocument === 0 ? "every booked statement has its document" : `${f.bookedWithNoDocument} booked with no document`,
@@ -317,6 +406,8 @@ export function runDailyCheck(f: Facts): Check[] {
    */
   checks.push({
     what: "No revenue offset is dated as paid",
+    href: "/expenses",
+    action: "See the expenses",
     shouldBe:
       "A rebate, a clawback or a recoupment is money the pharmacy was told it had earned and did not. The cash account sees it by its own route — the rebate's receipt, or a deposit that already arrived net — so the expense must carry no payment date. With one, the same money lands twice on the cash account and profit rises by the whole of it.",
     observed:
@@ -344,6 +435,8 @@ export function runDailyCheck(f: Facts): Check[] {
    */
   checks.push({
     what: "No supplier pays on the same basket twice",
+    href: "/suppliers",
+    action: "See the suppliers",
     shouldBe:
       "A rebate rate is summed across every current ladder paying on the same basket, so a second ladder on the same basket is added to the first rather than replacing it. One programme should be current per basket per supplier; two means every rate the estimate uses is doubled, and the estimate is a cost of goods, so profit rises by the whole of the difference.",
     observed:
@@ -375,6 +468,8 @@ export function runDailyCheck(f: Facts): Check[] {
    */
   checks.push({
     what: "Money earned and money arriving are counted once, not twice",
+    href: "/money",
+    action: "See the money",
     shouldBe:
       "A fill earns what the plan agreed to pay on the day it is dispensed, and the remittance is that same money arriving rather than more of it. A payment whose amount is exactly the claim's own remit figure must therefore add nothing further to that fill's revenue — `laterPayments` exists to carry the difference where a payment really is new money, and is nought where it is not.",
     observed:
@@ -404,6 +499,8 @@ export function runDailyCheck(f: Facts): Check[] {
    */
   checks.push({
     what: "Money the payer says it has sent has reached the cash account",
+    href: "/remits",
+    action: "See the remittances",
     shouldBe:
       "A remittance carrying a payment number is the payer saying that deposit has been made, and the deposit is banked from the payer payment report under that same number. Every remittance with a payment number should therefore have cash banked against it. One without a payment number is not owed yet and is not counted here.",
     observed:
@@ -420,7 +517,7 @@ export function runDailyCheck(f: Facts): Check[] {
           : `${f.remittancePaymentsPosted} payments came from a remittance and the register holds none of them, so nothing can be compared`
         : f.remittancesNotBanked === 0
           ? `all ${f.remittanceRegisterOwed} remittances with a payment number have their cash${unmatched(f)}${horizon(f)}`
-          : `${f.remittancesNotBanked} remittance${f.remittancesNotBanked === 1 ? "" : "s"} advised as paid and not banked, ${money(f.remittancesNotBankedCents)}${f.remittancesNotBanked === 1 ? "" : " between them"}${horizon(f)}`,
+          : `${f.remittancesNotBanked} remittance${f.remittancesNotBanked === 1 ? "" : "s"} advised as paid and not banked, ${money(f.remittancesNotBankedCents)}${f.remittancesNotBanked === 1 ? "" : " between them"}${unbankedNamed(f)}${horizon(f)}`,
     ok: f.remittancesNotBanked === 0 && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
     difference:
       f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0

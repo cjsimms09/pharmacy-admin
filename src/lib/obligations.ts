@@ -167,7 +167,7 @@ export const CLOSURES: Record<string, Closure> = {
     kind: "witnessed",
     witness: "A current immunization protocol on file for every immunizer. Upload each one on the person\u2019s page with its expiry; there is no separate training to record.",
   },
-  backup_restore_test: { kind: "witnessed", witness: "A backup taken and verified under Settings → Backups." },
+  backup_restore_test: { kind: "witnessed", witness: "A stored backup opened and proved to restore, under Settings → Backups. Each one counts in the quarter it was done." },
   technician_course_review: {
     kind: "attest",
     statement:

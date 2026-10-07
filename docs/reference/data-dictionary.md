@@ -38,7 +38,7 @@ gives units.
 | Unit cost (`unitCostCents`) | cents **per package** | What the invoice charged for one package as it prices it. | the pharmacy's paid price, once converted per unit | comparing with a catalogue or NADAC before dividing by the pack size |
 | Pack size (`packQty`) | units | Units in the package the invoice prices, from the catalogue. | converting invoice price to per unit | guessing when absent: the row is excluded and says so |
 | Extended, and the invoice's printed total | cents | The line and the whole. | the reconciliation that decides whether lines are stored at all | — |
-| Rebated flag (McKesson's K) | flag | The line earns the OneStop generic rebate. | taking the tier rate off **this line's** price | inferring from the product; only a document says it |
+| Rebated flag (McKesson's K) | flag | The line earns the OneStop generic rebate. A flag beginning K says so; no flag says it does not; any other letter is a flag the site does not know and is stored as *not stated* (pitfall 15). | taking the tier rate off **this line's** price | inferring from the product; only a document says it; reading *not stated* as *not rebated* |
 | Supplier | | Who sold it. | the rate that applies (rates are per supplier) | applying one supplier's rate to another's line |
 
 ## 3. Catalogues (PioneerRx export of each supplier's price file, weekly)
@@ -126,6 +126,11 @@ gives units.
     So "tied to no claim" is not "in no fill's revenue", and the phrase for the other is "tied to a claim", never "counted".
     Say the cause (section 10), never "unmatched" or "missing": most payments tied to no claim are for fills from before the
     claims feed that the site holds no claim for, and need nothing, and a bare count of them reads as a backlog.
+15. **A flag letter the reader does not know.** McKesson prints a letter after a line's price: one beginning K puts the line on
+    the rebate contract. Another letter (a V on 6 October 2026) is a flag the site does not know. The line is still read, because
+    its quantity times its price is its extended amount, and its rebate status is stored as *not stated*, neither on contract nor
+    off. The cost ledger prices it at its printed price, the basket-share reader counts it in neither basket, and the contract
+    replay counts only K lines. Dropping the line, as the reader did, made the invoice short and left its cost out of the ledger.
 
 ## 9. What a payer takes off a remittance (EFT payment report, 835 provider-level segments, adjustment report)
 

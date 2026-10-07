@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { createClient } from "@libsql/client";
+import { and, eq, like } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { createZip } from "./zip";
 import { unzip } from "./xlsx";
@@ -422,6 +423,29 @@ export type RestoreRehearsal = {
   message: string;
 };
 
+/** How every successful rehearsal's message begins; no failure's does, which is what lets the audit trail be read back. */
+export const RESTORE_PROVED = "Restore rehearsed from ";
+
+/**
+ * Every successful rehearsal, as stored timestamps, oldest first: the audit trail plus the slot each one overwrites.
+ *
+ * A press writes the slot and its audit row a moment apart, so the two stamps of one rehearsal differ by under a second (read live on
+ * 6 October 2026: one press came back as two dates). The slot is added only where no audit row stands within five minutes of it — it is
+ * the sole record of a rehearsal from before the trail, or of one whose audit row failed — so one test is one date and could not
+ * satisfy a duty that asks for two.
+ */
+export async function restoreRehearsalDates(): Promise<string[]> {
+  const last = await db.query.settings.findFirst({ where: eq(schema.settings.key, "backup_restore_last") });
+  const rows = await db
+    .select({ at: schema.auditEvents.at })
+    .from(schema.auditEvents)
+    .where(and(eq(schema.auditEvents.action, "backup.rehearse"), like(schema.auditEvents.details, `${RESTORE_PROVED}%`)));
+  const stamps = new Set<string>(rows.map((r) => r.at));
+  const slot = last?.value;
+  if (slot && ![...stamps].some((at) => Math.abs(Date.parse(at) - Date.parse(slot)) < 5 * 60_000)) stamps.add(slot);
+  return [...stamps].sort();
+}
+
 /**
  * Proves that an archive already sitting on disk still restores.
  *
@@ -490,7 +514,7 @@ export async function rehearseRestore(destination?: string): Promise<RestoreRehe
 
     const documents = Array.from(entries.keys()).filter((k) => k.startsWith("files/")).length;
     const message =
-      `Restore rehearsed from ${names[0]}: ${tables} tables, ${rows.toLocaleString()} rows and ${documents} uploaded ` +
+      `${RESTORE_PROVED}${names[0]}: ${tables} tables, ${rows.toLocaleString()} rows and ${documents} uploaded ` +
       `file${documents === 1 ? "" : "s"} came back intact.`;
     await setSetting("backup_restore_last", new Date().toISOString());
     await setSetting("backup_restore_result", message);

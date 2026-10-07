@@ -1,6 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { runDailyCheck, summarise, type Facts } from "../src/lib/daily-check";
+import { isRetired } from "../src/lib/retired";
 
 /** A day on which everything is as it should be. Each test spoils exactly one thing. */
 const wellRun: Facts = {
@@ -11,7 +13,9 @@ const wellRun: Facts = {
   standingRebatePeriodTo: "2026-08-31",
   invoicesShort: 0,
   invoicesShortCents: 0,
+  shortInvoices: [],
   lastSweptAt: "2026-09-17T16:29:00.000Z",
+  lastSweepResult: "0 stored, 0 rejected, 0 ignored",
   bookedWithNoDocument: 0,
   offsetsWithPaymentDates: 0,
   offsetsWithPaymentDatesCents: 0,
@@ -20,6 +24,7 @@ const wellRun: Facts = {
   paymentsCountedTwiceCents: 0,
   remittancesNotBanked: 0,
   remittancesNotBankedCents: 0,
+  unbankedRemittances: [],
   remittanceRegisterRows: 51,
   remittanceRegisterOwed: 51,
   remittanceRegisterThrough: "2026-09-17",
@@ -76,7 +81,8 @@ describe("the faults of 17 September 2026, as they actually were", () => {
   test("four ParMed invoices short by $7.68 between them", () => {
     const c = check({ invoicesShort: 4, invoicesShortCents: 768 }, "Invoices add up to what they say they come to");
     assert.equal(c.ok, false);
-    assert.match(c.observed, /4 short by \$7\.68/);
+    assert.equal(c.observed, "4 invoices short by $7.68 in total");
+    assert.equal(c.href, "/inventory/invoices", "no list of which, so the whole list of invoices");
   });
 
   test("a rebate expense booked with no document behind it", () => {
@@ -141,9 +147,43 @@ describe("the sweep, which is how nearly everything arrives", () => {
   });
 
   test("never swept is said as never, not as zero", () => {
-    const c = check({ lastSweptAt: null }, "The mailbox is being swept");
+    const c = check({ lastSweptAt: null, lastSweepResult: null }, "The mailbox is being swept");
     assert.equal(c.ok, false);
     assert.equal(c.observed, "never swept");
+  });
+
+  /*
+   * 6 October 2026: "Found: last swept 7 hours ago" on a morning the sweep had run twenty-three minutes before and found nothing to
+   * store. The check was reading when the newest email arrived, which is a fact about the post and not about the sweep.
+   */
+  test("seven quiet hours from a sweep that ran minutes ago is an empty mailbox, not a dead sweep", () => {
+    const c = check({ lastSweptAt: "2026-09-17T16:40:00.000Z", lastSweepResult: "0 stored, 0 rejected, 0 ignored" }, "The mailbox is being swept");
+    assert.equal(c.ok, true);
+    assert.equal(c.observed, "last swept within the hour");
+    assert.equal(c.difference, null);
+  });
+
+  test("a sweep that ran a moment ago and ended in an error has not collected the post", () => {
+    const c = check({ lastSweptAt: "2026-09-17T16:40:00.000Z", lastSweepResult: "0 stored, 0 rejected, 0 ignored, 1 error(s) — the mailbox refused the password" }, "The mailbox is being swept");
+    assert.equal(c.ok, false);
+    assert.equal(c.observed, "last swept within the hour, and that run ended with an error");
+    assert.match(c.difference!, /ended with an error/);
+  });
+
+  test("an error after other mail was filed still counts, because the message that failed is sitting unread", () => {
+    const c = check({ lastSweptAt: "2026-09-17T15:00:00.000Z", lastSweepResult: "3 stored, 0 rejected, 1 ignored, 2 error(s) — one attachment would not open" }, "The mailbox is being swept");
+    assert.equal(c.ok, false);
+    assert.equal(c.observed, "last swept 2 hours ago, and that run ended with an error");
+  });
+
+  test("a stale sweep that also ended in an error is said as nothing arriving", () => {
+    const c = check({ lastSweptAt: "2026-09-16T17:00:00.000Z", lastSweepResult: "0 stored, 0 rejected, 0 ignored, 1 error(s) — timed out" }, "The mailbox is being swept");
+    assert.equal(c.ok, false);
+    assert.match(c.difference!, /Nothing is arriving/);
+  });
+
+  test("the sweep still writes ', N error(s)' into its result, which is the only way a failed run can be told from a clean one", () => {
+    assert.match(fs.readFileSync("src/lib/mailbox.ts", "utf8"), /\$\{result\.errors\.length\} error\(s\)/);
   });
 });
 
@@ -291,5 +331,156 @@ describe("money earned and money arriving", () => {
     );
     assert.equal(c.ok, false);
     assert.match(c.observed, /reading to 2026-09-06/);
+  });
+});
+
+/*
+ * The line he reads and the page it sends him to.
+ *
+ * 6 October 2026: three findings, one "See it" link, and it went to Money for all three, a page that shows none of them. The page that
+ * shows a finding belongs to the check that found it, so the check carries it, and a finding that has a thing to look at names it.
+ * Every name and amount below is invented.
+ */
+const SHORT = "Invoices add up to what they say they come to";
+const BANKED = "Money the payer says it has sent has reached the cash account";
+type Tie = Facts["unbankedRemittances"][number]["tie"];
+
+describe("where each finding sends him", () => {
+  test("every check names a page that exists and has not been retired", () => {
+    for (const c of runDailyCheck(wellRun)) {
+      const where = c.href.split("?")[0];
+      assert.match(c.href, /^\//, c.what + " sends nowhere");
+      assert.ok(c.action.length > 8, c.what + " has no words on its button");
+      assert.equal(isRetired(where), false, c.what + " sends to a retired page, " + where);
+      assert.ok(fs.existsSync("src/app/(app)" + where + "/page.tsx"), c.what + " sends to " + where + ", which is not a page");
+    }
+  });
+
+  test("the three findings of 6 October 2026 go to three different pages", () => {
+    const failing = runDailyCheck({
+      ...wellRun,
+      today: "2026-10-06",
+      now: "2026-10-06T13:00:00.000Z",
+      lastSweptAt: "2026-10-05T10:00:00.000Z",
+      invoicesShort: 1,
+      invoicesShortCents: 2031,
+      shortInvoices: [{ supplier: "Invented Wholesale Co", invoiceOn: "2026-10-06", shortCents: 2031 }],
+      remittancesNotBanked: 1,
+      remittancesNotBankedCents: 200_800,
+      unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-09-15", amountCents: 200_800, tie: "amount in window" }],
+      remittanceRegisterThrough: "2026-09-30",
+    }).filter((c) => !c.ok);
+    assert.equal(failing.length, 3);
+    assert.deepEqual(failing.map((c) => c.href.split("?")[0]).sort(), ["/inventory/invoices", "/remits", "/settings/email"]);
+  });
+
+  test("the dashboard gives each failing check its own link and no longer guesses one from the words of the findings", () => {
+    const src = fs.readFileSync("src/app/(app)/dashboard/page.tsx", "utf8");
+    assert.match(src, /href: c\.href/);
+    assert.match(src, /action: c\.action/);
+    assert.doesNotMatch(src, /remit\|payment\|banked/, "the guess that sent the remittance finding to Money for want of a word");
+  });
+});
+
+describe("a short invoice is named, so it can be found in a drawer", () => {
+  const lone = { invoicesShort: 1, invoicesShortCents: 2031, shortInvoices: [{ supplier: "Invented Wholesale Co", invoiceOn: "2026-10-06", shortCents: 2031 }] };
+
+  test("one is named by who billed it and the day on it, and the link finds it", () => {
+    const c = check(lone, SHORT);
+    assert.equal(c.ok, false);
+    assert.equal(c.observed, "1 invoice short by $20.31 (Invented Wholesale Co, 2026-10-06)");
+    assert.equal(c.href, "/inventory/invoices?supplier=Invented+Wholesale+Co&on=2026-10-06");
+    assert.equal(c.action, "See the invoice");
+  });
+
+  test("a name with an ampersand in it is encoded, or the link finds nothing", () => {
+    const c = check({ ...lone, shortInvoices: [{ supplier: "Q&A Invented Supply", invoiceOn: "2026-10-06", shortCents: 2031 }] }, SHORT);
+    assert.equal(c.href, "/inventory/invoices?supplier=Q%26A+Invented+Supply&on=2026-10-06");
+  });
+
+  test("several are named largest first, three at most, with how many it left out", () => {
+    const five = [
+      { supplier: "Invented Wholesale Co", invoiceOn: "2026-10-06", shortCents: 2031 },
+      { supplier: "Other Invented Supply", invoiceOn: "2026-10-02", shortCents: 500 },
+      { supplier: "Invented Wholesale Co", invoiceOn: "2026-09-28", shortCents: 300 },
+      { supplier: "Third Invented Supply", invoiceOn: "2026-09-20", shortCents: 200 },
+      { supplier: "Fourth Invented Supply", invoiceOn: "2026-09-15", shortCents: 100 },
+    ];
+    const c = check({ invoicesShort: 7, invoicesShortCents: 3_300, shortInvoices: five }, SHORT);
+    assert.equal(
+      c.observed,
+      "7 invoices short by $33.00 in total (Invented Wholesale Co, 2026-10-06, $20.31 short; Other Invented Supply, 2026-10-02, $5.00 short; Invented Wholesale Co, 2026-09-28, $3.00 short; and 4 more)",
+    );
+    assert.equal(c.href, "/inventory/invoices?supplier=Invented+Wholesale+Co&on=2026-10-06", "the link goes to the one that costs the most");
+    assert.equal(c.action, "See the invoices");
+  });
+
+  test("an invoice whose supplier or date was never captured says so rather than naming nobody", () => {
+    const c = check({ invoicesShort: 1, invoicesShortCents: 500, shortInvoices: [{ supplier: null, invoiceOn: null, shortCents: 500 }] }, SHORT);
+    assert.equal(c.observed, "1 invoice short by $5.00 (supplier not captured, date not captured)");
+    assert.equal(c.href, "/inventory/invoices");
+  });
+});
+
+describe("a remittance not banked is named, with what the bank matcher says of it", () => {
+  const advised = (tie: Tie, over: Partial<Facts["unbankedRemittances"][number]> = {}): Partial<Facts> => ({
+    remittancesNotBanked: 1,
+    remittancesNotBankedCents: 200_800,
+    unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-09-15", amountCents: 200_800, tie, ...over }],
+    remittanceRegisterThrough: "2026-09-30",
+    today: "2026-10-06",
+  });
+
+  /*
+   * This check ties a remittance to its cash by the payment number alone; the bank matcher and the Remits tab also accept a receipt of
+   * exactly that amount near the advice date. Where only that weakest tie exists the other page shows the remittance as standing, so a
+   * card that said only "not banked" would contradict it. It still FAILS: whether that receipt is this remittance or the next one cannot
+   * be settled from the amount or the days, only from the payer record.
+   */
+  test("a receipt that stands for it by amount alone is said, and the check still fails", () => {
+    const c = check(advised("amount in window"), BANKED);
+    assert.equal(c.ok, false);
+    assert.equal(
+      c.observed,
+      "1 remittance advised as paid and not banked, $2,008.00 (Invented Payer A, advised 2026-09-15: a receipt of exactly that amount, near the advice date, stands for it by amount alone and not by its payment number), reading to 2026-09-30 (6 days ago) — the last ProviderPay export",
+    );
+    assert.equal(c.href, "/remits");
+    assert.equal(c.action, "See the remittances");
+  });
+
+  test("a receipt that names its remittance number is said", () => {
+    assert.match(check(advised("remittance number"), BANKED).observed, /advised 2026-09-15: a receipt carries its remittance number, not its payment number\)/);
+  });
+
+  test("a receipt that carries its payment number in a form this check does not match is said", () => {
+    assert.match(check(advised("payment number"), BANKED).observed, /advised 2026-09-15: a receipt carries its payment number, written in a way this check does not match\)/);
+  });
+
+  test("where the matcher finds nothing either, it says so in the three ways it looked", () => {
+    assert.match(check(advised(null), BANKED).observed, /advised 2026-09-15: no receipt stands for it, by payment number, remittance number or amount\)/);
+  });
+
+  test("a payer or a date that was never captured is said, not left blank", () => {
+    const c = check(advised(null, { payer: null, remitOn: null }), BANKED);
+    assert.match(c.observed, /\(payer not captured, advised date not captured: /);
+  });
+
+  test("several are named largest first with their amounts, three at most, and the rest counted", () => {
+    const c = check(
+      {
+        remittancesNotBanked: 5,
+        remittancesNotBankedCents: 600_000,
+        unbankedRemittances: [
+          { payer: "Invented Payer A", remitOn: "2026-09-15", amountCents: 200_800, tie: "amount in window" },
+          { payer: "Invented Payer D", remitOn: "2026-09-18", amountCents: 120_000, tie: null },
+          { payer: "Invented Payer E", remitOn: "2026-09-12", amountCents: 90_000, tie: null },
+          { payer: "Invented Payer C", remitOn: "2026-09-10", amountCents: 75_500, tie: null },
+        ],
+      },
+      BANKED,
+    );
+    assert.match(c.observed, /^5 remittances advised as paid and not banked, \$6,000\.00 between them \(Invented Payer A, advised 2026-09-15, \$2,008\.00: /);
+    assert.match(c.observed, /Invented Payer E, advised 2026-09-12, \$900\.00: no receipt stands for it[^;]*; and 2 more\)/);
+    assert.doesNotMatch(c.observed, /Invented Payer C/, "the fourth is counted, not named");
   });
 });

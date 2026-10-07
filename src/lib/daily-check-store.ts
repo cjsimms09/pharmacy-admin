@@ -3,7 +3,8 @@ import { db, schema } from "@/db";
 import { sql } from "drizzle-orm";
 import { getSettings } from "./settings";
 import { todayIso } from "./dates";
-import { runDailyCheck, summarise, type Check, type Facts } from "./daily-check";
+import { runDailyCheck, summarise, type Check, type Facts, type Tie } from "./daily-check";
+import { remitStanding } from "./engine/remit-standing";
 
 /**
  * Gathering what the morning check judges.
@@ -18,10 +19,6 @@ async function gather(): Promise<Facts> {
     const rows = await db.all<{ n: number | null }>(q);
     return Number(rows[0]?.n ?? 0);
   };
-  const text = async (q: ReturnType<typeof sql>): Promise<string | null> => {
-    const rows = await db.all<{ v: string | null }>(q);
-    return rows[0]?.v ?? null;
-  };
 
   const [
     inboxRows,
@@ -31,7 +28,6 @@ async function gather(): Promise<Facts> {
     invoicesShort,
     invoicesShortCents,
     bookedWithNoDocument,
-    lastSweptAt,
     offsetsWithPaymentDates,
     offsetsWithPaymentDatesCents,
     doubledRebateLadders,
@@ -51,7 +47,6 @@ async function gather(): Promise<Facts> {
      * somebody typed in by hand has no document to be missing and would make this cry wolf for ever.
      */
     one(sql`select count(*) as n from expenses where invoice_number like 'REBATE|%' and document_id is null`),
-    text(sql`select max(swept_at) as v from inbox_items`),
     /*
      * Revenue offsets dated as paid, by the category's kind rather than by name, so a new
      * revenue-offset category is covered the day somebody adds it.
@@ -98,12 +93,34 @@ async function gather(): Promise<Facts> {
   ]);
 
   /*
+   * Which invoices are short, as many as the card can name. The same rows the count above counts, the largest shortfall first, so what he
+   * is told to look at is the invoice that costs the most.
+   */
+  const shortInvoices = (
+    await db.all<{ supplier: string | null; invoice_date: string | null; short: number | null }>(
+      sql`select supplier, invoice_date, lines_short_cents as short from supplier_invoices
+           where lines_short_cents is not null order by lines_short_cents desc limit 5`,
+    )
+  ).map((r) => ({ supplier: r.supplier, invoiceOn: r.invoice_date, shortCents: Number(r.short ?? 0) }));
+
+  /*
    * Asked of the register rather than written as SQL here, because the rule for what counts as
    * "not banked" belongs beside the register that answers it — and a second copy of that rule is
    * how two places end up disagreeing about the same money.
    */
   const { remittancesNotBanked: notBankedRows } = await import("./mck-remit-detail-store");
   const notBanked = await notBankedRows();
+  /*
+   * What the bank matcher says of those same remittances. This check ties a remittance to its cash by the payment number alone; the matcher
+   * and the Remits tab also accept the remittance number and, weakest, the same amount near the advice date. Where the matcher finds a
+   * receipt this check does not, the card says which kind, so he is not left to find it on the other page; where the matcher finds none
+   * either, the card says that, which tells him the deposit is not sitting under some other reference. Asked of that one computation
+   * (engine/remit-standing.ts) and only when there is something to ask about; the register is keyed by remittance number, which is
+   * unique, so the payment number never has to leave this function.
+   */
+  const stood = new Map<string, Tie>();
+  if (notBanked.length > 0) for (const s of await remitStanding()) stood.set(s.row.remitNumber, s.banked);
+  const unbankedRemittances = notBanked.map((r) => ({ payer: r.payerName, remitOn: r.remitOn, amountCents: r.amountCents, tie: stood.get(r.remitNumber) ?? null }));
 
   const registerRows = await one(sql`select count(*) as n from remittance_register`);
   /*
@@ -140,7 +157,9 @@ async function gather(): Promise<Facts> {
     standingRebatePeriodTo,
     invoicesShort,
     invoicesShortCents,
-    lastSweptAt,
+    shortInvoices,
+    lastSweptAt: settings.mail_last_sweep ?? null,
+    lastSweepResult: settings.mail_last_result ?? null,
     bookedWithNoDocument,
     offsetsWithPaymentDates,
     offsetsWithPaymentDatesCents,
@@ -148,6 +167,7 @@ async function gather(): Promise<Facts> {
     paymentsCountedTwice,
     paymentsCountedTwiceCents,
     remittancesNotBanked: notBanked.length,
+    unbankedRemittances,
     remittanceRegisterRows: registerRows,
     remittanceRegisterOwed: registerOwed,
     remittanceRegisterThrough: registerThrough,

@@ -196,7 +196,22 @@ const MCK = new RegExp(
     // fifty-five that did parse then came to $172.91 less than the printed total, and the
     // all-or-nothing rule threw away all fifty-five. One letter cost the site every item line on a
     // $9,890.97 invoice, and with them what the pharmacy paid per NDC on any of it.
-    String.raw`(\s+K[A-Z]?)?` + // the contract rebate flag
+    /*
+     * And the column is not always the contract flag.
+     *
+     * A McKesson invoice of 6 October 2026 printed a V in it on one line: quantity one, the extended
+     * amount equal to the unit price, the line's own arithmetic exactly right. The pattern wanted a K,
+     * so the line failed to parse, the other lines came to $20.31 under the printed total, and the
+     * morning check reported the invoice short. Nothing was wrong with the line except a letter this
+     * reader had not met.
+     *
+     * The fifth time a McKesson line of an unexpected shape has cost an invoice its lines, after the
+     * two-letter rebate flag, the missing AWP column, the GTIN-14 and the drop ship's missing document
+     * number. So one or two capitals are accepted here, and what decides whether it is a line is the
+     * arithmetic that already decides it. What the letter means is a separate question and is not
+     * guessed: see `rebated` where the line is built.
+     */
+    String.raw`(\s+[A-Z]{1,2})?` + // the flag column: K, KI and KD are the contract rebate flag
     String.raw`\s+(${MONEY})` + // extended amount
     // Some lines carry one more figure after the extended amount — a pack multiple on the
     // testosterone gel line of a real invoice. It is not a field this needs, but a pattern
@@ -808,7 +823,13 @@ export function parseInvoiceLines(
         /* Null where the line prints no AWP, which is a fact about the line and not a nought. */
         awpCents: awp ? money(awp) : null,
         itemClass: cls ?? null,
-        rebated: Boolean(k),
+        /*
+         * True only for the contract flag, which starts with K. A line printed with no flag is not a
+         * contract line. Any other letter is a flag this reader has no meaning for — the invoice's own
+         * legend may say, and nobody has read it here — so it claims nothing either way: null, "not
+         * stated", which is not the same as "not rebated". See the note on the column in the schema.
+         */
+        rebated: k === undefined ? false : /^\s*K/.test(k) ? true : null,
         controlled: null,
       });
       continue;

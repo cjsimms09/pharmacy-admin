@@ -346,16 +346,17 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       kind: "warn",
     });
   }
-  if (health.failing > 0) {
+  /*
+   * One line to each failing check, each with the page that shows what it found. The morning check page is retired (2 October 2026), so
+   * the finding is said here; and the checks have nothing in common, so one link for all of them — guessed from the words of the findings —
+   * sent three unrelated findings to Money on 6 October 2026, and missed the remittance one for want of a word.
+   */
+  for (const c of health.checks.filter((c) => !c.ok)) {
     attention.push({
-      what: health.failing === 1 ? "The morning check found something" : `The morning check found ${health.failing} things`,
-      detail: health.checks
-        .filter((c) => !c.ok)
-        .map((c) => `Should be: ${c.what.charAt(0).toLowerCase()}${c.what.slice(1)}. Found: ${c.observed.replace(/\.$/, "")}.`)
-        .join(" · "),
-      /* The morning check page is retired (2 October 2026); its finding is said here and the page it concerns is one press away. */
-      href: /remit|payment|banked/i.test(health.checks.filter((c) => !c.ok).map((c) => c.what).join(" ")) ? "/remits" : "/money",
-      action: "See it",
+      what: `Should be: ${c.what.charAt(0).toLowerCase()}${c.what.slice(1)}`,
+      detail: `Found: ${c.observed.replace(/\.$/, "")}`,
+      href: c.href,
+      action: c.action,
       kind: "warn",
     });
   }

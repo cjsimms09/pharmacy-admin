@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { onSiteToday } from "./roster";
-import { todayIso } from "./dates";
+import { atLocal, todayIso } from "./dates";
 import { ensureObligations, CLOSURES, OBLIGATION_SEEDS, RENEWAL_CREDENTIAL } from "./obligations";
 import { periodsBetween, periodKeyFor, periodLabel, periodEnds, stateOf, type PeriodState } from "./periods";
 import type { ObligationKind, ObligationCadence } from "@/db/schema";
@@ -102,9 +102,10 @@ async function witnessed(seedKey: string, periods: string[], cadence: Obligation
     case "backup_restore_test": {
       // A backup having been taken is not evidence that a backup can be restored, and this
       // obligation asks the second question. The rehearsal answers it: an archive already on
-      // disk, opened cold and restored to a scratch database.
-      const s = await db.query.settings.findFirst({ where: eq(schema.settings.key, "backup_restore_last") });
-      bump(s?.value ?? null);
+      // disk, opened cold and restored to a scratch database. Each one counts in the quarter it was
+      // done on the pharmacy's clock, so a later test cannot take an earlier quarter's cover away.
+      const { restoreRehearsalDates } = await import("./backup");
+      for (const at of await restoreRehearsalDates()) bump(atLocal(at));
       return { counts, missing: "No backup has been opened and proved to restore in this period." };
     }
     case "fwa_training":
