@@ -37,7 +37,7 @@ describe("countFiles", () => {
   });
 });
 
-import { keyDaysLeft } from "../src/lib/mtf";
+import { keyDaysLeft, keyExpirySays } from "../src/lib/feed-rules";
 
 /**
  * CMS expires MTF keys 90 days after generation with no notice, so a scheduled pull would just
@@ -62,5 +62,42 @@ describe("keyDaysLeft", () => {
     assert.equal(keyDaysLeft(null), null);
     assert.equal(keyDaysLeft(""), null);
     assert.equal(keyDaysLeft("not a date"), null);
+  });
+});
+
+describe("keyDaysLeft reads a stored date and a stored timestamp the same way", () => {
+  test("a timestamp counts from its date, as the feed's own copy of this arithmetic did", () => {
+    assert.equal(keyDaysLeft("2026-09-01T10:30:00.000Z", "2026-09-16"), 75);
+  });
+});
+
+/**
+ * What the facilitator feed says of its key. Found 7 October 2026 reading the feed's code: a key that had already lapsed was
+ * reported as "The API key expires in -7 days.", the count printed as though it were still ahead. The sentence for a key that has
+ * run out has to say so, and what to do, with no number that reads as a deadline.
+ */
+describe("keyExpirySays", () => {
+  test("says nothing while more than two weeks are left, and nothing when there is no stored date", () => {
+    assert.equal(keyExpirySays(null), null);
+    assert.equal(keyExpirySays(90), null);
+    assert.equal(keyExpirySays(15), null);
+  });
+
+  test("names the days in the last two weeks, one day in the singular", () => {
+    assert.equal(keyExpirySays(14), "The API key expires in 14 days.");
+    assert.equal(keyExpirySays(2), "The API key expires in 2 days.");
+    assert.equal(keyExpirySays(1), "The API key expires in 1 day.");
+  });
+
+  test("the day it lapses says today", () => {
+    assert.equal(keyExpirySays(0), "The API key expires today.");
+  });
+
+  test("REGRESSION: a key that has run out says so, and prints no negative count", () => {
+    const says = keyExpirySays(-7)!;
+    assert.match(says, /has run out/);
+    assert.match(says, /stored 97 days ago/);
+    assert.doesNotMatch(says, /expires in/);
+    assert.doesNotMatch(says, /-\d/);
   });
 });

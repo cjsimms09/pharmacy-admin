@@ -1272,6 +1272,21 @@ place, and an arithmetic check before anything is stored.
     `lastPull` (the time of the last try) and `lastResult`; if that page's "last pull" should show when one last worked,
     read `mtf_last_ok` and `mtf_last_failed` (neither is exposed yet). **Not asked of him:** whether the badge should turn
     before 14 days after several failures in a row.
+    **Follow-ups from a cold read, 7 October (committed, not deployed; the three lines, what was checked and what
+    became of each of the reader's six leads are in OPEN-ITEMS, "Cold read, 7 October"):** `downloadMtf`, which a pull
+    run on its own goes through, now records through `recordMtfPull` with its own verdict, so the two new clocks and
+    the sentence agree after a pull run on its own; `mtfCycle`'s fetch passes `verdict: false` (the attempt only) and
+    the cycle records its verdict once, after `sweepRemittances` has read the folder, so a pull whose reading throws is
+    not recorded as one that worked; `keyDaysLeft` moved to `feed-rules.ts` beside a new `keyExpirySays`, so the key's
+    age is worked out once and a key past its 90 days says it has run out and a new one is made at CMS (the feed read
+    "expires in -7 days");
+    the feed's sentence says when no pull has been recorded as working. **For the cloud session, on the remits-side
+    MTF page:** `mtfStatus()` returns `keyDaysLeft`, which is negative once a key has run out, and `keyExpirySays` in
+    `feed-rules.ts` words it; its `lastPull` is still the time of the last try, so a "last pull" line there can read
+    as a success after a failure (`mtf_last_ok` and `mtf_last_failed` are the clocks of a pull that worked and of one
+    that did not). This session cannot read that page (a read-deny on the remits folder). **Not built:** recording a
+    failure of `applyKey()` when a pull is run on its own (it hands its message back to whoever called it, and
+    only the daily cycle records it, at the end), and a history of failures.
   - **A3-5** `alerts.ts` near lines 692-702: the monthly-checklist alert links "See the list" to `/money`; the list is
     on `/expected`.
     Checked 7 October (the site's own `alerts()`, read-only): live on 5 and 7 October, "September 2026: 1 thing still

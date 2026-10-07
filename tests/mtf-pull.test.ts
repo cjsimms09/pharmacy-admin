@@ -97,14 +97,60 @@ describe("a pull that failed does not count as the feed arriving", () => {
   });
 });
 
-describe("the pull's outcome is recorded from the pull's own result", () => {
-  const source = (p: string) => fs.readFileSync(path.join(__dirname, p), "utf8").replace(/\r\n/g, "\n");
+describe("an attempt that is not yet a verdict", () => {
+  /* The daily job fetches, then reads what was fetched. Whether the pull worked is known only after the read, and a read that throws
+     must not have been recorded as a pull that worked. So the fetch records that it was tried, and the verdict comes once, at the end. */
+  test("verdict: false records the attempt and what it said, and leaves both verdict clocks where they were", async () => {
+    const before = await getSettings();
+    await recordMtfPull({ ok: true, message: "Downloaded 2 new files into the download folder.", at: day(17), verdict: false });
+    const fetched = await getSettings();
+    assert.equal(fetched.mtf_last_pull, day(17).toISOString(), "the attempt stamp moves: it is what stops the daily job fetching again at once");
+    assert.equal(fetched.mtf_last_result, "Downloaded 2 new files into the download folder.");
+    assert.equal(fetched.mtf_last_ok, before.mtf_last_ok, "a fetch that has not been read is not yet a pull that worked");
+    assert.equal(fetched.mtf_last_failed, before.mtf_last_failed);
 
-  test("the unattended cycle hands the fetch's own verdict to the recorder, and does not stamp the clock itself", () => {
+    await recordMtfPull({ ok: false, message: "Could not fetch: unauthorised.", at: day(18), verdict: false });
+    const failed = await getSettings();
+    assert.equal(failed.mtf_last_pull, day(18).toISOString());
+    assert.equal(failed.mtf_last_ok, before.mtf_last_ok);
+    assert.equal(failed.mtf_last_failed, before.mtf_last_failed, "a failed fetch is recorded as a failed pull by the cycle's own verdict, not by the attempt");
+  });
+
+  test("the verdict that follows moves exactly one of the two, as before", async () => {
+    await recordMtfPull({ ok: true, message: "Ran successfully. Nothing new to post.", at: day(19) });
+    const s = await getSettings();
+    assert.equal(s.mtf_last_ok, day(19).toISOString());
+    assert.equal(s.mtf_last_failed, day(14).toISOString(), "a pull that worked does not touch the time of the last failure");
+  });
+});
+
+describe("every record of a pull goes through the one recorder (read from the source; the tool itself is not run here)", () => {
+  const source = (p: string) => fs.readFileSync(path.join(__dirname, p), "utf8").replace(/\r\n/g, "\n");
+  const between = (src: string, from: string, to: string) => src.slice(src.indexOf(from), src.indexOf(to));
+
+  test("the four settings that hold a pull are written in the recorder and nowhere before it in the tool's code", () => {
     const src = source("../src/lib/mtf.ts");
-    const cycle = src.slice(src.indexOf("export async function mtfCycle"), src.indexOf("export async function recordMtfPull"));
+    const at = src.indexOf("export async function recordMtfPull");
+    assert.ok(at > 0, "the recorder is where this test looks for it");
+    assert.doesNotMatch(src.slice(0, at), /["']mtf_last_(pull|result|ok|failed)["']/, "a pull recorded anywhere else would move a clock without saying which way it went");
+    const body = src.slice(at, src.indexOf("\n}\n", at));
+    for (const key of ["mtf_last_pull", "mtf_last_result", "mtf_last_ok", "mtf_last_failed"]) {
+      assert.ok(body.includes(`"${key}"`), `${key} is written by the recorder`);
+    }
+  });
+
+  test("downloadMtf hands its own result to the recorder and records its verdict unless told not to", () => {
+    const download = between(source("../src/lib/mtf.ts"), "export async function downloadMtf", "async function listFiles");
+    assert.match(download, /verdict = true\)/);
+    assert.match(download, /recordMtfPull\(\{ ok: r\.ok, message: [^\n]*, verdict \}\)/);
+  });
+
+  test("the daily cycle's fetch records the attempt only, and the verdict is recorded once, after the folder has been read", () => {
+    const cycle = between(source("../src/lib/mtf.ts"), "export async function mtfCycle", "export async function recordMtfPull");
+    assert.match(cycle, /downloadMtf\(iso\(from\), iso\(to\), true, false\)/);
     assert.match(cycle, /recordMtfPull\(\{ ok: pulled\.ok, message \}\)/);
-    assert.doesNotMatch(cycle, /setSetting\("mtf_last_(pull|ok)"/, "the cycle must not write the clock directly");
+    assert.equal(cycle.match(/recordMtfPull\(/g)?.length, 1, "the cycle records one verdict, and no other before the folder has been read");
+    assert.ok(cycle.indexOf("sweepRemittances(user)") < cycle.indexOf("recordMtfPull({ ok: pulled.ok"), "the verdict follows the read");
   });
 
   test("the feed reads the good-pull clock and not the time of the last try", () => {
@@ -119,17 +165,27 @@ describe("what the pull's sentence says, branch by branch", () => {
   const now = new Date("2026-10-20T15:00:00Z");
   const base = { lastOk: null, lastFailed: null, lastResult: null, newestPaymentOn: null, now };
 
-  test("nothing recorded yet: no warning, and nothing is invented", () => {
+  test("nothing recorded yet: no failure is claimed, and the feed says it has not been measured", () => {
     const r = mtfPull(base);
     assert.equal(r.failing, false);
-    assert.equal(r.says, "Last pull: never.");
+    assert.equal(r.says, "Last pull: never. No pull has been recorded as working yet, and no payment has arrived through it.");
     assert.equal(r.clockAt, null);
   });
 
-  test("before any pull is recorded as working, the clock is the newest payment, as it was", () => {
+  test("before any pull is recorded as working, the clock is the newest payment, and the sentence says so", () => {
     const r = mtfPull({ ...base, newestPaymentOn: "2026-10-05", lastResult: "Ran successfully." });
     assert.equal(r.clockAt, "2026-10-05");
     assert.equal(r.failing, false);
+    assert.equal(
+      r.says,
+      `Last pull: Ran successfully. No pull has been recorded as working yet, so this feed is judged on its newest payment, and is called stopped after ${MTF_QUIET_DAYS} days without one.`,
+    );
+  });
+
+  test("once a pull is recorded as working and none has failed, the sentence is only what the pull did", () => {
+    const r = mtfPull({ ...base, lastOk: "2026-10-19T15:00:00.000Z", lastResult: "Ran successfully." });
+    assert.equal(r.failing, false);
+    assert.equal(r.says, "Last pull: Ran successfully.");
   });
 
   test("a pull that worked is the clock even when a payment is newer or older", () => {
@@ -161,7 +217,31 @@ describe("what the pull's sentence says, branch by branch", () => {
   });
 
   test("a message gets one full stop, whether or not it came with one", () => {
-    assert.equal(mtfPull({ ...base, lastResult: "Ran successfully" }).says, "Last pull: Ran successfully.");
-    assert.equal(mtfPull({ ...base, lastResult: "Ran successfully." }).says, "Last pull: Ran successfully.");
+    const worked = { ...base, lastOk: "2026-10-19T15:00:00.000Z" };
+    assert.equal(mtfPull({ ...worked, lastResult: "Ran successfully" }).says, "Last pull: Ran successfully.");
+    assert.equal(mtfPull({ ...worked, lastResult: "Ran successfully." }).says, "Last pull: Ran successfully.");
+  });
+});
+
+/* What the feed's own row says of the key, in the one place a person reads it. Dates are chosen against `day(17)`, which is 18 October. */
+describe("the facilitator feed says what the key has left, and that it has run out", () => {
+  const detailWithKey = async (keySetOn: string) => {
+    await setSetting("mtf_key_set_on", keySetOn);
+    return (await mtf(day(17))).detail;
+  };
+
+  test("a key with six days left says six days", async () => {
+    assert.match(await detailWithKey("2026-07-26"), /The API key expires in 6 days\.$/);
+  });
+
+  test("REGRESSION: a key that has run out says so, and no sentence reads as a negative deadline", async () => {
+    const detail = await detailWithKey("2026-06-01");
+    assert.match(detail, /The API key was stored 139 days ago and CMS ends a key 90 days after it is made, so it has run out; a new one has to be made at CMS and stored\.$/);
+    assert.doesNotMatch(detail, /expires in/);
+  });
+
+  test("a key with more than two weeks left, or none stored, adds nothing", async () => {
+    assert.doesNotMatch(await detailWithKey("2026-10-01"), /API key/);
+    assert.doesNotMatch(await detailWithKey(""), /API key/);
   });
 });

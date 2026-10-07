@@ -61,7 +61,8 @@ export const MTF_QUIET_DAYS = 14;
  * nothing and a long run of them loses money. The clock is therefore the last pull that worked. A pull that failed does not move it,
  * and the feed is called stopped, as before, after `MTF_QUIET_DAYS` without one. What a failure does is get said, in words, beside the
  * badge, so a green badge never sits over a pull that is not working. Before any pull has been recorded as working the clock is the
- * newest payment received, as it was.
+ * newest payment received, and the sentence says so whether or not a pull has failed: a clock that has not been measured yet is
+ * said to be unmeasured, and is not left to read as one that was.
  */
 export function mtfPull(a: { lastOk: string | null; lastFailed: string | null; lastResult: string | null; newestPaymentOn: string | null; now: Date }): {
   clockAt: string | null;
@@ -79,6 +80,39 @@ export function mtfPull(a: { lastOk: string | null; lastFailed: string | null; l
   return {
     clockAt: a.lastOk ?? a.newestPaymentOn,
     failing,
-    says: failing ? `${last} ${worked}` : last,
+    says: failing || a.lastOk === null ? `${last} ${worked}` : last,
   };
+}
+
+/** CMS ends an MTF API key this many days after it is made. */
+export const MTF_KEY_LIFE_DAYS = 90;
+
+/**
+ * How long the stored key has left.
+ *
+ * CMS expires MTF API keys 90 days after generation and gives no notice. A scheduled pull would
+ * simply start failing. Counted from when the key was pasted in, which is the closest date we
+ * have — if it was generated some days earlier, the real deadline is earlier still, so this
+ * errs toward warning too early rather than too late. Zero is the day it lapses; below zero it
+ * already has.
+ */
+export function keyDaysLeft(setOn: string | null, today = new Date().toISOString().slice(0, 10)): number | null {
+  const m = setOn ? /^\d{4}-\d{2}-\d{2}/.exec(setOn) : null;
+  if (!m) return null;
+  const from = Date.parse(`${m[0]}T00:00:00Z`);
+  const to = Date.parse(`${today}T00:00:00Z`);
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  return MTF_KEY_LIFE_DAYS - Math.floor((to - from) / 86_400_000);
+}
+
+/**
+ * What the facilitator feed says of its key: nothing until two weeks are left, then the days, and
+ * once the count has gone below zero that the key has run out. It must not print the count there,
+ * where "expires in -7 days" was the sentence for a key that had already lapsed.
+ */
+export function keyExpirySays(left: number | null): string | null {
+  if (left === null || left > 14) return null;
+  if (left > 0) return `The API key expires in ${left} ${left === 1 ? "day" : "days"}.`;
+  if (left === 0) return "The API key expires today.";
+  return `The API key was stored ${MTF_KEY_LIFE_DAYS - left} days ago and CMS ends a key ${MTF_KEY_LIFE_DAYS} days after it is made, so it has run out; a new one has to be made at CMS and stored.`;
 }

@@ -8,6 +8,23 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after `1b65ea1`; NOT deployed or pushed): follow-ups to the facilitator
+  (MTF) feed's fix, from a second Claude's cold read of it.** (1) `downloadMtf` in `src/lib/mtf.ts`, which a pull run
+  on its own goes through (the second reader found the remits-side MTF page calling it; this session cannot read that
+  page), now records through `recordMtfPull` (a fourth argument, `verdict`, default true), so a pull run on its own
+  moves `mtf_last_ok` or `mtf_last_failed` as the daily one does; the daily `mtfCycle` passes `false` for its fetch,
+  which records the attempt only, and records its verdict once, after `sweepRemittances`. (2) `keyDaysLeft` moved from
+  `src/lib/mtf.ts` to `src/lib/feed-rules.ts`, beside a new `keyExpirySays`, and `src/lib/feeds.ts` uses both; a key
+  past its 90 days now says it has run out, where it read "expires in -7 days". (3) The feed's sentence says when no
+  pull has been recorded as working. **For the cloud session, who owns the remits-side MTF page (this session cannot
+  read it):** `mtfStatus()` returns `keyDaysLeft`, which is negative for a key that has run out, so if that page
+  prints it, word it with `keyExpirySays` from `src/lib/feed-rules.ts`; its `lastPull` is the time of the last try,
+  and `mtf_last_ok` and `mtf_last_failed` are the clocks of a pull that worked and of one that did not. **Files
+  changed on `feature/compliance`, so say so on your pull request before editing one:** `src/lib/mtf.ts`,
+  `src/lib/feeds.ts` and `src/lib/feed-rules.ts` (all three CRLF), `tests/mtf.test.ts`, `tests/mtf-pull.test.ts`,
+  `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`. **Read by:** its author only, no second reader; the leads came from a
+  second reader, and nobody has read the fixes. Nothing is asked of you beyond that note.
+
 - **7 October, pharmacy session (the commit after `0eeead0`; NOT deployed or pushed): "which receipts has a bank line
   confirmed" is now one function, and a counter deposit decided by hand no longer takes a register day another line
   already confirmed.** The question was asked four ways, and the by-hand decision (`decideBankLine`, "confirms run", in
@@ -34,7 +51,8 @@ file is how they talk.
   the time of the last try; if that page's "last pull" should say when one last worked, read `mtf_last_ok` and
   `mtf_last_failed`. **Files changed on `feature/compliance`, so say so on your pull request before editing one:**
   `src/lib/mtf.ts`, `src/lib/feeds.ts` and `src/lib/feed-rules.ts` (all three CRLF), `src/lib/settings.ts`,
-  `tests/mtf-pull.test.ts`, `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`. **Read by:** its author only, no second reader.
+  `tests/mtf-pull.test.ts`, `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`. **Read by:** its author when it was written; a second
+  Claude read it cold afterwards, and the bullet "follow-ups to the facilitator (MTF) feed's fix" is what came of that.
   Nothing is asked of you beyond that note.
 
 - **7 October, pharmacy session (the commit after the next one down; NOT deployed or pushed): Today's morning-check

@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/db";
 import { getSettings, type Settings } from "./settings";
-import { judgeFeed, missingDays, mtfPull, MTF_QUIET_DAYS, type FeedState } from "./feed-rules";
+import { judgeFeed, keyDaysLeft, keyExpirySays, missingDays, mtfPull, MTF_QUIET_DAYS, type FeedState } from "./feed-rules";
 
 /**
  * Is everything arriving?
@@ -276,7 +276,7 @@ async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds
       const { testMtf } = await import("./mtf");
       probe = await withTimeout(testMtf().then((x) => ({ ok: x.ok, says: x.message })), 60_000, { ok: false, says: "The facilitator's tool did not answer within a minute." });
     }
-    const keyLeft = s.mtf_key_set_on ? keyDays(s.mtf_key_set_on, today) : null;
+    const keyNote = keyExpirySays(keyDaysLeft(s.mtf_key_set_on || null, today));
     const pull = mtfPull({ lastOk: s.mtf_last_ok || null, lastFailed: s.mtf_last_failed || null, lastResult: s.mtf_last_result || null, newestPaymentOn: lastAt, now });
     feeds.push({
       key: "mtf",
@@ -286,7 +286,7 @@ async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds
       lastAt,
       state: !hasKey && lastAt === null ? "off" : probe && !probe.ok ? "broken" : judgeFeed({ maxQuietHours: MTF_QUIET_DAYS * 24, lastAt: pull.clockAt, now, enabled: true }),
       detail: hasKey
-        ? `${num(r.rows[0]?.n).toLocaleString()} payments held, ${money(num(r.rows[0]?.cents))} in all${lastAt ? `; newest received ${lastAt}` : ""}. ${pull.says}${keyLeft !== null && keyLeft <= 14 ? ` The API key expires in ${plural(keyLeft, "day")}.` : ""}`
+        ? `${num(r.rows[0]?.n).toLocaleString()} payments held, ${money(num(r.rows[0]?.cents))} in all${lastAt ? `; newest received ${lastAt}` : ""}. ${pull.says}${keyNote ? ` ${keyNote}` : ""}`
         : "No facilitator key is stored, so nothing is pulled.",
       proof: null,
       probe,
@@ -471,11 +471,6 @@ function rebateFiled(s: Settings): string | null {
   } catch {
     return null;
   }
-}
-
-function keyDays(setOn: string, today: string): number | null {
-  const m = /^\d{4}-\d{2}-\d{2}/.exec(setOn);
-  return m ? 90 - daysSince(m[0], today) : null;
 }
 
 function addDays(iso: string, days: number): string {

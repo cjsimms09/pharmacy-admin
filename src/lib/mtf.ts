@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { getSettings, setSetting } from "./settings";
 import { readSecret } from "./connections";
+import { keyDaysLeft } from "./feed-rules";
 
 const run = promisify(execFile);
 
@@ -276,8 +277,15 @@ export async function testMtf(): Promise<MtfResult> {
   };
 }
 
-/** Pulls 835 files for a date range into the download folder. */
-export async function downloadMtf(fromIso: string, toIso: string, onlyNew = true): Promise<MtfResult> {
+/**
+ * Pulls 835 files for a date range into the download folder, and records how it went.
+ *
+ * Called on its own it records its own verdict, so a pull run outside the daily job moves the same clocks the daily job does.
+ * The daily job passes `verdict = false`: it still has the downloaded files to read, so the fetch records the attempt only and
+ * the job records the verdict once they have been read. A read that throws is then not recorded as a pull that worked, and the
+ * attempt stamp, which the half-hourly job reads so as not to fetch twice in a day, is already written.
+ */
+export async function downloadMtf(fromIso: string, toIso: string, onlyNew = true, verdict = true): Promise<MtfResult> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fromIso) || !/^\d{4}-\d{2}-\d{2}$/.test(toIso)) {
     return { ok: false, message: "Give both dates as YYYY-MM-DD." };
   }
@@ -295,8 +303,7 @@ export async function downloadMtf(fromIso: string, toIso: string, onlyNew = true
   const after = await listFiles(dir);
   const added = after.filter((f) => !before.includes(f));
 
-  await setSetting("mtf_last_pull", new Date().toISOString());
-  await setSetting("mtf_last_result", r.ok ? `${added.length} new file(s)` : (r.err || "failed").slice(0, 300));
+  await recordMtfPull({ ok: r.ok, message: r.ok ? `${added.length} new file(s)` : r.err || "failed", verdict });
 
   if (!r.ok) return { ok: false, message: r.err || "The download failed.", output: r.out };
   return {
@@ -331,22 +338,6 @@ export function countFiles(out: string): number {
   if (/no files? found/i.test(out)) return 0;
   const names = out.match(/[\w.-]+\.(835|edi|txt|zip)\b/gi);
   return names ? new Set(names.map((n) => n.toLowerCase())).size : 0;
-}
-
-/**
- * How long the stored key has left.
- *
- * CMS expires MTF API keys 90 days after generation and gives no notice. A scheduled pull would
- * simply start failing. Counted from when the key was pasted in, which is the closest date we
- * have — if it was generated some days earlier, the real deadline is earlier still, so this
- * errs toward warning too early rather than too late.
- */
-export function keyDaysLeft(setOn: string | null, today = new Date().toISOString().slice(0, 10)): number | null {
-  if (!setOn) return null;
-  const ms = Date.parse(`${setOn}T00:00:00Z`);
-  const now = Date.parse(`${today}T00:00:00Z`);
-  if (Number.isNaN(ms) || Number.isNaN(now)) return null;
-  return 90 - Math.floor((now - ms) / 86_400_000);
 }
 
 /** What the MTF page shows about the last run. */
@@ -574,7 +565,8 @@ export async function mtfCycle(user: { name: string }, days = 21): Promise<{
   const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
   const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-  const pulled = await downloadMtf(iso(from), iso(to), true);
+  // The fetch records its attempt only: whether the pull worked is known after the folder has been read, below.
+  const pulled = await downloadMtf(iso(from), iso(to), true, false);
   const { sweepRemittances } = await import("./claim-payments");
   // Read whatever is in the folder even when the fetch failed: a file from an earlier run that
   // has never been read is money sitting on the disk, and a network failure should not hide it.
@@ -605,10 +597,19 @@ export async function mtfCycle(user: { name: string }, days = 21): Promise<{
  * It cannot also be the feed's clock. A pull that fails every day (a key that has lapsed, the tool gone) would then read as a feed
  * that arrived today, for ever. So the feed is judged on `mtf_last_ok`, which only a pull that worked moves, and a failure is kept
  * apart in `mtf_last_failed` so the feed can say the latest one did not work.
+ *
+ * `verdict: false` records the attempt and its words and leaves both verdict clocks alone. The daily job uses it for the fetch, which
+ * is only half of what it does: whether the pull worked is known after the folder has been read. Recording the verdict then, and the
+ * attempt now, means a read that throws is not recorded as a pull that worked, and the attempt stamp is already written, so the
+ * half-hourly job does not fetch again at once.
+ *
+ * This file writes these four settings nowhere else, so no pull it makes moves a clock without saying which way it went;
+ * tests/mtf-pull.test.ts reads the source to hold it to that.
  */
-export async function recordMtfPull(r: { ok: boolean; message: string; at?: Date }): Promise<void> {
+export async function recordMtfPull(r: { ok: boolean; message: string; at?: Date; verdict?: boolean }): Promise<void> {
   const at = (r.at ?? new Date()).toISOString();
   await setSetting("mtf_last_pull", at);
   await setSetting("mtf_last_result", r.message.slice(0, 500));
+  if (r.verdict === false) return;
   await setSetting(r.ok ? "mtf_last_ok" : "mtf_last_failed", at);
 }
