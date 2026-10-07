@@ -639,3 +639,28 @@ export function summarise(checks: Check[]): string {
   // `what` is the rule, not the finding: said bare after "failing:" it reads as though the rule held.
   return `${bad.length} of ${checks.length} failing. Should be: ${bad.map((c) => c.what.charAt(0).toLowerCase() + c.what.slice(1)).join("; ")}.`;
 }
+
+/**
+ * What Today shows when the morning check itself could not run.
+ *
+ * Today used to turn a thrown error into "no checks, none failing", which reads as all clear, and the card appears only when something
+ * fails, so a check that never ran looked exactly like one that passed. A check that did not run is not measured, and saying so is the one
+ * thing it can still do. The reason is the first line of the error with long digit runs masked, so a message that carries an
+ * identifier does not reach the screen. Opening Today runs the check again, which is what "Try again" does.
+ */
+export function checkCouldNotRun(reason: unknown, now: string = new Date().toISOString()): { checks: Check[]; failing: number; says: string; ranAt: string } {
+  const raw = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "";
+  const why = raw.split("\n")[0].replace(/\d{5,}/g, "#####").trim().slice(0, 160);
+  const check: Check = {
+    what: "The morning check runs",
+    href: "/",
+    action: "Try again",
+    shouldBe: "The morning check runs every time Today is opened, so what it checks has been looked at.",
+    observed: `not measured: the check could not run${why ? ` (${why})` : ""}, so nothing it looks at was looked at just now`,
+    ok: false,
+    difference:
+      "A check that did not run has not passed. Opening Today runs it again; until it runs, nothing the check covers (invoices, the mailbox, remittances, the feeds) has been judged.",
+    kind: "money",
+  };
+  return { checks: [check], failing: 1, says: "The morning check could not run, so none of its checks was looked at.", ranAt: now };
+}

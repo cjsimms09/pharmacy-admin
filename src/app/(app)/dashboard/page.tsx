@@ -7,6 +7,7 @@ import { staffMatrix } from "@/lib/staff-matrix";
 import { StaffBoard } from "@/components/staff-board";
 import { invoiceIssues } from "@/lib/invoices";
 import { dailyCheck } from "@/lib/daily-check-store";
+import { checkCouldNotRun } from "@/lib/daily-check";
 import { alerts, SOON_DAYS, type Alert } from "@/lib/alerts";
 import { claimsProofNow } from "@/lib/data-health-claims-proof-store";
 import { claimsProofAlert } from "@/lib/data-health-claims-proof";
@@ -127,8 +128,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     /*
      * The morning check. Six counts and two dates, so it is cheap enough to run on a page load, and
      * it is the same function the nightly pass calls — this page and that record cannot disagree.
+     * If it cannot run, Today says so (checkCouldNotRun): a card that appears only on a failure must not
+     * go quiet for the one failure that stops it being judged.
      */
-    dailyCheck().catch(() => ({ checks: [], failing: 0, says: "", ranAt: "" })),
+    dailyCheck().catch((e) => checkCouldNotRun(e)),
   ]);
 
   /*

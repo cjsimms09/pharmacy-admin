@@ -1239,6 +1239,11 @@ place, and an arithmetic check before anything is stored.
   - **A3-1** `dashboard/page.tsx` near line 131 wraps `dailyCheck()` in a `.catch` that returns no checks and no
     failures, so if the morning check cannot run, Today looks clean; a check that did not run is never-measured and
     should say so (rule 5).
+    Checked 7 October (the code; the check itself ran fine live that day): true, and not firing. Fixed in code on 7
+    October and not deployed: `checkCouldNotRun` in `daily-check.ts` gives the card one line, "not measured", with a
+    "Try again" that reopens Today; four tests, one reading the dashboard source. Registered in OPEN-ITEMS, "Found 6
+    October". Not built: the nightly run (`dailyCheckTick`) still swallows its own failure and stores nothing, and
+    nothing live reads the stored line, so a failed night leaves no trace.
   - **A3-2** `feeds.ts` near lines 253-258 judges the 835 feed on the newest advice date after 14 days, while
     ProviderPay is pulled by hand once a month; the feed would read "stopped arriving" for about half of every month.
     The morning check's `horizon()` already tells the day the export was read from the newest advice date.

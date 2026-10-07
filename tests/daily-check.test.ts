@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { runDailyCheck, summarise, type Facts, type History } from "../src/lib/daily-check";
+import { runDailyCheck, summarise, checkCouldNotRun, type Facts, type History } from "../src/lib/daily-check";
 import { isRetired } from "../src/lib/retired";
 
 /** A day on which everything is as it should be. Each test spoils exactly one thing. */
@@ -753,5 +753,46 @@ describe("a remittance banked by a receipt keyed to its remittance number is sai
     );
     assert.equal(failing.ok, false);
     assert.match(failing.observed, /; 1 other is banked by a receipt keyed to the remittance number, not the payment number; the last ProviderPay export/);
+  });
+});
+
+describe("a morning check that could not run says so, and does not read as all clear", () => {
+  test("it is one failing check that says nothing was measured, with the reason", () => {
+    const r = checkCouldNotRun(new Error("no such table: invented_table"), "2026-10-07T12:00:00.000Z");
+    assert.equal(r.checks.length, 1);
+    assert.equal(r.failing, 1);
+    assert.equal(r.ranAt, "2026-10-07T12:00:00.000Z");
+    const c = r.checks[0];
+    assert.equal(c.ok, false);
+    assert.equal(c.what, "The morning check runs");
+    assert.match(c.observed, /^not measured: the check could not run \(no such table: invented_table\)/);
+    assert.equal(c.href, "/");
+    assert.equal(c.action, "Try again");
+    assert.doesNotMatch(r.says, /pass|all clear|nothing/i, "what it says must not read as a pass");
+  });
+
+  test("only the first line of the reason is shown, long digit runs are masked, and it is cut at 160 characters", () => {
+    const masked = checkCouldNotRun(new Error("failed on 123456789012 and 4821\nat internal stack line"));
+    assert.match(masked.checks[0].observed, /failed on ##### and 4821\)/);
+    assert.doesNotMatch(masked.checks[0].observed, /123456789012|stack line/);
+    const long = checkCouldNotRun(new Error("x".repeat(500)));
+    assert.match(long.checks[0].observed, /\(x{160}\)/);
+    assert.doesNotMatch(long.checks[0].observed, /x{161}/);
+  });
+
+  test("a reason that is not an error still says it did not run, and does not invent a cause", () => {
+    for (const reason of [undefined, null, 42, {}]) {
+      const c = checkCouldNotRun(reason).checks[0];
+      assert.equal(c.ok, false);
+      assert.equal(c.observed, "not measured: the check could not run, so nothing it looks at was looked at just now");
+    }
+    assert.match(checkCouldNotRun("plain text reason").checks[0].observed, /\(plain text reason\)/);
+  });
+
+  test("Today shows it: the dashboard turns a failed run into this and no longer into an empty list", () => {
+    const src = fs.readFileSync("src/app/(app)/dashboard/page.tsx", "utf8");
+    assert.match(src, /dailyCheck\(\)\.catch\(\(e\) => checkCouldNotRun\(e\)\)/);
+    assert.doesNotMatch(src, /checks: \[\], failing: 0/, "an empty list with none failing is what a check that never ran looked like");
+    assert.match(src, /health\.checks\.filter\(\(c\) => !c\.ok\)/, "the card is built from the failing checks, which now include this one");
   });
 });

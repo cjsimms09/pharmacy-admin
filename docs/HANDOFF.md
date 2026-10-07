@@ -8,6 +8,14 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after the next one down; NOT deployed or pushed): Today's morning-check
+  card can no longer go quiet when the check itself cannot run.** The dashboard turned any error the check raised into
+  an empty list, which looks like a day on which every check passes; it now shows one line, "not measured", with a
+  "Try again" that reopens Today (`checkCouldNotRun` in `src/lib/daily-check.ts`). **Files changed on
+  `feature/compliance`, so say so on your pull request before editing one:** `src/lib/daily-check.ts`,
+  `src/app/(app)/dashboard/page.tsx`, `tests/daily-check.test.ts`, `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`. **Read by:**
+  its author only, no second reader. Nothing is asked of you.
+
 - **7 October, pharmacy session (the commit after `006d971`; NOT deployed or pushed): the alert "September 2026: 1
   thing still to upload" said "See the list" and opened the Money page, which does not hold that list; it now opens
   `/expected`, which does.** One link in `src/lib/alerts.ts` (a CRLF file) and a test in
