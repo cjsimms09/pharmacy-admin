@@ -281,6 +281,16 @@ describe("the fixed monthly debits and the counter's deposits (1 October 2026)",
     assert.equal(p.kind, "confirms_run");
     assert.deepEqual(p.kind === "confirms_run" ? p.receiptIds : [], ["d1", "d2"]);
   });
+
+  test("REGRESSION: the sentence gives the sum of the days it names, not of every day the search looked at", () => {
+    /* The search keeps adding days after it has found the run, so the total it ends on is one day too many. */
+    const p = one("2026-09-16", "Deposit", 69_069, { ...base, registerDeposits: register });
+    assert.equal(p.kind, "confirms_run");
+    const why = p.kind === "confirms_run" ? p.why : "";
+    assert.match(why, /5 days 2026-09-01 to 2026-09-05 \(cash and cheques, 690\.68\)/);
+    assert.match(why, /0\.01 over/);
+    assert.doesNotMatch(why, /933\.31/);
+  });
 });
 
 describe("his answers of 1 October, the second round", () => {

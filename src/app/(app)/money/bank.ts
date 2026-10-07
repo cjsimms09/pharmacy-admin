@@ -21,6 +21,7 @@ import { CARD_STATEMENT_BILL } from "@/lib/card-statement";
 import { readBankDescriptor } from "@/lib/bank-descriptors";
 import { paymentFromBankDebit } from "@/lib/supplier-payments";
 import { matchContext } from "@/lib/bank-match-context";
+import { receiptsConfirmedByBank } from "@/lib/bank-confirmed";
 import { remitReceiptKey } from "@/lib/engine/remit-standing";
 import { engineAfter } from "@/lib/engine/run";
 import { recordMonthBalances } from "@/lib/engine/month";
@@ -223,10 +224,7 @@ async function placeStatementLines(
    */
   const days = fresh.map((l) => l.on).sort();
   /* A receipt an earlier statement already confirmed is not available to be confirmed again. */
-  const confirmedAlready = new Set([
-    ...(await db.query.bankLines.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId).filter((id): id is string => id !== null),
-    ...(await db.query.bankLineReceipts.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId),
-  ]);
+  const confirmedAlready = await receiptsConfirmedByBank();
   const heldForBank: HeldForBank[] = days.length
     ? (
         await db.query.cashReceipts.findMany({
@@ -625,7 +623,7 @@ export async function decideBankLine(
     await db.update(schema.bankLines).set({ placedAs: "noted", why: `${decision.category}: ${decision.note} Nothing is booked from the line. (${by})` }).where(eq(schema.bankLines.id, lineId));
   } else if (decision.kind === "confirms_run") {
     if (line.amountCents <= 0) return { ok: false, why: "A payment is not a counter deposit." };
-    const confirmedAlready = new Set((await db.query.bankLines.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId).filter((id): id is string => id !== null));
+    const confirmedAlready = await receiptsConfirmedByBank();
     const run = (await db.query.cashReceipts.findMany({ where: and(like(schema.cashReceipts.sourceKey, "register|%"), gte(schema.cashReceipts.receivedOn, decision.from), lte(schema.cashReceipts.receivedOn, decision.to)) })).filter((r) => !confirmedAlready.has(r.id));
     if (run.length === 0) return { ok: false, why: `No unconfirmed register days between ${decision.from} and ${decision.to}.` };
     const sum = run.reduce((n, r) => n + r.amountCents, 0);

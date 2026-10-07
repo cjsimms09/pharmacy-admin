@@ -1,6 +1,7 @@
 import { and, eq, gte, lte, like, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { SITE_STARTS_ON } from "../books-start";
+import { receiptsConfirmedByBank } from "../bank-confirmed";
 import { OPEN_STATES, TERMINAL_DECISIONS, type ClaimState } from "./claims";
 
 /**
@@ -86,10 +87,7 @@ export async function computeMonth(month: string, today: string): Promise<MonthF
 
   /* Receipts dated in the month, and which of them a bank line stands behind. */
   const receipts = await db.query.cashReceipts.findMany({ where: and(gte(schema.cashReceipts.receivedOn, from), lte(schema.cashReceipts.receivedOn, to)), columns: { id: true, amountCents: true, kind: true, sourceKey: true, receivedOn: true } });
-  const linked = new Set([
-    ...(await db.query.bankLines.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId).filter((x): x is string => x !== null),
-    ...(await db.query.bankLineReceipts.findMany({ columns: { receiptId: true } })).map((r) => r.receiptId),
-  ]);
+  const linked = await receiptsConfirmedByBank();
   const receiptsCents = receipts.reduce((n, r) => n + r.amountCents, 0);
   const unlinked = receipts.filter((r) => !linked.has(r.id));
   const parts: { label: string; cents: number }[] = [];

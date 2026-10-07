@@ -8,6 +8,22 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after `0eeead0`; NOT deployed or pushed): "which receipts has a bank line
+  confirmed" is now one function, and a counter deposit decided by hand no longer takes a register day another line
+  already confirmed.** The question was asked four ways, and the by-hand decision (`decideBankLine`, "confirms run", in
+  `src/app/(app)/money/bank.ts`) read only `bank_lines.receipt_id`, not the link table `bank_line_receipts`, so a day
+  confirmed as a line's second or later receipt looked free to it and could be taken again, booking a false "Cash
+  short". `receiptsConfirmedByBank()` in the new `src/lib/bank-confirmed.ts` (no `server-only` import, because the
+  engine child imports `engine/month.ts`) now answers it for the placement, the decision, the matcher's context and
+  the month's balance. The sentence naming a counter deposit's days also printed the running total of the whole
+  search, and now prints the days' own; the two stored sentences that carry the wrong total (16 September, $232.67
+  and $690.69) keep it until those lines are placed again, which is a live write that needs his word.
+  **Files changed on `feature/compliance`, so say so on your pull request before editing one:**
+  `src/app/(app)/money/bank.ts`, `src/lib/bank-match-context.ts`, `src/lib/engine/month.ts`,
+  `src/lib/bank-statement.ts`, `src/lib/bank-confirmed.ts` (new), `tests/bank-statement.test.ts`,
+  `tests/bank-run-confirmed.test.ts` (new), `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`. **Read by:** its author only, no
+  second reader. Nothing is asked of you beyond that note.
+
 - **7 October, pharmacy session (the commit after `2bfd4c6`; NOT deployed or pushed): the facilitator (MTF) feed is now
   judged on the last pull that worked, not the last one tried.** Before, a pull that failed every day (a lapsed key, a
   missing tool) reset the feed's clock each time and the feed read "on time" for ever. `mtf_last_pull` is still the time

@@ -1377,6 +1377,19 @@ place, and an arithmetic check before anything is stored.
     199, `statementOnFile`, is unused.
   - **A5-Q** a receipt typed on the books page gets a month and no received day, so `month.ts` near line 87 leaves it
     out and `cash-from-bank.ts` near line 54 keys on the month; should the form ask for the day?
+  - **A5-6** (found 7 October by the author, not by a cold reader.) The question "which receipts has a bank line
+    confirmed" was asked four ways and one of them read half the answer: `decideBankLine`'s "confirms run" branch read
+    only `bank_lines.receipt_id`, so a counter deposit decided by hand could take a register day an earlier line had
+    confirmed as its second or later receipt and book a false "Cash short", and the automatic counter-run pass printed
+    the loop's last running total (933.31) for days that add up to 690.68. Fixed in code (not deployed): one function,
+    `receiptsConfirmedByBank()` in `src/lib/bank-confirmed.ts`, for the placement, the decision, the matcher's context
+    and the month's balance; the sentence totals its own days; five tests, seven mutants. Not fixed, because each is a
+    live-database write that needs his word: two stored sentences (16 September, $232.67 and $690.69) that keep the
+    old total until the lines are placed again, two register days (2 and 3 September) confirmed by two lines, and five
+    link rows tying three payer receipts to counter lines, whose writer is not established. The SQL in
+    `cash-from-bank.ts` near line 54 keeps its own form of the question and reads both sources; a source test pins it.
+    One question for him came out of it and has not been asked: what the three 16 September counter deposits held (the
+    slips would say); optional, nothing waits on it.
   - **A4-1** `compliance/register/page.tsx` near lines 27 and 41-45: a cell is green ("satisfied") unless its period
     is still open, and `openItems()` skips duties that need confirming (`compliance-status.ts` near line 282), so
     every period of the six unanswered duties would render green; the main page's `clean` (near line 55) ignores

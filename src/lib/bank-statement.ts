@@ -1007,6 +1007,7 @@ export function placeLines(lines: BankLine[], ctx: MatchContext): { line: BankLi
         }
         if (!hit) continue;
         const run = pool.slice(0, hit.n);
+        const runSum = run.reduce((n, r) => n + r.amountCents, 0);
         const money = (c: number) => (Math.abs(c) / 100).toFixed(2);
         out[i] = {
           line,
@@ -1017,7 +1018,7 @@ export function placeLines(lines: BankLine[], ctx: MatchContext): { line: BankLi
             to: run[run.length - 1].receivedOn,
             overShortCents: hit.diff,
             why:
-              `The counter paying in the register's ${run.length === 1 ? "day" : `${run.length} days`} ${run[0].receivedOn}${run.length > 1 ? ` to ${run[run.length - 1].receivedOn}` : ""} (cash and cheques, ${money(sum)})` +
+              `The counter paying in the register's ${run.length === 1 ? "day" : `${run.length} days`} ${run[0].receivedOn}${run.length > 1 ? ` to ${run[run.length - 1].receivedOn}` : ""} (cash and cheques, ${money(runSum)})` +
               (hit.diff === 0 ? ", to the cent. The statement confirms those receipts; nothing new is banked." : `, ${money(hit.diff)} ${hit.diff > 0 ? "over" : "short"} — booked as cash over and short.`),
           },
         };
