@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/db";
 import { getSettings, type Settings } from "./settings";
-import { judgeFeed, keyDaysLeft, keyExpirySays, missingDays, mtfPull, MTF_QUIET_DAYS, type FeedState } from "./feed-rules";
+import { judgeFeed, keyAgeSays, missingDays, mtfPull, MTF_QUIET_DAYS, type FeedState } from "./feed-rules";
 
 /**
  * Is everything arriving?
@@ -276,7 +276,7 @@ async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds
       const { testMtf } = await import("./mtf");
       probe = await withTimeout(testMtf().then((x) => ({ ok: x.ok, says: x.message })), 60_000, { ok: false, says: "The facilitator's tool did not answer within a minute." });
     }
-    const keyNote = keyExpirySays(keyDaysLeft(s.mtf_key_set_on || null, today));
+    const keyNote = keyAgeSays(hasKey, s.mtf_key_set_on || null, today);
     const pull = mtfPull({ lastOk: s.mtf_last_ok || null, lastFailed: s.mtf_last_failed || null, lastResult: s.mtf_last_result || null, newestPaymentOn: lastAt, now });
     feeds.push({
       key: "mtf",

@@ -224,7 +224,7 @@ describe("what the pull's sentence says, branch by branch", () => {
 });
 
 /* What the feed's own row says of the key, in the one place a person reads it. Dates are chosen against `day(17)`, which is 18 October. */
-describe("the facilitator feed says what the key has left, and that it has run out", () => {
+describe("the facilitator feed says what the key has left, that it has run out, and when nobody knows", () => {
   const detailWithKey = async (keySetOn: string) => {
     await setSetting("mtf_key_set_on", keySetOn);
     return (await mtf(day(17))).detail;
@@ -236,12 +236,38 @@ describe("the facilitator feed says what the key has left, and that it has run o
 
   test("REGRESSION: a key that has run out says so, and no sentence reads as a negative deadline", async () => {
     const detail = await detailWithKey("2026-06-01");
-    assert.match(detail, /The API key was stored 139 days ago and CMS ends a key 90 days after it is made, so it has run out; a new one has to be made at CMS and stored\.$/);
+    assert.match(detail, /The API key is dated 139 days ago and CMS ends a key 90 days after it is made, so it has run out; a new one has to be made at CMS and stored on the Connections page\.$/);
     assert.doesNotMatch(detail, /expires in/);
   });
 
-  test("a key with more than two weeks left, or none stored, adds nothing", async () => {
-    assert.doesNotMatch(await detailWithKey("2026-10-01"), /API key/);
-    assert.doesNotMatch(await detailWithKey(""), /API key/);
+  test("a key with more than two weeks left says nothing about its age", async () => {
+    const detail = await detailWithKey("2026-10-01");
+    assert.doesNotMatch(detail, /API key/);
+    assert.doesNotMatch(detail, /not on record/);
+  });
+
+  /* Found 7 October 2026: the live site holds a key and no day for it. The test that stood here asserted that this said nothing,
+     which was the fault written down as intended. */
+  test("REGRESSION: a key is stored and the day it was made is not on record, and the feed says it cannot count, and what settles it", async () => {
+    const detail = await detailWithKey("");
+    assert.match(detail, /The day this key was made is not on record, so the site cannot say how long it has left\./);
+    assert.match(detail, /Enter the day on the Connections page, or make a new key at CMS and store it there, which records the day\.$/);
+    assert.doesNotMatch(detail, /expires in|run out/);
+  });
+
+  test("a day on record that is not a day, or has not come, is said to be unmeasured and is not counted from", async () => {
+    for (const bad of ["not a date", "2026-02-30", "2026-10-19"]) {
+      assert.match(await detailWithKey(bad), /The day this key was made is not on record/, `for ${bad}`);
+    }
+  });
+
+  test("with no key stored there is no age to say, whatever day is left on record", async () => {
+    await setSetting("mtf_key_set_on", "2026-07-26");
+    await setSetting("mtf_api_key_enc", "");
+    try {
+      assert.match((await mtf(day(17))).detail, /^No facilitator key is stored, so nothing is pulled\.$/);
+    } finally {
+      await setSetting("mtf_api_key_enc", "not-a-real-key");
+    }
   });
 });

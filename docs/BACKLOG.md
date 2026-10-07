@@ -1287,6 +1287,17 @@ place, and an arithmetic check before anything is stored.
     that did not). This session cannot read that page (a read-deny on the remits folder). **Not built:** recording a
     failure of `applyKey()` when a pull is run on its own (it hands its message back to whoever called it, and
     only the daily cycle records it, at the end), and a history of failures.
+    **Follow-up on the key's age, 7 October (committed, not deployed; the three lines and the pre-flight are in
+    OPEN-ITEMS):** the live key has no day on record (`mtf_key_set_on` is empty), so the old warning, which printed only
+    in the last 14 days and only with a day to count from, could never print. New `keyAgeSays` in `feed-rules.ts` puts
+    "the day this key was made is not on record" in the feed's sentence when a key is stored and no usable day is; the
+    MTF card on the Connections page has a "Day this key was made" box with a check, and shows whenever a key is
+    stored; `keyDaysLeft` now returns null for a day that does not exist or has not come yet. **For the cloud session,
+    on the remits-side MTF page:** `mtfStatus().keyDaysLeft` is null in those cases now; say "not on record" there as
+    `keyAgeSays` does. **Q for him, not yet asked (it goes in the report):** the day he made the facilitator key at CMS,
+    or whether the portal shows it; if neither is known, make a new key and store it on the Connections page (it
+    cancels the old one, so choose a time when a missed pull does not matter). **Not built:** an end date guessed from
+    the date of the stamp or of the newest payment.
   - **A3-5** `alerts.ts` near lines 692-702: the monthly-checklist alert links "See the list" to `/money`; the list is
     on `/expected`.
     Checked 7 October (the site's own `alerts()`, read-only): live on 5 and 7 October, "September 2026: 1 thing still

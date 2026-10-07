@@ -23,7 +23,13 @@ export default async function ConnectionsPage({ searchParams }: { searchParams: 
     if (!conn) redirect("/settings/connections?error=" + encodeURIComponent("Unknown connection."));
 
     // Plain fields first: these save even when no new key is being pasted, so a folder or
-    // payee ID can be corrected without re-entering the credential.
+    // payee ID can be corrected without re-entering the credential. Every field is checked
+    // before any is saved, so a bad entry does not leave the rest of the form half saved.
+    for (const f of conn.fields) {
+      const v = fd.get(f.key);
+      const bad = typeof v === "string" ? f.check?.(v.trim()) : null;
+      if (bad) redirect("/settings/connections?error=" + encodeURIComponent(bad));
+    }
     for (const f of conn.fields) {
       const v = fd.get(f.key);
       if (typeof v === "string") await setSetting(f.key as SettingKey, v.trim());

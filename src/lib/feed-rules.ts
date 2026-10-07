@@ -88,13 +88,15 @@ export function mtfPull(a: { lastOk: string | null; lastFailed: string | null; l
 export const MTF_KEY_LIFE_DAYS = 90;
 
 /**
- * How long the stored key has left.
+ * How long the stored key has left, counted from the day on record for it.
  *
  * CMS expires MTF API keys 90 days after generation and gives no notice. A scheduled pull would
- * simply start failing. Counted from when the key was pasted in, which is the closest date we
- * have — if it was generated some days earlier, the real deadline is earlier still, so this
- * errs toward warning too early rather than too late. Zero is the day it lapses; below zero it
- * already has.
+ * simply start failing. The day on record is the day the key was pasted in, unless a day was
+ * entered for it by hand. A key pasted in some days after it was made has a real deadline
+ * earlier than this count says, so the count errs late by those days, not early; it is right to
+ * the day when the key is stored as it is made. Zero is the day it lapses; below zero it already
+ * has. No day on record, one that is not a date, one that does not exist (30 February), or one
+ * that has not come yet is null: the key's age has not been measured, and callers say so.
  */
 export function keyDaysLeft(setOn: string | null, today = new Date().toISOString().slice(0, 10)): number | null {
   const m = setOn ? /^\d{4}-\d{2}-\d{2}/.exec(setOn) : null;
@@ -102,7 +104,20 @@ export function keyDaysLeft(setOn: string | null, today = new Date().toISOString
   const from = Date.parse(`${m[0]}T00:00:00Z`);
   const to = Date.parse(`${today}T00:00:00Z`);
   if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  if (new Date(from).toISOString().slice(0, 10) !== m[0] || from > to) return null;
   return MTF_KEY_LIFE_DAYS - Math.floor((to - from) / 86_400_000);
+}
+
+/**
+ * What to say about a day typed in for the key, before it is saved: nothing when it is empty (that
+ * clears the record) or a usable day, and a plain instruction when it is not. The judge is
+ * keyDaysLeft, the same function the feed reads it with, so a day this accepts is a day the feed
+ * can count from, and one it refuses is one the feed would have called not on record.
+ */
+export function keyMadeOnProblem(typed: string, today?: string): string | null {
+  if (typed === "") return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(typed) && keyDaysLeft(typed, today) !== null) return null;
+  return "Write the day the key was made as year-month-day, for example 2026-01-31. It has to be a day that exists and has already come.";
 }
 
 /**
@@ -114,5 +129,21 @@ export function keyExpirySays(left: number | null): string | null {
   if (left === null || left > 14) return null;
   if (left > 0) return `The API key expires in ${left} ${left === 1 ? "day" : "days"}.`;
   if (left === 0) return "The API key expires today.";
-  return `The API key was stored ${MTF_KEY_LIFE_DAYS - left} days ago and CMS ends a key ${MTF_KEY_LIFE_DAYS} days after it is made, so it has run out; a new one has to be made at CMS and stored.`;
+  return `The API key is dated ${MTF_KEY_LIFE_DAYS - left} days ago and CMS ends a key ${MTF_KEY_LIFE_DAYS} days after it is made, so it has run out; a new one has to be made at CMS and stored on the Connections page.`;
+}
+
+/**
+ * What the facilitator feed says of its key's age. A key is stored and no usable day is on record
+ * for it: its age has never been measured, which is not the same as a long time left, and the
+ * feed says so and names what settles it. Both acts named are on the Connections page, which shows
+ * the MTF card whenever a key is stored. Without a key there is no age to say; the feed has its own
+ * sentence for that.
+ */
+export function keyAgeSays(hasKey: boolean, setOn: string | null, today?: string): string | null {
+  if (!hasKey) return null;
+  const left = keyDaysLeft(setOn, today);
+  if (left === null) {
+    return `The day this key was made is not on record, so the site cannot say how long it has left. CMS ends a key ${MTF_KEY_LIFE_DAYS} days after it is made and gives no warning. Enter the day on the Connections page, or make a new key at CMS and store it there, which records the day.`;
+  }
+  return keyExpirySays(left);
 }

@@ -37,12 +37,14 @@ describe("countFiles", () => {
   });
 });
 
-import { keyDaysLeft, keyExpirySays } from "../src/lib/feed-rules";
+import { keyAgeSays, keyDaysLeft, keyExpirySays, keyMadeOnProblem } from "../src/lib/feed-rules";
 
 /**
  * CMS expires MTF keys 90 days after generation with no notice, so a scheduled pull would just
- * start failing. The count is deliberately measured from when the key was pasted in — if it was
- * generated earlier the real deadline is earlier, so this warns too early rather than too late.
+ * start failing. The count runs from the day on record for the key, which is the day it was pasted
+ * in unless a day was entered by hand. A key pasted in some days after it was made really ends
+ * sooner than the count says, so the count errs late by those days, not early (an earlier note here
+ * said the opposite).
  */
 describe("keyDaysLeft", () => {
   test("counts down from 90 days", () => {
@@ -62,6 +64,13 @@ describe("keyDaysLeft", () => {
     assert.equal(keyDaysLeft(null), null);
     assert.equal(keyDaysLeft(""), null);
     assert.equal(keyDaysLeft("not a date"), null);
+  });
+
+  test("a day that does not exist, or that has not come yet, is not a day to count from", () => {
+    assert.equal(keyDaysLeft("2026-02-30", "2026-03-10"), null);
+    assert.equal(keyDaysLeft("2026-13-01", "2026-03-10"), null);
+    assert.equal(keyDaysLeft("2026-03-11", "2026-03-10"), null);
+    assert.equal(keyDaysLeft("2026-03-10", "2026-03-10"), 90, "the day itself is a day to count from");
   });
 });
 
@@ -96,8 +105,64 @@ describe("keyExpirySays", () => {
   test("REGRESSION: a key that has run out says so, and prints no negative count", () => {
     const says = keyExpirySays(-7)!;
     assert.match(says, /has run out/);
-    assert.match(says, /stored 97 days ago/);
+    assert.match(says, /dated 97 days ago/, "dated, not stored: the day on record may have been written in by hand");
+    assert.match(says, /stored on the Connections page/);
     assert.doesNotMatch(says, /expires in/);
     assert.doesNotMatch(says, /-\d/);
+  });
+});
+
+/**
+ * Found 7 October 2026 reading the live settings: a key is stored and no day is on record for it (it was stored before the site
+ * kept the day, or by a route that did not), so the key's sentence, which prints only in the last two weeks, could never print, and
+ * the feed said nothing of a key whose age nobody had measured. A key in use with no day on record is "never measured", and says so.
+ */
+describe("keyAgeSays", () => {
+  const today = "2026-10-18";
+
+  test("with no key stored there is no age to say, whatever the day on record", () => {
+    assert.equal(keyAgeSays(false, null, today), null);
+    assert.equal(keyAgeSays(false, "2026-10-01", today), null);
+  });
+
+  test("a key with no usable day on record says so, and names both ways to settle it", () => {
+    for (const setOn of [null, "", "not a date", "2026-02-30", "2026-10-19"]) {
+      const says = keyAgeSays(true, setOn, today)!;
+      assert.match(says, /^The day this key was made is not on record, so the site cannot say how long it has left\./, `for ${JSON.stringify(setOn)}`);
+      assert.match(says, /CMS ends a key 90 days after it is made and gives no warning/);
+      assert.match(says, /Enter the day on the Connections page, or make a new key at CMS and store it there, which records the day\.$/);
+    }
+  });
+
+  test("a key with a day on record says nothing until two weeks are left, then what keyExpirySays says", () => {
+    assert.equal(keyAgeSays(true, "2026-10-01", today), null);
+    assert.equal(keyAgeSays(true, "2026-07-26", today), "The API key expires in 6 days.");
+    assert.equal(keyAgeSays(true, "2026-07-20", today), "The API key expires today.");
+    assert.equal(keyAgeSays(true, "2026-06-01", today), keyExpirySays(keyDaysLeft("2026-06-01", today)));
+    assert.match(keyAgeSays(true, "2026-06-01", today)!, /has run out/);
+  });
+
+  test("a stored timestamp counts as its day", () => {
+    assert.equal(keyAgeSays(true, "2026-07-26T10:30:00.000Z", today), "The API key expires in 6 days.");
+  });
+});
+
+/** What may be typed into the "Day this key was made" box. The same function that counts from the day judges it, so the two cannot disagree. */
+describe("keyMadeOnProblem", () => {
+  const today = "2026-10-18";
+
+  test("empty is allowed, because emptying the box clears the record", () => {
+    assert.equal(keyMadeOnProblem("", today), null);
+  });
+
+  test("a real day that has come is allowed, today included", () => {
+    assert.equal(keyMadeOnProblem("2026-08-15", today), null);
+    assert.equal(keyMadeOnProblem("2026-10-18", today), null);
+  });
+
+  test("anything else is refused with one instruction that shows the shape", () => {
+    for (const typed of ["yesterday", "08/15/2026", "2026-8-15", "2026-02-30", "2026-13-01", "2026-10-19", "2026-08-15T10:00:00Z", " 2026-08-15"]) {
+      assert.match(keyMadeOnProblem(typed, today) ?? "", /^Write the day the key was made as year-month-day, for example 2026-01-31\./, `for ${JSON.stringify(typed)}`);
+    }
   });
 });

@@ -8,6 +8,28 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after `2de8157`; NOT deployed or pushed): the facilitator (MTF) key's age
+  was never recorded on the live site, so the feed said nothing of it; it now says "not on record", and the
+  Connections page takes the day.** The live key has no day on record (read only, no values printed), so the old
+  14-day warning could never print. (1) `src/lib/feed-rules.ts`: new `keyAgeSays(hasKey, setOn, today?)` says the
+  age is not on record when a key is stored and no usable day is; new `keyMadeOnProblem` checks a typed day;
+  `keyDaysLeft` now returns null for a day that does not exist (30 February) or has not come yet; a lapsed key reads
+  "dated N days ago". (2) `src/lib/feeds.ts` uses `keyAgeSays`. (3) `src/lib/connections.ts`: the MTF connection has
+  a "Day this key was made" field with a `check`, and its card shows whenever a key is stored (it showed only while
+  `feature_reimbursement` was "yes"). (4) `src/app/(app)/settings/connections/page.tsx`: `save()` runs every field's
+  `check` before it saves any. **For the cloud session, who owns the remits-side MTF page (this session cannot read
+  it):** `mtfStatus()` keeps its shape, but its `keyDaysLeft` is now null in more cases (no day on record, a day that
+  does not exist, a day that has not come), so if that page prints it, say "not on record" for null as `keyAgeSays`
+  does, rather than saying nothing or counting for itself. `mtfStatus()` has one other caller outside the remits
+  folder, `remittanceDir()` in `src/lib/claim-payments.ts`, which reads only `.dir`; the register first said it had
+  none, which was wrong (found by grep on 7 October and corrected there; neither commit message carried it). **Files
+  changed on `feature/compliance`, so say so on your pull request before editing one:** `src/lib/feed-rules.ts`,
+  `src/lib/feeds.ts`, `src/lib/connections.ts` and `src/app/(app)/settings/connections/page.tsx` (all four CRLF),
+  `tests/mtf.test.ts` (CRLF), `tests/mtf-pull.test.ts`, `tests/connections-key-date.test.ts` (new),
+  `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`. **Read by:** its author only, no second reader. **Asked of him, in the
+  report, not of you:** the day he made the key at CMS, or whether the portal shows it; recording that day live is a
+  settings write that needs his word. Nothing is asked of you beyond the note.
+
 - **7 October, pharmacy session (the commit after `1b65ea1`; NOT deployed or pushed): follow-ups to the facilitator
   (MTF) feed's fix, from a second Claude's cold read of it.** (1) `downloadMtf` in `src/lib/mtf.ts`, which a pull run
   on its own goes through (the second reader found the remits-side MTF page calling it; this session cannot read that

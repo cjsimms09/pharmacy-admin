@@ -1,5 +1,6 @@
 import "server-only";
 import { decryptText, encryptText } from "./crypto";
+import { keyMadeOnProblem } from "./feed-rules";
 import { getSettings, setSetting, type SettingKey } from "./settings";
 
 /**
@@ -25,8 +26,8 @@ export type Connection = {
   secondSecretLabel?: string;
   /** Where the rest of the setup for this service lives, when it is not on this page. */
   more?: { href: string; label: string };
-  /** Plain (non-secret) settings that belong with it. */
-  fields: { key: SettingKey; label: string; hint?: string; placeholder?: string }[];
+  /** Plain (non-secret) settings that belong with it. `check` refuses a bad entry before anything on the form is saved. */
+  fields: { key: SettingKey; label: string; hint?: string; placeholder?: string; check?: (v: string) => string | null }[];
   /** Rejects an obviously wrong paste before it is stored. */
   validate?: (v: string) => string | null;
 };
@@ -107,6 +108,15 @@ export const CONNECTIONS: Connection[] = [
       "cancels the previous one, and the portal will not show it again.",
     secretKey: "mtf_api_key_enc",
     fields: [
+      {
+        key: "mtf_key_set_on",
+        label: "Day this key was made",
+        hint:
+          "CMS ends a key 90 days after it is made, and the site counts from this day. Storing a new key above fills it in with " +
+          "today; write it here only for a key that was stored before the site kept the day.",
+        placeholder: "year-month-day",
+        check: keyMadeOnProblem,
+      },
       { key: "mtf_payee_id", label: "Payee ID", hint: "From Developer Tools → your remit profile.", placeholder: "" },
       { key: "mtf_cli_path", label: "Path to mtf-cli", hint: "Leave blank if it is on the system PATH.", placeholder: "mtf-cli" },
       { key: "mtf_download_dir", label: "Download folder", hint: "Where 835 files land. Defaults to data/remits/mtf.", placeholder: "data/remits/mtf" },
@@ -116,10 +126,11 @@ export const CONNECTIONS: Connection[] = [
 
 export async function connectionState() {
   const s = await getSettings();
-  // The MTF key belongs to the reimbursement work; no reason to show it while that is off.
-  // MTF belongs to the reimbursement work and hides with it. Everything else is compliance and
-  // stays: a key you cannot find a home for is a key that ends up in a text file.
-  const shown = s.feature_reimbursement === "yes" ? CONNECTIONS : CONNECTIONS.filter((c) => c.id !== "mtf");
+  // MTF belongs to the reimbursement work and hides with it, unless a key is stored: the feed's
+  // sentence about that key's age sends him here, so the card has to be here. Everything else is
+  // compliance and stays: a key you cannot find a home for is a key that ends up in a text file.
+  const mtfWanted = s.feature_reimbursement === "yes" || Boolean(s.mtf_api_key_enc);
+  const shown = mtfWanted ? CONNECTIONS : CONNECTIONS.filter((c) => c.id !== "mtf");
   return shown.map((c) => ({
     ...c,
     hint: hintFor(s[c.secretKey]),
