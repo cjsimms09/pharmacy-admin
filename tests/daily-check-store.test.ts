@@ -89,6 +89,23 @@ describe("the morning check, gathered", () => {
     assert.match(banked.observed, /no remittance has been read yet/);
   });
 
+  test("a mailbox that has never been swept says so, and does not say NaN; a sweep two hours ago reads as hours and passes", async () => {
+    const mailbox = async () => (await dailyCheck()).checks.find((x) => x.key === "mailbox-swept")!;
+    const never = await mailbox();
+    assert.equal(never.ok, false);
+    assert.equal(never.observed, "never swept");
+    assert.equal(never.fingerprint, "never|clean|-|-");
+    try {
+      await db.insert(schema.settings).values({ key: "mail_last_sweep", value: new Date(Date.now() - 2 * 3_600_000).toISOString() });
+      const recent = await mailbox();
+      assert.equal(recent.ok, true);
+      assert.equal(recent.observed, "last swept 2 hours ago");
+      assert.equal(recent.fingerprint, "recent|clean|0|-");
+    } finally {
+      await db.delete(schema.settings).where(eq(schema.settings.key, "mail_last_sweep"));
+    }
+  });
+
   test("short invoices are counted, named largest first, and the link finds the first", async () => {
     const invoice = (id: string, supplier: string, invoiceDate: string, linesShortCents: number | null) =>
       db.insert(schema.supplierInvoices).values({ id, documentId: `doc-${id}`, supplier, invoiceDate, linesShortCents });

@@ -38,7 +38,14 @@ correct things meeting. 12. **What did I not check, and have I said so?**
 channels for a dollar that can fall between them; look at the newest import, remits and expenses for
 anomalies; re-run the three-line test on every open finding; ask *what would he be most angry about
 if it were wrong and I had not caught it*; and report at least one concrete observation **or one
-area confirmed clean**.
+area confirmed clean**. On the pharmacy computer, also run
+`npx tsx --tsconfig tsconfig.script.json scripts/wrong-alarms.ts`: every "This is wrong" he has
+pressed on the morning check is a report that the site told him something untrue, and it stays open
+until a session has found the cause, fixed the check and recorded what it did with that script's
+`answer <id> <text>`. A cloud session cannot read the database and leaves it to the pharmacy
+session. If the script says there is no `check_marks` table, the migration that adds it has not been
+applied to that database: the press is not deployed there yet, or the launcher started the site
+after its migration failed.
 
 **4. Nothing ships without the means to correct it.** On the same screen: the source of every
 number, a one-press "this is wrong / this is settled / override", an override that survives the next

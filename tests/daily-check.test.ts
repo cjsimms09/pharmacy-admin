@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { runDailyCheck, summarise, checkCouldNotRun, type Facts, type History } from "../src/lib/daily-check";
+import { runDailyCheck, summarise, sortMarks, wrongAlarmsSaid, checkCouldNotRun, type Check, type Facts, type History, type Mark } from "../src/lib/daily-check";
 import { isRetired } from "../src/lib/retired";
 
 /** A day on which everything is as it should be. Each test spoils exactly one thing. */
@@ -521,6 +521,8 @@ describe("a short invoice is named, so it can be found in a drawer", () => {
     );
     assert.equal(c.href, "/inventory/invoices?supplier=Invented+Wholesale+Co&on=2026-10-06", "the link goes to the one that costs the most");
     assert.equal(c.action, "See the invoices");
+    assert.match(c.reads, /Up to 3 are named, the largest shortfall first\./, "what the line says it names is what it names");
+    assert.equal((c.fingerprint!.match(/@/g) ?? []).length, 5, "the fingerprint tells apart the five the store gathers, though the sentence names three");
   });
 
   test("an invoice whose supplier or date was never captured says so rather than naming nobody", () => {
@@ -762,7 +764,13 @@ describe("a morning check that could not run says so, and does not read as all c
     assert.equal(r.checks.length, 1);
     assert.equal(r.failing, 1);
     assert.equal(r.ranAt, "2026-10-07T12:00:00.000Z");
+    assert.deepEqual(r.open, r.checks, "the card is built from the open checks, so it must be on the card");
+    assert.deepEqual(r.setAside, []);
+    assert.deepEqual(r.wrongAlarms, { notMeasured: "check did not run" }, "the count of wrong alarms was never tried, and is not a count of none");
+    assert.match(wrongAlarmsSaid(r.wrongAlarms)!, /not measured just now, because the morning check could not run\./);
     const c = r.checks[0];
+    assert.equal(c.key, "check-ran");
+    assert.equal(c.fingerprint, null, "no fingerprint, so no press can ever set it aside");
     assert.equal(c.ok, false);
     assert.equal(c.what, "The morning check runs");
     assert.match(c.observed, /^not measured: the check could not run \(no such table: invented_table\)/);
@@ -793,6 +801,419 @@ describe("a morning check that could not run says so, and does not read as all c
     const src = fs.readFileSync("src/app/(app)/dashboard/page.tsx", "utf8");
     assert.match(src, /dailyCheck\(\)\.catch\(\(e\) => checkCouldNotRun\(e\)\)/);
     assert.doesNotMatch(src, /checks: \[\], failing: 0/, "an empty list with none failing is what a check that never ran looked like");
-    assert.match(src, /health\.checks\.filter\(\(c\) => !c\.ok\)/, "the card is built from the failing checks, which now include this one");
+    assert.match(src, /for \(const c of health\.open\)/, "the card is built from the open checks, which include this one");
+  });
+});
+
+/**
+ * What he can say about a finding (rule 4 of CLAUDE.md).
+ *
+ * A press on a line of the card is kept against the check's key and what the finding found (its fingerprint). These pin the two things a
+ * press stands on: that every check has a name that is never reworded, and that its fingerprint is the finding. It moves when the
+ * things found move, so a press never covers a finding he has not seen; it does not move with the totals the finding is read against
+ * (an ordinary delivery, a routine import), so a press survives them; and it moves with the clock only where the finding is worse for
+ * the time passing (whole days since a sweep, 30-day steps of a statement's age). What no test can fail is whether a line's `reads`
+ * sentence is true of the code: that is read by a person, which is why the line carries it on the screen.
+ */
+const KEYS = [
+  "inbox-rows",
+  "invoice-documents",
+  "rebate-statement",
+  "invoices-short",
+  "mailbox-swept",
+  "booked-no-document",
+  "offsets-dated-paid",
+  "doubled-ladders",
+  "payments-counted-twice",
+  "remittances-banked",
+];
+
+describe("every check can be named, says what it reads, and can be set aside", () => {
+  test("ten keys that must not be reworded, each with a sentence on what it reads, a page to look at and a fingerprint", () => {
+    const checks = runDailyCheck(wellRun);
+    assert.deepEqual(checks.map((c) => c.key).sort(), [...KEYS].sort());
+    for (const c of checks) {
+      assert.ok(c.reads.length > 60, `${c.key} says nothing of what it reads`);
+      assert.match(c.href, /^\/[a-z]/, `${c.key} has no page to look at`);
+      assert.ok(c.fingerprint !== null && c.fingerprint.length > 0, `${c.key} cannot be set aside`);
+    }
+  });
+});
+
+const byKey = (key: string, f: Partial<Facts>): Check => {
+  const c = runDailyCheck({ ...wellRun, ...f }).find((x) => x.key === key);
+  assert.ok(c, `no check keyed ${key}`);
+  return c;
+};
+
+const LATER: Partial<Facts> = { today: "2026-09-19", now: "2026-09-19T17:00:00.000Z" };
+const REMIT = { payer: "Invented Payer B", remitOn: "2026-09-20", amountCents: 150_000, tie: null as Tie, history: { state: "reaches past", through: "2026-09-30" } as History };
+const unbanked = (r: Partial<typeof REMIT>): Partial<Facts> => {
+  const x = { ...REMIT, ...r };
+  return { remittancesNotBanked: 1, remittancesNotBankedCents: x.amountCents, unbankedRemittances: [x] };
+};
+const SHORT_ONE: Partial<Facts> = {
+  invoicesShort: 1,
+  invoicesShortCents: 2031,
+  shortInvoices: [{ supplier: "Invented Wholesale Co", invoiceOn: "2026-10-06", shortCents: 2031 }],
+};
+
+type Case = {
+  key: string;
+  fail: Partial<Facts>;
+  later: Partial<Facts>;
+  /** Facts that move without the finding moving: a press made on the base finding must still cover these. */
+  same?: { why: string; facts: Partial<Facts> }[];
+  changed: { why: string; facts: Partial<Facts> }[];
+};
+
+const CASES: Case[] = [
+  {
+    key: "inbox-rows",
+    fail: { inboxRows: 200 },
+    later: LATER,
+    // The finding is the surplus (20 rows over their deliveries), not the totals: an ordinary delivery adds a row and an arrival together.
+    same: [{ why: "an ordinary delivery adds a row and an arrival together", facts: { inboxRows: 201, inboxArrivals: 181 } }],
+    changed: [
+      { why: "one more row", facts: { inboxRows: 201 } },
+      { why: "fewer arrivals for the same rows", facts: { inboxArrivals: 170 } },
+    ],
+  },
+  {
+    key: "invoice-documents",
+    fail: { invoiceDocumentRows: 70 },
+    later: LATER,
+    same: [{ why: "a new invoice adds a record and a file together", facts: { invoiceDocumentRows: 71, invoiceDocumentFiles: 65 } }],
+    changed: [{ why: "one more duplicate", facts: { invoiceDocumentRows: 71 } }],
+  },
+  {
+    key: "rebate-statement",
+    fail: { standingRebatePeriodTo: "2026-06-01" },
+    later: LATER,
+    // 2026-06-01 to 2026-09-17 is 108 days, the third 30-day step; the third step ends on the 119th day and the fourth begins on the 120th.
+    same: [{ why: "the same statement on the last day of its 30-day step", facts: { today: "2026-09-28" } }],
+    changed: [
+      { why: "a different, still old statement is standing", facts: { standingRebatePeriodTo: "2026-06-30" } },
+      { why: "no statement standing is not an old one", facts: { standingRebatePeriodTo: null } },
+      { why: "the same statement on the first day of its next 30-day step", facts: { today: "2026-09-29" } },
+    ],
+  },
+  {
+    key: "invoices-short",
+    fail: SHORT_ONE,
+    later: LATER,
+    changed: [
+      {
+        why: "a second invoice is short",
+        facts: {
+          invoicesShort: 2,
+          invoicesShortCents: 2531,
+          shortInvoices: [...SHORT_ONE.shortInvoices!, { supplier: "Other Invented Supply", invoiceOn: "2026-10-02", shortCents: 500 }],
+        },
+      },
+      { why: "the same total on a different invoice", facts: { shortInvoices: [{ supplier: "Other Invented Supply", invoiceOn: "2026-10-06", shortCents: 2031 }] } },
+      { why: "the same invoice short by another amount", facts: { invoicesShortCents: 2100, shortInvoices: [{ supplier: "Invented Wholesale Co", invoiceOn: "2026-10-06", shortCents: 2100 }] } },
+    ],
+  },
+  {
+    key: "mailbox-swept",
+    fail: { lastSweptAt: "2026-09-17T05:00:00.000Z" },
+    later: { now: "2026-09-17T22:00:00.000Z" },
+    // 12 hours since the sweep at the base reading: the line is the same through the 23rd hour, and another from the 24th.
+    same: [{ why: "the same sweep seen late in the same day of silence", facts: { now: "2026-09-18T04:00:00.000Z" } }],
+    changed: [
+      { why: "the same sweep a day and more later is a longer silence", facts: { now: "2026-09-18T17:00:00.000Z" } },
+      { why: "the same sweep exactly one day on", facts: { now: "2026-09-18T05:00:00.000Z" } },
+      { why: "the last run ended with an error", facts: { lastSweepResult: "0 stored, 1 error(s)" } },
+      { why: "never swept is not a sweep gone stale", facts: { lastSweptAt: null } },
+    ],
+  },
+  { key: "booked-no-document", fail: { bookedWithNoDocument: 2 }, later: LATER, changed: [{ why: "one more", facts: { bookedWithNoDocument: 3 } }] },
+  {
+    key: "offsets-dated-paid",
+    fail: { offsetsWithPaymentDates: 1, offsetsWithPaymentDatesCents: 5000 },
+    later: LATER,
+    changed: [
+      { why: "another offset", facts: { offsetsWithPaymentDates: 2, offsetsWithPaymentDatesCents: 5000 } },
+      { why: "the same offset for more money", facts: { offsetsWithPaymentDatesCents: 7000 } },
+    ],
+  },
+  { key: "doubled-ladders", fail: { doubledRebateLadders: 1 }, later: LATER, changed: [{ why: "a second basket", facts: { doubledRebateLadders: 2 } }] },
+  {
+    key: "payments-counted-twice",
+    fail: { paymentsCountedTwice: 3, paymentsCountedTwiceCents: 4500 },
+    later: LATER,
+    changed: [
+      { why: "one more payment", facts: { paymentsCountedTwice: 4 } },
+      { why: "the same payments for more money", facts: { paymentsCountedTwiceCents: 4600 } },
+    ],
+  },
+  {
+    key: "remittances-banked",
+    fail: unbanked({}),
+    // The day the export was read, the newest day it holds and the history's reach all move with every export: none is the finding.
+    later: { ...LATER, remittanceRegisterReadOn: "2026-09-19", remittanceRegisterThrough: "2026-10-05", ...unbanked({ history: { state: "reaches past", through: "2026-10-05" } }) },
+    changed: [
+      { why: "another amount", facts: unbanked({ amountCents: 150_100 }) },
+      { why: "another advice date", facts: unbanked({ remitOn: "2026-09-21" }) },
+      { why: "another payer", facts: unbanked({ payer: "Invented Payer C" }) },
+      { why: "an amount in the window now stands near it", facts: unbanked({ tie: "amount in window" }) },
+      { why: "the history now ends too soon to say", facts: unbanked({ history: { state: "ends too soon", through: "2026-09-22" } }) },
+      { why: "the history has a gap in a month", facts: unbanked({ history: { state: "has a gap", month: "2026-09" } }) },
+      { why: "there is no history to look in", facts: unbanked({ history: { state: "none" } }) },
+      {
+        why: "a second remittance is not banked",
+        facts: { remittancesNotBanked: 2, remittancesNotBankedCents: 170_000, unbankedRemittances: [REMIT, { ...REMIT, payer: "Invented Payer D", amountCents: 20_000 }] },
+      },
+      {
+        why: "an empty register is not a register with nothing unbanked",
+        facts: { remittanceRegisterRows: 0, remittancePaymentsPosted: 12, remittancesNotBanked: 0, remittancesNotBankedCents: 0, unbankedRemittances: [] },
+      },
+    ],
+  },
+];
+
+describe("a finding's fingerprint is the finding: it moves when what was found moves, not with the totals around it, and with the clock only in whole days or 30-day steps", () => {
+  test("there is a case for every check, so a check added later cannot go without one", () => {
+    assert.deepEqual(CASES.map((c) => c.key).sort(), [...KEYS].sort());
+  });
+  for (const c of CASES) {
+    test(`${c.key}: the same finding read later, or among larger totals, has the same fingerprint, and each change to what was found has another`, () => {
+      const base = byKey(c.key, c.fail);
+      assert.equal(base.ok, false, "the fixture must fail, or this proves nothing");
+      assert.ok(base.fingerprint !== null);
+      const later = byKey(c.key, { ...c.fail, ...c.later });
+      assert.equal(later.ok, false, "still failing later");
+      assert.equal(later.fingerprint, base.fingerprint, "only the clock moved, so a press made this morning must still cover it");
+      for (const s of c.same ?? []) {
+        const unmoved = byKey(c.key, { ...c.fail, ...s.facts });
+        assert.equal(unmoved.ok, false, `${s.why}: the fixture must still fail`);
+        assert.equal(unmoved.fingerprint, base.fingerprint, `${s.why}: what was found has not moved, so a press made on it must still cover it`);
+      }
+      for (const ch of c.changed) {
+        const other = byKey(c.key, { ...c.fail, ...ch.facts });
+        assert.equal(other.ok, false, `${ch.why}: the fixture must still fail`);
+        assert.notEqual(other.fingerprint, base.fingerprint, `${ch.why}: a press made on the first finding must not cover this one`);
+      }
+    });
+  }
+
+  test("no fingerprint carries a payment number or any run of nine digits: it is kept in a table", () => {
+    for (const c of CASES) assert.doesNotMatch(byKey(c.key, c.fail).fingerprint!, /\d{9,}/, c.key);
+  });
+});
+
+describe("the mailbox line's fingerprint tells one sweep error from another, and never holds what the error said", () => {
+  const ended = (summary: string, error: string): Partial<Facts> => ({ lastSweptAt: wellRun.lastSweptAt, lastSweepResult: `${summary} — ${error}` });
+  const fpOf = (error: string, summary = "3 stored, 0 rejected, 0 ignored, 1 error(s)") => byKey("mailbox-swept", ended(summary, error)).fingerprint!;
+
+  test("the same error with other numbers in it, or in a different summary, is one finding; a different error is another", () => {
+    const base = fpOf("could not log in to the mailbox after 3 tries");
+    assert.equal(fpOf("could not log in to the mailbox after 5 tries"), base, "a count inside the error is not a different error");
+    assert.equal(fpOf("could not log in to the mailbox after 3 tries", "9 stored, 2 rejected, 0 ignored, 2 error(s)"), base, "the summary's counts are not the error");
+    assert.notEqual(fpOf("could not read the folder INBOX"), base, "a different error is a different finding, so a press on the first does not cover it");
+  });
+
+  test("it is kept for good, so what the error said (an address, a server) is not in it", () => {
+    const f = fpOf("login refused for invented.sender@example.test by mail.invented.example");
+    assert.doesNotMatch(f, /invented|example|@|login/i);
+    assert.match(f, /^recent\|error\|0\|[0-9a-f]{8}$/);
+  });
+
+  test("an error that came with no words is still an error, and is not a clean run", () => {
+    const c = byKey("mailbox-swept", { lastSweptAt: wellRun.lastSweptAt, lastSweepResult: "0 stored, 1 error(s)" });
+    assert.equal(c.ok, false);
+    assert.match(c.fingerprint!, /^recent\|error\|0\|[0-9a-f]{8}$/);
+    assert.notEqual(c.fingerprint, byKey("mailbox-swept", {}).fingerprint);
+  });
+});
+
+const failingDay = (): Check[] => runDailyCheck({ ...wellRun, ...SHORT_ONE, lastSweptAt: "2026-09-17T05:00:00.000Z" });
+const named = (checks: Check[], key: string) => checks.find((c) => c.key === key)!;
+const markOf = (c: Check, o: Partial<Mark> = {}): Mark => ({
+  id: `mark-${c.key}`,
+  key: c.key,
+  fingerprint: c.fingerprint ?? "",
+  verdict: "settled",
+  note: null,
+  by: "Invented Owner",
+  at: "2026-09-17T16:00:00.000Z",
+  ...o,
+});
+const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : 1);
+
+describe("what he has said of a finding covers that finding and no other", () => {
+  test("a mark whose facts still hold sets its check aside, and leaves the others open", () => {
+    const checks = failingDay();
+    const r = sortMarks(checks, [markOf(named(checks, "invoices-short"))]);
+    assert.deepEqual(r.open.map((c) => c.key), ["mailbox-swept"]);
+    assert.deepEqual(r.setAside.map((s) => s.check.key), ["invoices-short"]);
+    assert.equal(r.setAside[0].mark.id, "mark-invoices-short");
+    assert.deepEqual(r.toEnd, []);
+  });
+
+  test("when what it found changes the check is open again, and the mark ends as changed", () => {
+    const checks = failingDay();
+    const r = sortMarks(checks, [markOf(named(checks, "invoices-short"), { fingerprint: "1|2031|Invented Wholesale Co@2026-10-05=2031" })]);
+    assert.deepEqual(r.open.map((c) => c.key).sort(), ["invoices-short", "mailbox-swept"]);
+    assert.deepEqual(r.setAside, []);
+    assert.deepEqual(r.toEnd, [{ id: "mark-invoices-short", how: "changed" }]);
+  });
+
+  test("when the check passes the mark ends as passed, and nothing is open", () => {
+    const passing = runDailyCheck(wellRun);
+    const r = sortMarks(passing, [markOf(named(passing, "invoices-short"), { fingerprint: "1|2031|x" })]);
+    assert.deepEqual(r.open, []);
+    assert.deepEqual(r.setAside, []);
+    assert.deepEqual(r.toEnd, [{ id: "mark-invoices-short", how: "passed" }]);
+  });
+
+  test("of two marks on one check the newest speaks, in whatever order they arrive, and the older ends as replaced", () => {
+    const checks = failingDay();
+    const short = named(checks, "invoices-short");
+    const older = markOf(short, { id: "older", verdict: "wrong", at: "2026-09-17T15:00:00.000Z" });
+    const newer = markOf(short, { id: "newer", verdict: "settled", at: "2026-09-17T16:00:00.000Z" });
+    for (const order of [[older, newer], [newer, older]]) {
+      const r = sortMarks(checks, order);
+      assert.equal(r.setAside[0].mark.id, "newer");
+      assert.deepEqual(r.toEnd, [{ id: "older", how: "replaced" }]);
+    }
+  });
+
+  test("a newest mark that no longer fits is not rescued by an older one that does", () => {
+    const checks = failingDay();
+    const short = named(checks, "invoices-short");
+    const older = markOf(short, { id: "older", at: "2026-09-17T15:00:00.000Z" });
+    const newer = markOf(short, { id: "newer", fingerprint: "1|99|elsewhere", at: "2026-09-17T16:00:00.000Z" });
+    const r = sortMarks(checks, [older, newer]);
+    assert.deepEqual(r.setAside, []);
+    assert.ok(r.open.some((c) => c.key === "invoices-short"));
+    assert.deepEqual([...r.toEnd].sort(byId), [{ id: "newer", how: "changed" }, { id: "older", how: "replaced" }]);
+  });
+
+  test("a mark for a check that is not there is left alone", () => {
+    const checks = failingDay();
+    const r = sortMarks(checks, [markOf(named(checks, "invoices-short"), { id: "gone", key: "no-such-check" })]);
+    assert.deepEqual(r.toEnd, []);
+    assert.deepEqual(r.open.map((c) => c.key).sort(), ["invoices-short", "mailbox-swept"]);
+    assert.deepEqual(r.setAside, []);
+  });
+
+  test("two marks for a check that is not there are both left alone, and are not sorted into newer and replaced", () => {
+    const checks = failingDay();
+    const short = named(checks, "invoices-short");
+    const r = sortMarks(checks, [
+      markOf(short, { id: "gone-1", key: "no-such-check", at: "2026-09-17T15:00:00.000Z" }),
+      markOf(short, { id: "gone-2", key: "no-such-check", at: "2026-09-17T16:00:00.000Z" }),
+    ]);
+    assert.deepEqual(r.toEnd, []);
+  });
+
+  test("a finding that cannot be set aside is never covered, whatever a mark says", () => {
+    const ran = checkCouldNotRun("no such table: invented_table").checks;
+    for (const fingerprint of ["", "-", "check-ran"]) {
+      const r = sortMarks(ran, [markOf(ran[0], { fingerprint })]);
+      assert.deepEqual(r.open, ran, `a mark carrying "${fingerprint}" covered a check that could not run`);
+      assert.deepEqual(r.setAside, []);
+    }
+  });
+
+  test("sorting reads the marks and the checks and changes neither", () => {
+    const checks = failingDay();
+    const short = named(checks, "invoices-short");
+    const marks = [markOf(short, { id: "older", at: "2026-09-17T15:00:00.000Z" }), markOf(short, { id: "newer", at: "2026-09-17T16:00:00.000Z" })];
+    const before = JSON.stringify({ checks, marks });
+    sortMarks(checks, marks);
+    assert.equal(JSON.stringify({ checks, marks }), before);
+  });
+});
+
+describe("the line the night stores says how many failing findings are set aside, and is never quieter than the truth", () => {
+  const rule = "Should be: invoices add up to what they say they come to; the mailbox is being swept.";
+
+  test("a set-aside finding is still counted as failing, and said to be set aside", () => {
+    const checks = failingDay();
+    assert.equal(summarise(checks), `2 of 10 failing. ${rule}`);
+    assert.equal(summarise(checks, ["invoices-short"]), `2 of 10 failing (1 set aside). ${rule}`);
+    assert.equal(summarise(checks, ["invoices-short", "mailbox-swept"]), `2 of 10 failing (2 set aside). ${rule}`);
+  });
+
+  test("a key that is not failing is not a set-aside finding, and a day that passes says it passes", () => {
+    assert.equal(summarise(failingDay(), ["inbox-rows"]), `2 of 10 failing. ${rule}`);
+    assert.equal(summarise(runDailyCheck(wellRun), ["invoices-short"]), "All 10 checks pass.");
+  });
+});
+
+describe("how many times he has pressed \"This is wrong\" is said on Today, and not read as none when it could not be read", () => {
+  test("a count that could not be read is said as not measured, with that reason, and shows no number", () => {
+    const said = wrongAlarmsSaid({ notMeasured: "record unreadable" })!;
+    assert.equal(said, "Times you have pressed “This is wrong”: not measured just now, because that record could not be read.");
+    assert.doesNotMatch(said, /\d/);
+  });
+
+  test("a count that was never tried, because the check did not run, says that and not the other", () => {
+    const said = wrongAlarmsSaid({ notMeasured: "check did not run" })!;
+    assert.equal(said, "Times you have pressed “This is wrong”: not measured just now, because the morning check could not run.");
+    assert.doesNotMatch(said, /\d/);
+  });
+
+  test("none pressed is left unsaid, so the line is not on every morning's screen", () => {
+    assert.equal(wrongAlarmsSaid({ total: 0, lastThirtyDays: 0, since: null }), null);
+  });
+
+  test("a count is said with both numbers and the day the first was pressed, in the words the page chooses", () => {
+    const w = { total: 7, lastThirtyDays: 3, since: "2026-10-07T14:00:00.000Z" };
+    assert.match(wrongAlarmsSaid(w)!, /^Times you have pressed “This is wrong”: 3 in the last 30 days, 7 in all since 2026-10-07\. /);
+    assert.match(wrongAlarmsSaid(w, () => "Oct 7, 2026")!, /7 in all since Oct 7, 2026\. /);
+    assert.doesNotMatch(wrongAlarmsSaid({ ...w, since: null })!, /since/);
+  });
+});
+
+describe("the press on the card is wired to its two actions (read from the source files, not run)", () => {
+  const page = fs.readFileSync("src/app/(app)/dashboard/page.tsx", "utf8");
+  const actions = fs.readFileSync("src/app/(app)/_actions/check-marks.ts", "utf8");
+
+  test("each form carries every field its action reads, and the forms exist", () => {
+    for (const field of ["key", "fingerprint", "verdict", "note", "back", "id"]) {
+      assert.ok(actions.includes(`fd.get("${field}")`), `an action does not read ${field}`);
+      assert.ok(page.includes(`name="${field}"`), `no form on Today carries ${field}`);
+    }
+    assert.match(page, /name="verdict" value="wrong"/);
+    assert.match(page, /name="verdict" value="settled"/);
+    assert.match(page, /<form action=\{markCheckAction\}/);
+    assert.match(page, /<form action=\{putBackAction\}/);
+  });
+
+  test("a line that cannot be set aside has no press, and every line says what it reads", () => {
+    assert.match(page, /a\.check\.fingerprint !== null && \(\s*<form action=\{markCheckAction\}/);
+    assert.match(page, /Reads: \{a\.check\.reads\}/);
+    assert.match(page, /Reads: \{check\.reads\}/, "the set-aside block says what each reads too");
+  });
+
+  test("the buttons are shown only to the roles the actions accept, and the note cannot make Enter record a verdict", () => {
+    const auth = fs.readFileSync("src/lib/auth.ts", "utf8");
+    const rule = auth.slice(auth.indexOf("export async function requireManager"));
+    assert.match(rule, /u\.role !== "owner" && u\.role !== "pic"/, "the roles an action accepts");
+    assert.match(page, /const canPress = user\.role === "owner" \|\| user\.role === "pic";/, "the roles the page shows the buttons to must be the same");
+    assert.match(page, /\{canPress && a\.check\.fingerprint !== null && \(\s*<form action=\{markCheckAction\}/);
+    assert.match(page, /\{canPress && \(\s*<form action=\{putBackAction\}/);
+    assert.match(page, /<textarea\s+name="note"/);
+    assert.doesNotMatch(page, /<input[^>]*name="note"/, "in a one-line field Enter presses the first button, which records wrong");
+  });
+
+  test("the older page that lists the checks says all pass only when none fails, whatever has been set aside", () => {
+    const old = fs.readFileSync("src/app/(app)/tools/check/page.tsx", "utf8");
+    assert.match(old, /const failing = r\.checks\.filter\(\(c\) => !c\.ok\);/);
+    assert.match(old, /failing\.length === 0 \? \(\s*<Notice kind="ok">/);
+    assert.doesNotMatch(old, /r\.failing === 0/, "r.failing counts only the open ones, so a finding he set aside would read as a pass");
+  });
+
+  test("both actions ask who is pressing before they touch the record", () => {
+    for (const [action, touch] of [["markCheckAction", "markShown("], ["putBackAction", "putBack("]]) {
+      const body = actions.slice(actions.indexOf(`export async function ${action}`));
+      const asks = body.indexOf("requireManager()");
+      const acts = body.indexOf(touch);
+      assert.ok(asks > -1 && acts > -1 && asks < acts, `${action} does not ask who is pressing before it records`);
+    }
   });
 });

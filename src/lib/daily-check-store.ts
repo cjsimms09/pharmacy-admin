@@ -4,7 +4,8 @@ import { sql } from "drizzle-orm";
 import { getSettings } from "./settings";
 import { addDays, atLocal, todayIso } from "./dates";
 import { SITE_STARTS_ON } from "./books-start";
-import { runDailyCheck, summarise, type Check, type Facts, type History, type Tie } from "./daily-check";
+import { runDailyCheck, sortMarks, summarise, type DailyCheckResult, type Facts, type History, type Tie, type WrongAlarmReading } from "./daily-check";
+import { activeMarks, endMarks, markCheck, wrongAlarms } from "./check-marks";
 import { remitStanding, STANDING_WINDOW_DAYS } from "./engine/remit-standing";
 import { digits, loadHistoryReach } from "./engine/remit-sweep";
 
@@ -202,8 +203,9 @@ async function gather(): Promise<Facts> {
     invoicesShort,
     invoicesShortCents,
     shortInvoices,
-    lastSweptAt: settings.mail_last_sweep ?? null,
-    lastSweepResult: settings.mail_last_result ?? null,
+    /* An unset setting is an empty string here (getSettings fills every key), never null: `??` would pass "" on and the card would say "last swept NaN hours ago" for a mailbox never swept. */
+    lastSweptAt: settings.mail_last_sweep || null,
+    lastSweepResult: settings.mail_last_result || null,
     bookedWithNoDocument,
     offsetsWithPaymentDates,
     offsetsWithPaymentDatesCents,
@@ -228,17 +230,52 @@ async function gather(): Promise<Facts> {
   };
 }
 
-export type DailyCheckResult = { checks: Check[]; failing: number; says: string; ranAt: string };
-
-/** Runs the check now and returns it. Reads only — it never changes anything it is judging. */
+/**
+ * Runs the check now and returns it, sorted into what is open and what he has set aside.
+ *
+ * It judges and reads. The one thing it writes is the end of a mark that no longer covers anything (the check came right, or what it
+ * found changed): bookkeeping about his earlier words, never about the data it is judging.
+ *
+ * What he said of a finding can hide only a failure with the same facts it had when he said it. If his marks cannot be read, every
+ * failing check is shown, because an alarm is never hidden for want of being able to look up a reason to hide it.
+ */
 export async function dailyCheck(): Promise<DailyCheckResult> {
   const checks = runDailyCheck(await gather());
+  const marks = await activeMarks().catch(() => []);
+  const { open, setAside, toEnd } = sortMarks(checks, marks);
+  /* Housekeeping: if ending a stale mark fails, the card still says what the check found and not that it could not run. */
+  await endMarks(toEnd).catch(() => undefined);
   return {
     checks,
-    failing: checks.filter((c) => !c.ok).length,
-    says: summarise(checks),
+    open,
+    setAside,
+    failing: open.length,
+    says: summarise(
+      checks,
+      setAside.map((s) => s.check.key),
+    ),
     ranAt: new Date().toISOString(),
+    wrongAlarms: await wrongAlarms().catch((): WrongAlarmReading => ({ notMeasured: "record unreadable" })),
   };
+}
+
+/**
+ * Records his press on a line he was shown, judged against the check as it stands when the press arrives and not as it stood when the page
+ * was drawn. A mark must cover the finding he saw and no other, so it is refused, in words, when the line has changed since, when the check
+ * now passes, when the check cannot be set aside, or when the check is gone. `shown` is the fingerprint the page carried with the line.
+ * `already` is true when the same verdict already stood on that finding, so nothing was added.
+ */
+export async function markShown(key: string, shown: string, verdict: string, note: string, user: { id: string; name: string }): Promise<{ already: boolean }> {
+  if (verdict !== "wrong" && verdict !== "settled") throw new Error("Say whether the line is wrong or settled.");
+  const { checks } = await dailyCheck();
+  const check = checks.find((c) => c.key === key);
+  if (!check) throw new Error("That check is not on the morning check any more, so nothing was recorded.");
+  if (check.ok) throw new Error("That check passes now, so there was nothing to set aside and nothing was recorded.");
+  if (check.fingerprint === null || check.fingerprint !== shown) {
+    throw new Error("What that line found has changed since you looked at it, so nothing was recorded. The line on the screen now is the one to look at.");
+  }
+  const { already } = await markCheck(check, verdict, note, user);
+  return { already };
 }
 
 /**

@@ -23,6 +23,7 @@ export default async function CheckPage() {
   const [r, settings] = await Promise.all([dailyCheck(), getSettings()]);
   const last = settings.daily_check_result ?? null;
   const stamp = last?.match(/^(\S+Z): ([\s\S]*)$/) ?? null;
+  const failing = r.checks.filter((c) => !c.ok);
 
   return (
     <>
@@ -32,13 +33,18 @@ export default async function CheckPage() {
         actions={<Link href="/" className="btn">Today</Link>}
       />
 
-      {r.failing === 0 ? (
+      {/*
+        "All pass" is said only when every check passes. A finding he has set aside is still failing, so the count here is of the failing
+        checks, whatever has been said of them, and the ones set aside are named as that and not left out.
+      */}
+      {failing.length === 0 ? (
         <Notice kind="ok">
           All {r.checks.length} checks pass. Nothing below needs you.
         </Notice>
       ) : (
         <Notice kind="warn">
-          {r.failing} of {r.checks.length} failing. Each one says what it expected and what it found.
+          {failing.length} of {r.checks.length} failing{r.setAside.length > 0 ? `, ${r.setAside.length} of them set aside by you` : ""}. Each one says what it
+          expected and what it found.
         </Notice>
       )}
 

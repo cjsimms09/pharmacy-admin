@@ -4078,3 +4078,40 @@ export const pageVisits = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.day, t.path] })],
 );
+
+/**
+ * What the owner said about a finding on the morning check: "this is wrong" or "this is settled" (drizzle/0142_check_marks.sql).
+ *
+ * One row per press, never deleted, so the count of "wrong" rows is how many times he had to tell the site an alarm was wrong. A mark
+ * covers one finding as it stood: `fingerprint` is the finding itself (the things it found and where each stands; a clock only as whole
+ * days or 30-day steps of age), so the alarm returns when what it found changes. One standing mark per finding and verdict.
+ */
+export const checkMarks = sqliteTable(
+  "check_marks",
+  {
+    id: text("id").primaryKey(),
+    checkKey: text("check_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    /** "wrong": the site said something untrue. "settled": it was true, and it is dealt with or does not matter. */
+    verdict: text("verdict", { enum: ["wrong", "settled"] }).notNull(),
+    /** The rule and the finding as he was shown them, kept so the press can be understood after the code has changed. */
+    what: text("what").notNull(),
+    observed: text("observed").notNull(),
+    note: text("note"),
+    markedBy: text("marked_by").notNull(),
+    markedAt: text("marked_at").notNull().default(now()),
+    endedAt: text("ended_at"),
+    /** "put back" (he did), "passed" (the check came right), "changed" (the finding did), "replaced" (a later press did). */
+    endedHow: text("ended_how", { enum: ["put back", "passed", "changed", "replaced"] }),
+    endedBy: text("ended_by"),
+    /** Whoever fixed the check says here what was done, so a wrong alarm stays open until somebody has answered it. */
+    answeredAt: text("answered_at"),
+    answer: text("answer"),
+  },
+  (t) => [
+    index("check_marks_key_idx").on(t.checkKey, t.endedAt),
+    uniqueIndex("check_marks_one_standing_idx")
+      .on(t.checkKey, t.fingerprint, t.verdict)
+      .where(sql`${t.endedAt} is null`),
+  ],
+);

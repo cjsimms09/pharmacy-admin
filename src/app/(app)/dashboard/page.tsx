@@ -7,7 +7,7 @@ import { staffMatrix } from "@/lib/staff-matrix";
 import { StaffBoard } from "@/components/staff-board";
 import { invoiceIssues } from "@/lib/invoices";
 import { dailyCheck } from "@/lib/daily-check-store";
-import { checkCouldNotRun } from "@/lib/daily-check";
+import { checkCouldNotRun, wrongAlarmsSaid } from "@/lib/daily-check";
 import { alerts, SOON_DAYS, type Alert } from "@/lib/alerts";
 import { claimsProofNow } from "@/lib/data-health-claims-proof-store";
 import { claimsProofAlert } from "@/lib/data-health-claims-proof";
@@ -15,7 +15,8 @@ import { automationStatus, type JobStatus } from "@/lib/automation-status";
 import { feedsNow } from "@/lib/feeds";
 import { openFindings } from "@/lib/self-inspection";
 import { attestAction, answerAction } from "../_actions/compliance";
-import { daysUntil, fmt, fmtLong, todayIso } from "@/lib/dates";
+import { markCheckAction, putBackAction } from "../_actions/check-marks";
+import { atLocal, daysUntil, fmt, fmtLong, todayIso, whenLocal } from "@/lib/dates";
 import { getSettings } from "@/lib/settings";
 import { mailHealth } from "@/lib/mail-health";
 import { pendingUpdates } from "@/lib/updates";
@@ -95,6 +96,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { ok, error } = await searchParams;
   // The signer's own name, to fill in the attestation form without asking them to remember it.
   const user = await requireUser();
+  // The press on the morning check is for those who may act on it. The actions refuse everybody else without a word, so a staff member is
+  // not shown buttons that would do nothing.
+  const canPress = user.role === "owner" || user.role === "pic";
   const [compliance, dated, matrix, cqi, cs, jobs, selfFindings, settings, mail, updates, invoiceProblems, alertList, clocks, claimsProof, health] =
     await Promise.all([
     complianceSummary(),
@@ -294,7 +298,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
    * has stopped arriving, then money that cannot be sent or chased, then housekeeping. A stale feed
    * is third from nothing because every figure downstream of it goes on looking right.
    */
-  const attention: { what: string; detail: string | null; href: string; action: string; kind: "crit" | "warn" }[] = [];
+  const attention: {
+    what: string;
+    detail: string | null;
+    href: string;
+    action: string;
+    kind: "crit" | "warn";
+    /** Only the morning check's lines: what each reads, and what he can press. */
+    check?: { key: string; fingerprint: string | null; reads: string };
+  }[] = [];
   if (setup.length > 0) {
     attention.push({
       what: "The pharmacy's own details are missing",
@@ -354,15 +366,17 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
    * the finding is said here; and the checks have nothing in common, so one link for all of them — guessed from the words of the findings —
    * sent three unrelated findings to Money on 6 October 2026, and missed the remittance one for want of a word.
    */
-  for (const c of health.checks.filter((c) => !c.ok)) {
+  for (const c of health.open) {
     attention.push({
       what: `Should be: ${c.what.charAt(0).toLowerCase()}${c.what.slice(1)}`,
       detail: `Found: ${c.observed.replace(/\.$/, "")}`,
       href: c.href,
       action: c.action,
       kind: "warn",
+      check: { key: c.key, fingerprint: c.fingerprint, reads: c.reads },
     });
   }
+  const wrongSaid = wrongAlarmsSaid(health.wrongAlarms, (stamp) => fmt(atLocal(stamp).slice(0, 10)));
   if (updates.behind > 0) {
     attention.push({
       what: `${updates.behind} update${updates.behind === 1 ? "" : "s"} waiting`,
@@ -420,14 +434,85 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <b>{attention.length === 1 ? "One thing needs attention" : `${attention.length} things need attention`}</b>
           <ul className="mt-1 space-y-0.5">
             {attention.map((a) => (
-              <li key={a.what} className="text-sm">
+              <li key={a.check?.key ?? a.what} className="text-sm">
                 <span className="font-medium">{a.what}</span>
                 {a.detail && <span className="text-ink-2"> — {a.detail}</span>}{' '}
                 <Link href={a.href} className="underline">{a.action}</Link>
+                {a.check && (
+                  <>
+                    {/*
+                      What the check looked at, said on the line, so that a stand-in can be seen by reading it: if the sentence above names a
+                      thing and this names another, the check is measuring the wrong one (CLAUDE.md, rule 7).
+                    */}
+                    <p className="mt-0.5 text-xs font-normal text-ink-2">Reads: {a.check.reads}</p>
+                    {/*
+                      No press on a line that cannot be set aside (a check that could not run has not passed, and nothing may quieten it),
+                      and none for somebody the action would refuse. Two buttons, because they mean different things: "wrong" says the site
+                      told him something untrue, and is kept as a bug report until somebody has answered it; "settled" says it was true and
+                      is dealt with. The note is a textarea so that Enter adds a line: in a one-line field Enter would press the first
+                      button, and a note typed in a hurry would record "wrong".
+                    */}
+                    {canPress && a.check.fingerprint !== null && (
+                      <form action={markCheckAction} className="mt-1 flex flex-wrap items-center gap-2">
+                        <input type="hidden" name="back" value="/" />
+                        <input type="hidden" name="key" value={a.check.key} />
+                        <input type="hidden" name="fingerprint" value={a.check.fingerprint} />
+                        <textarea
+                          name="note"
+                          rows={2}
+                          maxLength={500}
+                          placeholder="What was wrong, or what settled it (optional)"
+                          aria-label="A note on this line, optional"
+                          className="field min-w-0 flex-1 resize-none py-1 text-xs font-normal"
+                        />
+                        <button name="verdict" value="wrong" className="btn btn-sm">This is wrong</button>
+                        <button name="verdict" value="settled" className="btn btn-sm">This is settled</button>
+                      </form>
+                    )}
+                  </>
+                )}
               </li>
             ))}
           </ul>
         </Notice>
+      )}
+
+      {/*
+        What has been said of the morning check's findings, where it can be seen and taken back.
+
+        A finding set aside is not gone: it is still failing, the line the night's check stores counts it as set aside, and it comes back
+        by itself when the things it found change or the check passes. This block is outside the card above so that it is still here on a
+        morning when every failing check has been set aside and the card has nothing left to say.
+      */}
+      {(health.setAside.length > 0 || wrongSaid !== null) && (
+        <div className="mb-4 text-xs text-ink-2">
+          {health.setAside.length > 0 && (
+            <details>
+              <summary className="cursor-pointer font-medium hover:underline">
+                {health.setAside.length === 1 ? "1 finding set aside" : `${health.setAside.length} findings set aside`}
+              </summary>
+              <ul className="mt-1 space-y-2">
+                {health.setAside.map(({ check, mark }) => (
+                  <li key={mark.id}>
+                    <span className="font-medium">Should be: {check.what.charAt(0).toLowerCase()}{check.what.slice(1)}</span>
+                    {" — "}Found: {check.observed.replace(/\.$/, "")}.{" "}
+                    Marked {mark.verdict === "wrong" ? "wrong" : "settled"} by {mark.by}, {whenLocal(mark.at)}
+                    {mark.note ? `: “${mark.note}”` : ""}. It comes back if the things it found change.
+                    <p className="mt-0.5 text-ink-3">Reads: {check.reads}</p>
+                    {canPress && (
+                      <form action={putBackAction} className="mt-1">
+                        <input type="hidden" name="back" value="/" />
+                        <input type="hidden" name="id" value={mark.id} />
+                        <button className="btn btn-sm">Put back</button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {wrongSaid !== null && <p className={health.setAside.length > 0 ? "mt-1" : undefined}>{wrongSaid}</p>}
+        </div>
       )}
 
       {/*

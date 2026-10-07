@@ -351,11 +351,31 @@ when the key's day is not on record (`ef43c0c`); a test reads the monthly-checkl
 page it opens, and fails if the link changes or the text `monthClose(` leaves that page's source (`206c87b`). That
 last test is itself a stand-in: a comment holding the text would keep it passing, and the page was not rendered.
 
+From 7 October the code also gives the morning-check card a way to be told it is wrong (not deployed). Under each line
+it says what the check reads (`Reads:`), and under each line except the one saying a check could not run it offers the
+owner and the pharmacist in charge two presses: *This is wrong* and *This is settled*. Both set that one finding aside,
+in a block on Today that stays closed until it is opened, until what it found changes or the check passes. *Wrong* is
+also kept, never deleted, as a report until a session working on the pharmacy computer has answered it (a cloud session
+cannot read the database), and the count of them is the nearest measure the site has of whether it is learning. It is
+smaller than what it measures: it covers this card's ten checks only, and of the five alarms that were wrong on 6
+October three were lines of this card, one was the Compliance banner, which has no press, and one was the card's link,
+which sent three findings to Money. A press covers the finding as it stood, not the check, so a different finding on
+the same check shows again, except that four checks print one bare number and two a count and a dollar total, and a
+different set of the same size reads as the same finding; if the record cannot be read, every failing check is shown.
+(`src/lib/check-marks.ts`; `scripts/wrong-alarms.ts` lists the unanswered ones.)
 What is still habit, so it is the weaker form: the question in pre-flight 8, and rule 7 in `CLAUDE.md`. A check that
-cannot run is still silent in places: the nightly run swallows its own failure, and on Today the contract-deadline items
-and the claims-proof warning turn an error into an empty list or nothing; no other reader has been looked at for this.
-The morning-check card does not yet say what each check reads, so he cannot see a stand-in; he can only find one by
-being wrong about it.
+cannot run is still silent in places: the nightly run swallows its own failure, on Today the contract-deadline items
+and the claims-proof warning turn an error into an empty list or nothing, and `alerts.ts` has nine catches that drop
+the error (BACKLOG, A3-11). The `Reads:` sentence under each line is written by that check's author and no test can
+fail it: it lets him see a stand-in by reading, and it can itself be wrong (two of them said more than their
+fingerprints covered while the press was being finished, and were corrected before it was committed). A second Claude,
+given the change and none of the reasoning, read the press cold and found eleven things; they were treated as leads
+and read against the code, and what could not be fixed is written down as a known limit in `docs/OPEN-ITEMS.md`.
+Another fresh Claude then read the documents written about the press and found nine points, seven of them sentences
+that said more than the code shows; those were corrected, and the corrections have been read by their author only. The
+press has not been run in a browser, and has not been run on the live site, where its table does not exist until the
+launcher applies the migration on the first start after a deploy. It is how he finds a wrong alarm that none of this
+caught, and the count of them is the nearest measure the site has, not the whole of it.
 
 ## 8. How I report
 

@@ -1207,7 +1207,7 @@ place, and an arithmetic check before anything is stored.
   author on every change he will read, named in the commit; (2) every check, alert and banner that can reach him
   audited for the stand-in shape (it says one thing and reads a neighbour of it while the real thing is on file), on
   live data, read-only, and fixed where it does; (3) the one-press "this is wrong" on the morning-check card, stored,
-  and read at the start of every session (Rule 4); (4) the lesson written where every session reads it. The measure
+  and read at the start of every session on the pharmacy computer (Rule 4); (4) the lesson written where every session reads it. The measure
   is how many alarms he has to tell us about: five on 6 October.
   - **Status when the remittance-line commit was written:** (1) done for this one change and not yet a procedure: a
     second Claude, with none of the author's reasoning, read an earlier version of the sweep-deposit change cold, and
@@ -1224,6 +1224,26 @@ place, and an arithmetic check before anything is stored.
     session in HANDOFF. What only the author read is the code written after the second report. **A reader's lead can be
     wrong: two of the leads below (A2-4 and A2-6) were refuted when checked, and A2-3 is true in the code and dormant;
     each says so in its own entry.** Nothing here is registered as a fact until it has been checked this way.
+  - **Status on 7 October, when the press (3) was built:** (3) is built and committed, not deployed. Each failing line of
+    the morning-check card, except the one saying the check could not run, now says what its check reads ("Reads: ...")
+    and, for the owner and the pharmacist in charge, takes "This is wrong" or "This is settled" with a note; either sets
+    the line aside until what it found changes or the check passes (a check whose fingerprint is one bare number, or a
+    count and a dollar total, cannot tell a different set of the same size from the one he pressed), and the set-aside
+    lines stay listed on Today, under a closed "findings set aside" heading, with a "Put back" button. A "wrong" press
+    is kept as a report until a session on the pharmacy computer answers it, `scripts/wrong-alarms.ts` lists the open
+    ones, and Today counts the presses (OPEN-ITEMS, "The morning check could not be told it was wrong"; the data
+    dictionary, section 12). It needs migration `0142_check_marks`, which the launcher's migration step applies on the
+    first start after a deploy; if that step fails the launcher starts the site anyway and a press then fails. Two fresh
+    Claude subagents read it cold, the first the change and the second the written account of it afterwards, and handed
+    back eleven points and nine; each was read against the code and acted on, and the limits that remain are in that
+    row. No person has read the card's wording yet. (1) and (4) are CLAUDE.md rules 6 and 7, committed on 7 October,
+    and rule 3 now names the script, so a session on the pharmacy computer reads the open reports before it builds
+    anything new (a cloud session cannot read the database, and leaves them to it). (2) goes on: the leads below are
+    checked in the order of worst case, and each entry says where it stands. The measure is as it was, five alarms he
+    had to tell us about on 6 October. The press counts presses on the card's own lines, from its first use after the
+    deploy: an alarm on another screen (the Compliance banner has no press) or one he did not notice is not counted,
+    and one pressed twice is counted twice, so it is the nearest measure there is and not the number of untrue
+    sentences the site showed.
 
 - **6 October, the cold readers' leads: LEADS, NOT FINDINGS.** Nobody but the reader who wrote each one has checked it
   against the code or the live data, and a cold reader's claim is something to verify, not a fact (CLAUDE.md, rule 1:
@@ -1256,6 +1276,11 @@ place, and an arithmetic check before anything is stored.
   - **A3-3** `mail-health.ts` near lines 49-56 reports the mailbox failing when the last send failed or when any
     training assignment carries a send error, so a stale bounce pins "the last attempt did not get through"; which
     failure it names is unordered.
+    Checked 7 October (the code, and the live database, counts and yes/no only): NOT firing. This is the state of
+    sending training emails, not the sweep of the mailbox. Live there are no open training assignments, so none can
+    carry a send error, and the last send result is on file and does not say it failed. A successful re-send clears
+    an assignment's error (`training-assignments.ts` near line 216), so a bounce pins "failing" only until the next
+    send that gets through or the assignment is completed. Left as it was: which of two failures the sentence names.
   - **A3-4** `feeds.ts` near line 286 judges the MTF feed on `mtf_last_pull`; `mtf.ts` writes it near line 298 before
     `if (!r.ok) return`, and again near line 589 after "Could not fetch", so a failed pull reads as on time.
     Checked 7 October (the code, and the settings and counts read-only): the stamp is written whatever the outcome in
@@ -1337,6 +1362,26 @@ place, and an arithmetic check before anything is stored.
     `enabled: true` unconditionally; `mail-health.ts` near line 45 decides success by testing a stored string for
     "FAILED". Not a lead for action, and not to be re-added: `alerts.ts` near line 937 holds a pattern that drops "N
     supplies need ordering", correctly, because purchasing was cut on 2 October.
+  - **A3-11** (found 7 October while building the press, read back from the code and not from a reader) A reader that
+    throws is turned into an answer that looks like "nothing to say" in three places. `alerts.ts` has nine catches (near
+    lines 302, 358, 391, 473, 657, 705, 789, 854 and 891), each of which drops the error and adds nothing to the list,
+    so an alert whose reader failed looks on Today like an alert with nothing to report. `dashboard/page.tsx` turns a
+    failed read into an empty list or null near lines 120 and 128 (contract clocks, the claims proof) and 970 and 971
+    (the month's books, the last bank-closed month). `instrumentation.ts` near line 700 wraps the nightly morning
+    check in a catch with nothing in it; the line it stores is read by the retired `/tools/check` page and, in a search
+    that leaves out the read-denied remits folder, by nothing else. A reader that could not run is never-measured, not
+    measured-and-none (rule 5; CLAUDE.md rule 7, first corollary). Not checked: whether any of these has thrown on the
+    live site, which would be seen only in the server log, and what each of the null results renders as. The shape to
+    copy is `checkCouldNotRun`, one line saying which reader could not run and why. Not started.
+  - **A3-12** (found 7 October, from the code) `getSettings()` gives every key it does not hold an empty string, so
+    `s.key ?? "a sentence"` never prints the sentence. `automation-status.ts` near lines 91, 113, 121, 129 and 229 and
+    `feeds.ts` near line 396 each hold one ("No backup has run yet.", "Not connected. Reports emailed here are not
+    being filed.", "Connected, not yet swept.", and the iMonnit, reviews and NADAC ones), and the NADAC `lastAt` near
+    line 227, `s.nadac_last_ok ?? s.nadac_last_fetch ?? null`, can never reach its second term. Dormant on the live
+    site: all fourteen of the settings those lines read are set there (checked 7 October, set or unset only). The same
+    slip put "NaN hours ago" on the morning check for a mailbox never swept; that one is fixed and has a test. Not
+    checked: where each of these lines is shown. Not started; the fix is `||` in each place and a test on an empty
+    settings table.
   - **A2-2** `instrumentation.ts` near lines 527-595: the nightly proofs for NADAC, the catalogue, invoices and the
     directory write only to the retired data-health page; only `claims_proof` has a reader that is still live.
   - **A2-3** check 4, "every invoice on file reconciles", reads only invoices where `lines_short_cents` is not null;
@@ -1390,14 +1435,49 @@ place, and an arithmetic check before anything is stored.
   - **A5-1** `needs-you.ts` near line 220 and `money/page.tsx` near line 256 say "Every line placed and every proof
     passed"; `month.ts` near line 128, `closeState`, reads no proof. A known carry-forward, and the September
     remit-to-claim proof fails.
+    Checked 7 October (the code; the live database, counts and dates only). Half of the lead is wrong: the sentence is
+    in `needs-you.ts` alone, and no live screen reads that list (`todayView()` is called only by a support script,
+    because the rebuild's Today is paused); `money/page.tsx` near line 256 shows a Close button on the same "ready"
+    state with no sentence. The other half holds: `closeState` is "ready" when the bank has lines, none is unplaced,
+    every receipt without a bank line is a credit memo or one of the last four register days, and the month is over
+    (`month.ts` line 126); no proof is read. Live, September is closed (2 October, 18:18 UTC): its audit line says the
+    pharmacy session closed it on his word ("can we close sept?", then "dont see close button?"; the old site had no
+    close control), after he had been told it was ready, which the comment in `close-month.ts` also records; the
+    button on the Money page came after. Its remit-to-claim proof had failed in all ten of its runs, which fall on seven
+    days from 1 October, and fails in the latest (7 October, 03:58 UTC: 25 payments, net $977.95, tied to no claim and
+    open); its other two
+    proofs pass. September is a test month, so nothing is wrong in the books because of it; the same button on
+    October, the first real month, would close it the same way. Which proofs should stop a close is not readable from
+    the data: `expected_arrived` and `reader_arithmetic`, which belong to no month, and `claims_eq_pioneer`, which
+    belongs to a day, also fail today and would hold every month open for ever. The comment on the month's state in
+    `schema.ts` (near line 3860) says "ready (every proof passed…)" and is wrong in the same way, and the other branch
+    of the `needs-you.ts` line (218) says "It closes itself when every line is placed and every proof passes.", which is
+    false twice: only a press closes a month (`closeMonth`, `month.ts` line 192, reached from `close-month.ts`) and
+    "ready" reads no proof. Q for him: when a month is closed, should a failing proof for it stop the close, or only be
+    written down at the close? Not built; the plan without his answer is to say beside the button which of that
+    month's proofs fail, to write them into the audit line for the close, and to correct the three sentences.
   - **A5-2** `money/page.tsx` near line 421 says "the cash account equals the bank to the cent", which holds by
     construction over the rows it reads; only `bank_to_cent` proves the rows equal the statement, and the page's
     upload path (`bank.ts` near lines 43-51) does not call `recordMonthBalances`.
   - **A5-3** a cheque matched to an expected cheque is stored `placedAs` `noted` with a why that begins "Invoice N: ";
     `cash-from-bank-rules.ts` near lines 188-193 looks the text before the colon up as a category, finds none and says
     "Not yet named", while the bank page shows the line confirmed with no button: two states at once.
+    Checked 7 October (the code; the live database, counts only). The path is real (`bank-statement.ts` near line 764
+    makes a cheque matched to an expected cheque with an invoice number a "noted" line under the category "Invoice
+    N"), and when it fires the cash account lists the line under "Not yet named" while the bank page shows it
+    confirmed. Live, no line is noted with an "Invoice" why (the two noted lines start with a category name, "Drug
+    purchases (OTC)", which rule 9 finds), so it is not firing; and "not yet named" is arguably true of a cheque whose
+    invoice is not on file, so the lead is a design point, not a false sentence. Dormant.
   - **A5-4** `bank.ts` near line 520 prints "Read from the scan and proved against its daily balances." only when
     `o.notes?.length`, which looks inverted.
+    Checked 7 October (the code). Not inverted; dropped. `notes` holds the scan solver's exceptions (a printed balance
+    that could not be relied on, lines with no readable amount left out, summary figures that disagree with the
+    lines), and `placeStatementLines` uses only whether there are any, to append one canned sentence, and never shows
+    them; a read that left lines out says what a read that corrected a summary says, and a read with no exceptions
+    says nothing of the proof. The sentence also follows "marked paid" with no stop and ends "..". What it claims is
+    true, because a scan with a day still unproven stops before anything is placed (`bank.ts` near lines 51 and 163).
+    Not measurable live (the notes are not stored). Not fixed; the fix is to print the notes' own sentences, which are
+    written for a person, and to say "proved against its daily balances" for every scan, with a test on the sentence.
   - **A5-5** loose ends: `cash-from-bank.ts` near line 58 decides "not yet at the bank" and "credit memos" by a
     pattern on the source key, and near lines 115-116 returns `missing: []` with `usable: true`; `month.ts` near line
     199, `statementOnFile`, is unused.
@@ -1427,6 +1507,18 @@ place, and an arithmetic check before anything is stored.
     is still open, and `openItems()` skips duties that need confirming (`compliance-status.ts` near line 282), so
     every period of the six unanswered duties would render green; the main page's `clean` (near line 55) ignores
     `summary.unanswered`.
+    Checked 7 October (the code; the live database, counts and dates only): real in the code, dormant live. The
+    register paints a cell "satisfied" whenever `openItems()` does not list it, and `openItems()` skips a duty that
+    still needs confirming and the periods before a duty's confirmation (`compliance-status.ts` near lines 276-285), so
+    the periods of an unanswered duty would show green. The page also lists only active duties, and `answerObligation()`
+    switches a duty answered "no" off, with a comment that says the register can then show an inspector it was
+    considered and dismissed on a date; the register would not show it at all. Live, all 30 duties are active and none
+    needs confirming, the 13 completions are all against active, answered duties, and the six that carry a confirmation
+    date (five annual and one quarterly, all 16 September, after the register's start on 3 September) have no period
+    that falls wholly before it, so no cell is green for want of being judged. Not fixed. The fix is to say "awaiting
+    your answer" for an unanswered duty, "not judged before <date>" before a confirmation, and to list a duty answered
+    "no" with the date and who said so, each with a test on the register page. Next after the press, because an
+    inspector reads this page (pre-flight 7: board).
   - **A4-2** "Test that a backup restores": the duty's detail names "the dispensing system and this desk"
     (`obligations.ts` near lines 489-493) but its witness is only this desk's rehearsal archive, and
     `instrumentation.ts` near lines 269-275 rehearses every 30 days, so the quarter would always cover itself. Q for

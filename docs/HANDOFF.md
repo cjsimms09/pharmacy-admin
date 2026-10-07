@@ -8,6 +8,50 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after `fc962e0`; NOT deployed or pushed): the morning-check card can now
+  be told that a line is wrong or settled, and the site remembers it (CLAUDE.md rule 4).** On 6 October five of the
+  morning's alarms were wrong, and the card had no way to be told; each was put right only when he noticed and wrote
+  to a session. Each failing line on Today, except the one saying the check could not run, now has **This is wrong**
+  and **This is settled** (shown to the owner and the pharmacist-in-charge, the two roles `requireManager()` admits),
+  a note box, and a `Reads:` line saying what the check looked at. A pressed line moves to a block listed under a
+  closed "findings set aside" heading, which says who pressed it and when and has **Put back** (the same two roles). A
+  press covers the finding as it stood and ends when the check passes or when what the line found changes. That is
+  only as fine as the check's fingerprint: four checks (`inbox-rows`, `invoice-documents`, `booked-no-document`,
+  `doubled-ladders`) fingerprint one bare number and two (`offsets-dated-paid`, `payments-counted-twice`) a count and a
+  dollar total, so on those a different set of the same size reads as the same finding and stays set aside. "Wrong" is
+  also kept as a report: `npx tsx --tsconfig tsconfig.script.json scripts/wrong-alarms.ts` lists the ones nobody has
+  answered (`answer <id> <text>` closes one), and CLAUDE.md rule 3 now has every session on the pharmacy computer read
+  it; a cloud session cannot read the database. **Migration `0142_check_marks`** (additive; applies after
+  `0141_tied_by_hand`). Read only on 7 October: the live database has neither the `check_marks` table nor the
+  `claim_payments.tied_by` column, and these are the only two journal entries newer than its newest applied migration.
+  The launcher's migration step applies both on the first start after a deploy, which is his word; if that step fails
+  the launcher starts the site anyway, and then the card says the count of presses is not measured, shows every failing
+  line with its buttons, and a press fails with Drizzle's "Failed query" text. The second session to merge renumbers
+  its own. **Shape change for anything that calls `dailyCheck()`** (in `src` and `scripts`, by grep, only Today,
+  `tools/check`, `markShown` and `dailyCheckTick` do): `failing` now counts only the lines not set aside; `open`,
+  `setAside` and `wrongAlarms` are new; to count every failing check whatever has been said of it, filter `checks` on
+  `ok`.
+  Also registered and not fixed, both in `docs/BACKLOG.md`: A4-1 (the Compliance register paints a period covered
+  unless it is listed as overdue, so a duty that still needs confirming would show green; real in the code, dormant
+  on the live rows, where all 30 duties are answered) and A5-1 (September was closed on 2 October while its
+  remit-to-claim proof was failing, because the state that offers the close reads no proof; the row is in
+  `docs/OPEN-ITEMS.md`). **Files changed on `feature/compliance`, so say so on your pull request before editing
+  one:** `src/lib/daily-check.ts`, `src/lib/daily-check-store.ts`, `src/app/(app)/dashboard/page.tsx`,
+  `src/app/(app)/tools/check/page.tsx`, `src/db/schema.ts`, `drizzle/meta/_journal.json`, `tests/daily-check.test.ts`,
+  `tests/daily-check-store.test.ts`, new `src/lib/check-marks.ts`, `src/app/(app)/_actions/check-marks.ts`,
+  `scripts/wrong-alarms.ts`, `tests/check-marks.test.ts`, `drizzle/0142_check_marks.sql`, and `CLAUDE.md`,
+  `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`, `docs/CONSTITUTION.md`, `docs/reference/data-dictionary.md`. **Read by:** two
+  fresh Claude subagents, neither given my reasoning. The first read the change and raised eleven points; the second
+  read what had been written about it and raised nine. Each point was checked against the code before it was acted on.
+  Of the nine, seven were sentences that said more than the code shows (who the script and the buttons reach, how many
+  fingerprints are a bare count, what the launcher does when the migration fails, what a count of presses measures,
+  how a transaction behaves, how many sentences claim a proof was read) and are corrected; the other two were true of
+  the working tree at that moment (a file list that left out a separate Compliance change, and "committed" before the
+  commit) and are made true by the order of the commits. They are models: no person has read this, nothing was
+  rendered in a browser, and he has not seen the wording. **Asked of him, in the report, not of you:** whether a
+  failing remit-to-claim proof should stop a month closing or only be written down at the close (A5-1). Nothing is
+  asked of you beyond the note on a pull request.
+
 - **7 October, pharmacy session (the commit after `2de8157`; NOT deployed or pushed): the facilitator (MTF) key's age
   was never recorded on the live site, so the feed said nothing of it; it now says "not on record", and the
   Connections page takes the day.** The live key has no day on record (read only, no values printed), so the old
