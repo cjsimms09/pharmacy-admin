@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { cqiSnapshot, csInventoryStatus } from "@/lib/compliance";
 import { dueList, type DueItem } from "@/lib/due";
 import { complianceSummary, comingSentence, type OpenItem } from "@/lib/compliance-status";
+import { awaitingSaid, AWAITING_COST } from "@/lib/judged";
 import { staffMatrix } from "@/lib/staff-matrix";
 import { StaffBoard } from "@/components/staff-board";
 import { invoiceIssues } from "@/lib/invoices";
@@ -614,11 +615,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         const now = [...alertList, ...extra].filter((a) => a.level === "now");
         const soon = [...alertList, ...extra].filter((a) => a.level === "soon");
         if (now.length === 0 && soon.length === 0) {
+          const waiting = compliance.unanswered.length;
+          const elsewhere = lateCount > 0 || waiting > 0;
           return (
-            <Card tone="ok" title="Nothing needs you today" className="mb-6">
+            <Card tone={elsewhere ? "warn" : "ok"} title={elsewhere ? "No alert is open today" : "Nothing needs you today"} className="mb-6">
               <p className="card-sub">
                 Nothing has expired, lapsed or stopped running, and nothing falls due in the next {SOON_DAYS} days.
                 What is further out is on its own page rather than here.
+                {lateCount > 0 && ` ${lateCount} ${lateCount === 1 ? "thing is" : "things are"} late, further down this page.`}
+                {waiting > 0 && ` ${awaitingSaid(waiting)}, further down this page. ${AWAITING_COST}`}
               </p>
             </Card>
           );
@@ -746,10 +751,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {/* ── Everything else that is late, grouped the way it gets worked ── */}
       <section id="now" className="mb-6">
         {lateCount === 0 ? (
-          <Card tone="ok" title="Nothing is late">
+          <Card tone={compliance.unanswered.length > 0 ? "warn" : "ok"} title="Nothing is late">
             <p className="text-sm text-ink-2">
-              Every compliance period that has ended is covered, every licence and training is current, and no record
-              is sitting here without a date on it.
+              {`Every compliance period ${compliance.unanswered.length > 0 ? "judged so far" : "that has ended"} is covered, every licence and training is current, and no record is sitting here without a date on it.`}
+              {compliance.unanswered.length > 0 && ` ${awaitingSaid(compliance.unanswered.length)}, below. ${AWAITING_COST}`}
             </p>
           </Card>
         ) : (
@@ -781,7 +786,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <Card
           title="Does this apply here?"
           count={compliance.unanswered.length}
-          subtitle="Duties the site cannot decide for you. Nothing here counts against you until you say it applies, and a “no” is recorded with the date so the register shows it was considered rather than missed."
+          subtitle={`Duties the site cannot decide for you. ${AWAITING_COST} A “no” is recorded with today’s date and your name, and the register lists it under “Considered and not applicable”.`}
           className="mb-6"
         >
           <div className="divide-y divide-line">

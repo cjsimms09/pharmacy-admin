@@ -8,6 +8,7 @@ import { audit } from "@/lib/audit";
 import { complianceSummary, type OpenItem, type Unanswered } from "@/lib/compliance-status";
 import { attestAction, answerAction } from "../_actions/compliance";
 import { periodLabel } from "@/lib/periods";
+import { awaitingSaid, AWAITING_COST } from "@/lib/judged";
 import { dueList } from "@/lib/due";
 import { cqiSnapshot, csInventoryStatus } from "@/lib/compliance";
 import { daysUntil } from "@/lib/dates";
@@ -52,7 +53,10 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
   const needsAction = [...summary.missed, ...summary.partial];
   const shown = needsAction;
   const notYetDue = summary.openNow;
-  const clean = needsAction.length === 0 && people.length === 0 && alsoLate.length === 0;
+  const needYou = needsAction.length + people.length + alsoLate.length;
+  const nothingLate = needYou === 0;
+  const waiting = summary.unanswered.length;
+  const clean = nothingLate && waiting === 0;
 
   async function assignFromList(fd: FormData) {
     "use server";
@@ -132,7 +136,9 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
         subtitle={
           clean
             ? "Nothing outstanding."
-            : `${needsAction.length + people.length + alsoLate.length} thing${needsAction.length + people.length + alsoLate.length === 1 ? "" : "s"} need you.`
+            : nothingLate
+              ? `Nothing is late. ${awaitingSaid(waiting)}.`
+              : `${needYou} thing${needYou === 1 ? "" : "s"} need you.${waiting > 0 ? ` ${awaitingSaid(waiting)}.` : ""}`
         }
         actions={
           <>
@@ -149,12 +155,21 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
         <section className="rounded-lg border border-emerald-300 bg-emerald-50 p-6">
           <h2 className="text-lg font-semibold text-emerald-900">You are clean.</h2>
           <p className="mt-1 text-sm text-emerald-900">
-            Every period is covered, every licence is current, and nothing is due in the next 45 days. The register
-            holds the detail if you need to show someone.
+            Every period that has ended is covered, no licence, credential or training is overdue, undated or due within
+            45 days, and no duty is waiting for your yes or no. {notYetDue.length > 0 ? "What is still open for the current period is listed below, not yet due. " : ""}
+            The register holds the detail if you need to show someone.
           </p>
         </section>
       ) : (
         <>
+          {nothingLate && (
+            <section className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-6">
+              <h2 className="text-lg font-semibold text-amber-900">Nothing is late, but this is not a clean bill yet.</h2>
+              <p className="mt-1 text-sm text-amber-900">
+                {awaitingSaid(waiting)}, below. {AWAITING_COST}
+              </p>
+            </section>
+          )}
           {summary.missed.length > 0 && (
             <p className="mb-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
               <b>{summary.missed.length} period{summary.missed.length === 1 ? "" : "s"} went by without being covered.</b>{" "}
@@ -240,10 +255,10 @@ export default async function CompliancePage({ searchParams }: { searchParams: P
 
       {summary.unanswered.length > 0 && (
         <Card title="Does this apply here?" className="mt-8">          <p className="mt-1 text-xs text-ink-3">
-            {summary.unanswered.length} {summary.unanswered.length === 1 ? "duty" : "duties"} shipped switched on because
-            leaving out a rule that does apply is the expensive mistake. Answer once and it is settled — a &ldquo;no&rdquo;
-            is recorded with today&rsquo;s date and your name, so the register shows it was considered rather than missed.
-            Nothing here is counting against you in the meantime.
+            {awaitingSaid(summary.unanswered.length)}. {AWAITING_COST} Answer once and it is settled. A &ldquo;yes&rdquo;
+            counts the duty from the period that holds today. A &ldquo;no&rdquo; is recorded with today&rsquo;s date and your
+            name and listed on the register under &ldquo;Considered and not applicable&rdquo;; it stops this duty&rsquo;s own
+            periods being counted.
           </p>
           <div className="mt-3 space-y-2">
             {summary.unanswered.map((q) => (

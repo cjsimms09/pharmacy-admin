@@ -8,6 +8,30 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after `825c572`; NOT deployed or pushed): the Compliance register no longer
+  paints a period covered that nothing judged, and no screen says "clean" over a duty still waiting for its answer.**
+  (1) New `src/lib/judged.ts` (pure): which periods of a duty are judged at all (none while it waits for its yes or no,
+  none before the day a late-confirmed duty was confirmed, none for a duty done as needed), the register's cell states
+  (`cellState`), and the sentences the screens share (`awaitingSaid`, `AWAITING_COST`, `registerSaid`, `yesSaid`,
+  `noSaid`). (2) `src/lib/compliance-status.ts`: `openItems()` reads `judgedPeriods`; `startedUsingSite()` is exported
+  and takes the earliest row; `dismissedObligations()` is new; `answerObligation()` returns `{ title, cadence }`;
+  `complianceSummary().clean`, which nothing read, is deleted. (3) The register lists a duty answered "no" with the
+  day and the person; the Compliance page, Today's "Nothing is late" card and the inspection sheet's register check
+  count the waiting duties; Today's top card says "No alert is open today" and names the late count when anything is
+  late or waiting, because it reads `alerts()`, which does not read compliance. Live, none of this paints anything
+  differently today: 30 duties, all active, none waiting, none answered "no". **Registered, not fixed, in
+  `docs/BACKLOG.md` as A4-1 (leads a to f), with the undo of a mistaken "no" as A4-1b (next) and two questions for him,
+  A4-Q3 and A4-Q4.** `tests/answer-again.test.ts` is written and not committed: it fails until the undo exists.
+  **Files changed on `feature/compliance`, so say so on your pull request before editing one:**
+  `src/lib/compliance-status.ts`, new `src/lib/judged.ts`, `src/lib/inspection.ts`, `src/app/(app)/_actions/compliance.ts`,
+  `src/app/(app)/compliance/page.tsx`, `src/app/(app)/compliance/register/page.tsx`, `src/app/(app)/dashboard/page.tsx`,
+  new `tests/judged.test.ts`, and `docs/OPEN-ITEMS.md`, `docs/BACKLOG.md`, `docs/HANDOFF.md`. **Read by:** two fresh
+  Claude subagents read it cold in turn; five of the second one's six leads were confirmed against the code and fixed,
+  and the sixth is older wording closed by A4-1b. They are models: the corrections after the second reading were read
+  by their author only, no person has read this, nothing was rendered in a browser, the live pages were not read
+  through `openItems()`, and he has not seen the new sentences. Nothing is asked of him or of you beyond the note on a
+  pull request.
+
 - **7 October, pharmacy session (the commit after `e8e9c93`; NOT deployed or pushed): the two registration renewals on
   Compliance now read the certificate on file, so entering it closes them, and they go late the day after the date on
   it and not at the end of the year.** (1) New `src/lib/renewal-cover.ts` (pure): a period is covered when a

@@ -9,6 +9,7 @@ import { registerStatus } from "./business-associates";
 import { onSiteToday, rotations } from "./roster";
 import { getSettings } from "./settings";
 import { periodKeyFor } from "./periods";
+import { registerSaid } from "./judged";
 import { credentialEnd, inForce } from "./superseded";
 
 /**
@@ -283,16 +284,15 @@ export async function inspectionReport(): Promise<InspectionReport> {
 
   // ── Everything the register says is outstanding ───────────────────
   const missed = compliance.missed.length;
+  const partial = compliance.partial.length;
+  const waiting = compliance.unanswered.length;
   add({
     key: "register",
     who: "both",
     asks: "Anything else on your compliance calendar",
     authority: "The pharmacy's own register of standing duties.",
-    state: missed === 0 ? "ready" : missed > 3 ? "blocking" : "gap",
-    answer:
-      missed === 0
-        ? "Every period that has ended is covered."
-        : `${missed} period${missed === 1 ? "" : "s"} went by without being covered. Those are what an inspector finds.`,
+    state: missed > 3 ? "blocking" : missed > 0 || partial > 0 || waiting > 0 ? "gap" : "ready",
+    answer: registerSaid(missed, partial, waiting),
     href: "/compliance",
     printHref: "/compliance/attestations",
   });

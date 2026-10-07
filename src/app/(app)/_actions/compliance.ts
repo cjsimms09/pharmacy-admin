@@ -6,6 +6,8 @@ import { requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { attest, answerObligation } from "@/lib/compliance-status";
 import { periodLabel } from "@/lib/periods";
+import { todayIso } from "@/lib/dates";
+import { yesSaid, noSaid } from "@/lib/judged";
 import { assignTraining, sendOutstanding } from "@/lib/training-assignments";
 import { requestCredential } from "@/lib/credential-requests";
 import type { TrainingType, CredentialType } from "@/db/schema";
@@ -66,11 +68,7 @@ export async function answerAction(fd: FormData) {
     revalidatePath("/compliance/register");
     redirect(
       `${back}?ok=` +
-        encodeURIComponent(
-          applies
-            ? `"${r.title}" is now tracked, counting from today rather than from before you said so.`
-            : `"${r.title}" is switched off, with today's date and your name on the decision.`,
-        ),
+        encodeURIComponent(applies ? yesSaid(r.title, r.cadence, todayIso()) : noSaid(r.title)),
     );
   } catch (e) {
     if (e && typeof e === "object" && "digest" in e) throw e;

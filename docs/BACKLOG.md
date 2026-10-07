@@ -1519,22 +1519,36 @@ place, and an arithmetic check before anything is stored.
     receipt of exactly its amount and no receipt serves two). Expected-not-yet: look again when the next ProviderPay
     export arrives. If it reads past 5 October and still has no advice for that amount, ask him one question: is there
     an advice for it on ProviderPay, and did it come with the 29 September file? Until then nothing is asked.
-  - **A4-1** `compliance/register/page.tsx` near lines 27 and 41-45: a cell is green ("satisfied") unless its period
-    is still open, and `openItems()` skips duties that need confirming (`compliance-status.ts` near line 282), so
-    every period of the six unanswered duties would render green; the main page's `clean` (near line 55) ignores
-    `summary.unanswered`.
-    Checked 7 October (the code; the live database, counts and dates only): real in the code, dormant live. The
-    register paints a cell "satisfied" whenever `openItems()` does not list it, and `openItems()` skips a duty that
-    still needs confirming and the periods before a duty's confirmation (`compliance-status.ts` near lines 276-285), so
-    the periods of an unanswered duty would show green. The page also lists only active duties, and `answerObligation()`
-    switches a duty answered "no" off, with a comment that says the register can then show an inspector it was
-    considered and dismissed on a date; the register would not show it at all. Live, all 30 duties are active and none
-    needs confirming, the 13 completions are all against active, answered duties, and the six that carry a confirmation
-    date (five annual and one quarterly, all 16 September, after the register's start on 3 September) have no period
-    that falls wholly before it, so no cell is green for want of being judged. Not fixed. The fix is to say "awaiting
-    your answer" for an unanswered duty, "not judged before <date>" before a confirmation, and to list a duty answered
-    "no" with the date and who said so, each with a test on the register page. Next after the press, because an
-    inspector reads this page (pre-flight 7: board).
+  - **A4-1** (found and read in code 7 October; fixed in code the same day, committed, not deployed.) OBSERVATION: the
+    register (`compliance/register/page.tsx`) painted a cell covered unless the list on Compliance carried that
+    period; `openItems()` skipped a duty still waiting for its yes or no and the periods before a late confirmation,
+    so those read green; a duty answered "no" was switched off and the register's list of active duties dropped it;
+    Compliance's green "You are clean.", Today's "Nothing is late" and the inspection sheet's register check each
+    ignored the waiting duties, and the inspection check also ignored part-done periods. SHOULD BE: a cell is covered
+    only for a period that was judged; a waiting duty reads "awaiting your answer"; a period before a late
+    confirmation reads "not judged"; a duty answered "no" is listed with the day and the person; no screen says clean
+    over a duty it did not judge. DIFFERENCE: the register decided "covered" by the list's silence. Fixed: `judged.ts`
+    is the one rule both read (`judgedPeriods`, `cellState`); `dismissedObligations()` feeds the register's
+    "Considered and not applicable" list; `registerSaid` for the inspection sheet; the yes and no sentences say what
+    they start and what they leave alone; Today's top card says "No alert is open today" and names the late count
+    when anything is late or waiting (it reads `alerts()`, which does not read compliance); `startedUsingSite()` takes
+    the earliest row; the dead `complianceSummary().clean` is deleted. Row in `docs/OPEN-ITEMS.md`. Left, each a lead:
+    (a) a judged period's "covered" is still the list's silence (`openItems()` leaves out a satisfied period).
+    (b) **A4-1b, next:** the way back from a mistaken "no": a one-press button in the register's "Considered and not
+    applicable" list that posts to the existing `answerAction` with `back=/compliance`. Until then the Compliance
+    page's "Answer once and it is settled" is true; the commit that adds the undo rewrites that sentence and extends
+    the answer's flash, and `tests/answer-again.test.ts` (written, not run; it fails until then, and its
+    `{ title }` assertion on `answerObligation()` becomes `{ title, cadence }`). (c) A period before a late
+    confirmation that has a filing still reads "not judged" and its hover omits the filing; after an undo, the stretch
+    between the no and the yes reads "not judged". (d) The Compliance page's "You are clean." does not read the
+    self-inspection findings or the invoice problems that Today counts as late. (e) The inspection sheet's part-done
+    sentence cannot fire today: no closure sets `perPeriod`. (f) "Every period that has ended" names no start date, by
+    his design.
+    **A4-Q3, for him:** a duty added by a later release: judged from the site's start, or from the day it was added?
+    Live today it changes nothing: three duties were added after the start (5 September and 2 October), all annual or
+    as-needed.
+    **A4-Q4, for him:** when he answers "yes" part-way through a period, is that period judged, so it can be late if it
+    ends uncovered (what the screen now says), or only the next one?
   - **A4-2** "Test that a backup restores": the duty's detail names "the dispensing system and this desk"
     (`obligations.ts` near lines 489-493) but its witness is only this desk's rehearsal archive, and
     `instrumentation.ts` near lines 269-275 rehearses every 30 days, so the quarter would always cover itself. Q for
@@ -1567,9 +1581,9 @@ place, and an arithmetic check before anything is stored.
     `imonnit.ts` near lines 505-507, `monthsSatisfied`, is false for every month when no sensor is tracked.
   - **A4-Q** the "CQI program" duty's witness is a staff member who holds a `cqi_program_review` training record, a
     different act from reviewing the written programme: which does the duty mean?
-  - **A4-6** loose ends: `startedUsingSite()` (`compliance-status.ts` near lines 57-60) and the register page's start
-    (`register/page.tsx` near lines 29-30) each take the first obligations row, not the earliest `created_at`;
-    `inspection.ts` near lines 408-420 says "ready" from the last completed walk with no period test and would
+  - **A4-6** loose ends: (fixed with A4-1: `startedUsingSite()` and the register page's start each took the first
+    obligations row and not the earliest `created_at`; the register now calls `startedUsingSite()`, which orders by
+    `created_at`); `inspection.ts` near lines 408-420 says "ready" from the last completed walk with no period test and would
     disagree with the register from 1 January 2027; `periods.ts` near lines 102-105 re-chooses the judged years of a
     biennial or triennial duty as today moves; the controlled-substance inventory line appears twice ("also late" and
     "Nothing here is late"). The readers report reading these sound, on their word and not mine: `periods.ts`,

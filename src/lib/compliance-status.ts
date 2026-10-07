@@ -1,5 +1,5 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { onSiteToday } from "./roster";
@@ -7,7 +7,8 @@ import { atLocal, todayIso } from "./dates";
 import { ensureObligations, CLOSURES, OBLIGATION_SEEDS, RENEWAL_CREDENTIAL } from "./obligations";
 import { readRenewal, renewalMissing } from "./renewal-cover";
 import { CREDENTIAL_LABEL } from "./labels";
-import { periodsBetween, periodKeyFor, periodLabel, periodEnds, stateOf, type PeriodState } from "./periods";
+import { periodKeyFor, periodLabel, periodEnds, stateOf, type PeriodState } from "./periods";
+import { judgedPeriods } from "./judged";
 import type { ObligationKind, ObligationCadence } from "@/db/schema";
 
 /**
@@ -56,8 +57,8 @@ const fill = (template: string, periodKey: string, today: string) =>
  * open with a page of failures for months nobody could have filed anything in, which teaches the
  * PIC to ignore the screen on the first day they see it.
  */
-async function startedUsingSite(): Promise<string> {
-  const [o] = await db.select({ at: schema.obligations.createdAt }).from(schema.obligations).limit(1);
+export async function startedUsingSite(): Promise<string> {
+  const [o] = await db.select({ at: schema.obligations.createdAt }).from(schema.obligations).orderBy(asc(schema.obligations.createdAt)).limit(1);
   return (o?.at ?? new Date().toISOString()).slice(0, 10);
 }
 
@@ -186,19 +187,36 @@ export async function unansweredObligations(): Promise<Unanswered[]> {
     .sort((a, b) => a.title.localeCompare(b.title));
 }
 
+/** A duty answered "no". It counts nowhere, and the register lists it with the day and the person so it reads as decided and not as overlooked. */
+export type Dismissed = {
+  obligationId: string;
+  title: string;
+  citation: string | null;
+  cadence: ObligationCadence;
+  decidedOn: string | null;
+  decidedBy: string | null;
+};
+
+export async function dismissedObligations(): Promise<Dismissed[]> {
+  const rows = (await db.query.obligations.findMany()).filter((o) => !o.active);
+  return rows
+    .map((o) => ({ obligationId: o.id, title: o.title, citation: o.citation, cadence: o.cadence, decidedOn: o.confirmedOn, decidedBy: o.confirmedBy }))
+    .sort((a, b) => a.title.localeCompare(b.title));
+}
+
 /**
  * Answers one of them.
  *
- * "Yes" starts the clock from today rather than from whenever the site was first opened: a duty
- * that has just been confirmed cannot sensibly be counted late for months in which nobody knew it was
- * theirs. "No" switches it off and records why, so the register can show an inspector that it was
- * considered and dismissed on a date rather than simply absent.
+ * "Yes" counts the duty from the period that holds today rather than from whenever the site was first opened: a duty that has just been
+ * confirmed cannot sensibly be counted late for months in which nobody knew it was theirs. "No" records the decision with the day and the
+ * person, and stops this duty's own periods being counted anywhere, so the register can show an inspector that it was considered and
+ * dismissed on a date rather than simply absent.
  */
 export async function answerObligation(
   obligationId: string,
   applies: boolean,
   user: { id: string; name: string },
-): Promise<{ title: string }> {
+): Promise<{ title: string; cadence: ObligationCadence }> {
   const o = await db.query.obligations.findFirst({ where: eq(schema.obligations.id, obligationId) });
   if (!o) throw new Error("That duty no longer exists.");
   const today = todayIso();
@@ -215,7 +233,7 @@ export async function answerObligation(
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.obligations.id, obligationId));
-  return { title: o.title };
+  return { title: o.title, cadence: o.cadence };
 }
 
 /**
@@ -276,16 +294,9 @@ export async function openItems(today: string = todayIso()): Promise<OpenItem[]>
   const out: OpenItem[] = [];
 
   for (const o of obligations) {
-    if (o.cadence === "as_needed") continue;
-    // Seeded duties that may not apply here at all — an emergency kit, vaccine storage — are a
-    // question until someone answers it. Counting periods against an unanswered question produces
-    // a screen full of failures for things the pharmacy may not even do, which is exactly the
-    // noise that makes a compliance screen stop being read. They are offered separately, once.
-    if (o.needsConfirmation) continue;
-    // A duty confirmed as ours in March is not judged on January. Counting from the confirmation
-    // where there is one is the difference between a real gap and a retrospective one.
-    const from = o.confirmedOn && o.confirmedOn > start ? o.confirmedOn : start;
-    const periods = periodsBetween(o.cadence, from, today);
+    // Which periods are judged is decided in judged.ts, which the register reads too. A duty still waiting for its yes or no is
+    // offered separately, once, and judged for nothing.
+    const periods = judgedPeriods(o, start, today);
     if (periods.length === 0) continue;
 
     const closure = o.seedKey ? CLOSURES[o.seedKey] : undefined;
@@ -431,7 +442,7 @@ export async function attest(
     .where(eq(schema.obligations.id, obligationId));
 }
 
-/** The one-line answer: is the pharmacy clean, and if not, by how much. */
+/** What is outstanding. It does not say "clean": that also needs licences and training current, which this does not read. */
 export async function complianceSummary(): ReturnType<typeof loadComplianceSummary> {
   const { held } = await import("./held");
   return held("compliance-summary", loadComplianceSummary);
@@ -444,7 +455,6 @@ async function loadComplianceSummary() {
   const openNow = items.filter((i) => i.state === "open");
   const quick = items.filter((i) => i.kind === "attest" && (i.minutes ?? 99) <= 10);
   return {
-    clean: missed.length === 0 && partial.length === 0,
     missed,
     partial,
     openNow,
