@@ -134,7 +134,9 @@ export async function readIntoIntake(
   }
 
   try {
-    const doc = await readBusinessDocument({ buffer: bytes, mimeType: file.mimeType, fileName: file.fileName }, await knownParties(), { userId: user.id, userName: user.name });
+    const doc = await asked(user.name, "Reading a document at the intake", async () =>
+      readBusinessDocument({ buffer: bytes, mimeType: file.mimeType, fileName: file.fileName }, await knownParties(), { userId: user.id, userName: user.name }),
+    );
     if (doc.kind !== "compliance_document" && doc.kind !== "other") {
       await db.update(schema.intakeItems).set({ resultJson: JSON.stringify({ kind: "business", doc }) }).where(eq(schema.intakeItems.id, intakeId));
       return;
@@ -475,7 +477,8 @@ export async function applyBusiness(id: string, fd: FormData) {
     try {
       const { pdfText } = await import("@/lib/pdf-text");
       const text = doc.mimeType === "application/pdf" ? pdfText(buf) : "";
-      await writeInvoiceLines(filed.id, text, { allowModel: true, user: { id: user.id, name: user.name } });
+      // Filing at the intake does not ask Claude to read the lines; the invoices page has the button that does.
+      await writeInvoiceLines(filed.id, text);
     } catch {
       /* Lines are read again from the invoices page. */
     }

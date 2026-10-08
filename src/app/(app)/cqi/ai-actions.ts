@@ -192,9 +192,12 @@ export async function applyImport(id: string, fd: FormData) {
   revalidatePath("/cqi/incidents");
   revalidatePath("/");
   if (toWrite.length > 0) {
-    after(async () => {
-      for (const incId of toWrite) await writeIncidentAnalysisInBackground(incId, { id: user.id, name: user.name });
-    });
+    // The ask is made inside the callback, so it holds whether or not the request's context reaches code that runs after the response.
+    after(() =>
+      asked(user.name, "Writing the analyses of the imported incidents", async () => {
+        for (const incId of toWrite) await writeIncidentAnalysisInBackground(incId, { id: user.id, name: user.name });
+      }),
+    );
     redirect(`/cqi/incidents?drafting=${toWrite.length}`);
   }
   redirect(`/cqi/incidents?saved=1`);
@@ -213,7 +216,7 @@ export async function suggestForIncident(id: string, fd: FormData) {
   const here = `/cqi/incidents/${id}`;
   const extra = String(fd.get("extraContext") ?? "").trim() || null;
   try {
-    await writeIncidentAnalysis(id, extra, user);
+    await asked(user.name, "Writing the analysis of an incident", () => writeIncidentAnalysis(id, extra, user));
   } catch (e) {
     fail(here, describeError(e));
   }
@@ -249,9 +252,11 @@ export async function strengthenThinIncidents() {
   }
   await audit({ action: "cqi.incidents.ai_bulk_strengthen", userId: user.id, userName: user.name, details: `${batch.length} queued` });
   // One at a time in the background — each analysis takes a minute or two and the page must come back now.
-  after(async () => {
-    for (const inc of batch) await writeIncidentAnalysisInBackground(inc.id, { id: user.id, name: user.name });
-  });
+  after(() =>
+    asked(user.name, "Rewriting the thin incident analyses", async () => {
+      for (const inc of batch) await writeIncidentAnalysisInBackground(inc.id, { id: user.id, name: user.name });
+    }),
+  );
   revalidatePath(here);
   revalidatePath("/cqi");
   redirect(`${here}?drafting=${batch.length}`);
@@ -327,7 +332,7 @@ export async function startReview(id: string) {
     })
     .where(eq(schema.cqiIncidents.id, id));
   await audit({ action: "cqi.incident.review_started", userId: user.id, userName: user.name, entity: "cqi_incident", entityId: id });
-  if (ready) after(() => writeIncidentAnalysisInBackground(id, { id: user.id, name: user.name }));
+  if (ready) after(() => asked(user.name, "Drafting the analysis for a review that was started", () => writeIncidentAnalysisInBackground(id, { id: user.id, name: user.name })));
   revalidatePath(here);
   revalidatePath("/cqi");
   revalidatePath("/cqi/incidents");
@@ -364,14 +369,16 @@ export async function prepareSummary(id: string) {
   await audit({ action: "cqi.summary.prepare", userId: user.id, userName: user.name, entity: "cqi_summary", entityId: id, details: `${needing.length} review(s) queued` });
 
   // Draft them one at a time after the page has already come back, then the CAP evaluations.
-  after(async () => {
-    for (const inc of needing) await writeIncidentAnalysisInBackground(inc.id, { id: user.id, name: user.name });
-    try {
-      await draftEvaluationsFor(id, user);
-    } catch {
-      /* the evaluation drafts are a convenience; the PIC can still press the button on the summary */
-    }
-  });
+  after(() =>
+    asked(user.name, "Preparing a summary", async () => {
+      for (const inc of needing) await writeIncidentAnalysisInBackground(inc.id, { id: user.id, name: user.name });
+      try {
+        await draftEvaluationsFor(id, user);
+      } catch {
+        /* the evaluation drafts are a convenience; the PIC can still press the button on the summary */
+      }
+    }),
+  );
 
   revalidatePath(here);
   revalidatePath("/cqi");

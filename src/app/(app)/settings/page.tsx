@@ -6,8 +6,9 @@ import { db, schema } from "@/db";
 import { requireManager, createUser } from "@/lib/auth";
 import { getSettings, setSetting, SETTING_KEYS, type SettingKey } from "@/lib/settings";
 import { audit } from "@/lib/audit";
+import { asked } from "@/lib/ai-gate";
 import { apiKeyHint, clearApiKey, saveApiKey, testConnection, hasApiKey, DEFAULT_MODEL } from "@/lib/ai";
-import { spend, rates, dollars, monthlyCap, ratesLookWrong, DEFAULT_RATE_IN, DEFAULT_RATE_OUT } from "@/lib/ai-spend";
+import { spend, rates, dollars, monthlyCap, ceilingSaid, ratesLookWrong, DEFAULT_MONTHLY_CAP, DEFAULT_RATE_IN, DEFAULT_RATE_OUT } from "@/lib/ai-spend";
 import { logo, saveLogo, clearLogo } from "@/lib/branding";
 import { fmt } from "@/lib/dates";
 import { Hub } from "@/components/hub";
@@ -76,21 +77,19 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     await setSetting("ai_model", model);
     await setSetting("ai_price_in", String(fd.get("ai_price_in") ?? "").trim());
     await setSetting("ai_price_out", String(fd.get("ai_price_out") ?? "").trim());
-    await setSetting("ai_monthly_cap", String(fd.get("ai_monthly_cap") ?? "").trim());
     const cap = String(fd.get("ai_monthly_cap") ?? "").trim();
+    await setSetting("ai_monthly_cap", cap);
+    const ceiling = ceilingSaid(cap);
     await audit({
       action: key === "" && hadKey ? "ai.settings.set" : "ai.key.set",
       userId: u.id,
       userName: u.name,
-      details: `model=${model}${cap ? `, ceiling=$${cap}` : ", no ceiling"}`,
+      details: `model=${model}, ${ceiling.logged}`,
     });
-    const t = await testConnection();
+    const t = await asked(u.name, "Testing the Claude connection after saving", () => testConnection());
     revalidatePath("/settings");
     if (t.ok) {
-      redirect(
-        "/settings?saved=" +
-          encodeURIComponent(cap ? `The monthly ceiling is now $${cap}.` : "There is no monthly ceiling any more."),
-      );
+      redirect("/settings?saved=" + encodeURIComponent(ceiling.says));
     }
     /*
      * Saying "the connection test failed" when the ceiling is what stopped it sends somebody to
@@ -102,7 +101,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       "/settings?error=" +
         encodeURIComponent(
           blockedByCeiling
-            ? `Your settings were saved${cap ? ` and the ceiling is now $${cap}` : " with no ceiling"}, but the test itself could not run: ${t.error} If you meant to remove the limit entirely, enter 0 rather than leaving the box empty — empty means the built-in $50.`
+            ? `Your settings were saved. ${ceiling.says} The connection test could not run: ${t.error}${cap === "" ? " If you meant to remove the limit entirely, enter 0 rather than leaving the box empty." : ""}`
             : `Your settings were saved, but the connection test failed: ${t.error}`,
         ),
     );
@@ -119,7 +118,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   async function testKey() {
     "use server";
-    const t = await testConnection();
+    const u = await requireManager();
+    const t = await asked(u.name, "Testing the Claude connection", () => testConnection());
     redirect(t.ok ? "/settings?saved=1&ai=" + encodeURIComponent(t.model) : "/settings?error=" + encodeURIComponent(t.error));
   }
 
@@ -279,7 +279,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       </section>
 
       <section className="card mb-6 max-w-3xl">
-        <h2 className="mb-1 font-semibold">Claude</h2>
+        <h2 id="claude" className="mb-1 font-semibold">Claude</h2>
         <p className="mb-3 text-xs text-ink-3">Used to read scanned CQI packets and draft root cause analyses, corrective action plans, and CAP evaluations for you to review. Get a key at console.anthropic.com → API keys. The key is stored encrypted and never shown again. Prescription numbers and staff names are redacted from text sent for drafting.</p>
         {keyHint ? (
           <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
@@ -332,9 +332,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
             The question that produced this was "am I about to pay a fortune in API fees?", and the
             honest answer — about nine dollars a year — is arithmetic, not reassurance. A number the
-            pharmacist chooses himself is reassurance. It is enforced at the single point every
-            model call passes through, so it covers everything the site does rather than the one
-            screen somebody remembered to guard.
+            pharmacist chooses himself is reassurance. It is checked each time a reading is set up,
+            at the door every call but the contract reader's passes through, and by the contract
+            reader before it queues a batch; the contract reader's two test reads do not ask it, and
+            a reading that has begun is not stopped part-way. That is wider than the one screen
+            somebody remembered to guard.
           */}
           {/*
             The label has to match the code, and it did not.
@@ -346,9 +348,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           */}
           <Field
             label="Stop spending after, per month"
-            hint="Dollars. Leave blank for the built-in $50 ceiling, or enter 0 for no ceiling at all. Nothing is sent to Claude once the last 31 days reach it."
+            hint={`Dollars. Leave blank for the built-in ${dollars(DEFAULT_MONTHLY_CAP)} ceiling, or enter 0 for no ceiling at all. Once the last 31 days reach it, the buttons that use Claude are refused until they fall below it. A reading already under way can finish, so spending can pass it a little.`}
           >
-            <input name="ai_monthly_cap" type="number" step="1" min="0" className="field" defaultValue={s.ai_monthly_cap} placeholder="50 — the built-in ceiling" />
+            <input name="ai_monthly_cap" type="number" step="1" min="0" className="field" defaultValue={s.ai_monthly_cap} placeholder={`${DEFAULT_MONTHLY_CAP} — the built-in ceiling`} />
           </Field>
           <div className="sm:col-span-3"><button className="btn btn-primary">Save and test</button></div>
         </form>

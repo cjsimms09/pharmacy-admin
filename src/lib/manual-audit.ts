@@ -4,7 +4,9 @@ import { db, schema } from "@/db";
 import { newId } from "./crypto";
 import { todayIso, daysBetween } from "./dates";
 import { getSettings, setSetting } from "./settings";
-import { hasApiKey, reviewPolicy, describeError } from "./ai";
+import { hasApiKey, reviewPolicy, describeError, AiCapReachedError, AiNotConfiguredError } from "./ai";
+import { mustBeAsked, NotAsked } from "./ai-gate";
+import { tallyWriteAll, type WriteAllReport, type WriteOutcome } from "./write-all-said";
 import { policies, suggestForm, appendixReference } from "./manual";
 import { pharmacyFacts } from "./pharmacy-facts";
 import { allSections, saveSection, outline } from "./manual-store";
@@ -181,6 +183,8 @@ export async function runManualAudit(
   user: { id: string; name: string },
   opts: { limit?: number; deadline?: number; onProgress?: Progress } = {},
 ): Promise<AuditRun> {
+  // Refused here and not inside the loop below, where the refusal would be written against every section as a failed read.
+  mustBeAsked("Reading the manual");
   const limit = Math.max(1, Math.min(opts.limit ?? 4, 40));
   // A wall clock as well as a count. A model call that takes a minute turns a batch of five into
   // five minutes, and a request that long is indistinguishable from a frozen site to the person
@@ -748,7 +752,7 @@ export async function draftFindingFix(id: string, user: { id: string; name: stri
     await db.update(schema.manualFindings).set({ suggestedBody: r.body }).where(eq(schema.manualFindings.id, id));
     return { wrote: true, changed: r.changed, stillNeeded: null };
   }
-  return { wrote: false, changed: r.changed, stillNeeded: r.stillNeeded ?? "It still turns on a fact about this pharmacy that nobody has supplied." };
+  return { wrote: false, changed: r.changed, stillNeeded: r.stillNeeded ?? "It still turns on a fact about this pharmacy that it does not have." };
 }
 
 /** Every open finding that has no text yet — the ones the list used to leave nowhere to go. */
@@ -760,30 +764,26 @@ export async function findingsNeedingText(): Promise<Finding[]> {
  * Writes the text for as many findings as will fit in the time given.
  *
  * Bounded like every other press on this page: a request that takes minutes reads as a frozen
- * site. Whatever finishes is saved as it goes, so stopping early loses nothing and pressing again
- * continues.
+ * site. Whatever finishes is saved as it goes, so stopping early loses nothing. One that comes
+ * back needing a fact, or fails, keeps no text and so is first in line again on the next press.
  */
 export async function draftAllFindingFixes(
   user: { id: string; name: string },
   opts: { limit?: number; budgetMs?: number } = {},
-): Promise<{ wrote: number; stillNeedFacts: number; left: number; problems: string[] }> {
+): Promise<WriteAllReport> {
   const deadline = Date.now() + (opts.budgetMs ?? 30_000);
   const limit = opts.limit ?? 6;
   const pending = await findingsNeedingText();
-  let wrote = 0;
-  let stillNeedFacts = 0;
-  const problems: string[] = [];
-  let done = 0;
+  const outcomes: WriteOutcome[] = [];
   for (const f of pending) {
-    if (done >= limit || Date.now() > deadline) break;
-    done++;
+    if (outcomes.length >= limit || Date.now() > deadline) break;
     try {
       const r = await draftFindingFix(f.id, user);
-      if (r.wrote) wrote++;
-      else stillNeedFacts++;
+      outcomes.push(r.wrote ? { kind: "wrote", section: f.sectionTitle } : { kind: "needs-fact", section: f.sectionTitle, need: r.stillNeeded ?? "" });
     } catch (e) {
-      problems.push(`${f.sectionTitle}: ${e instanceof Error ? e.message : String(e)}`);
+      const ours = e instanceof AiCapReachedError || e instanceof AiNotConfiguredError || e instanceof NotAsked;
+      outcomes.push({ kind: "failed", section: f.sectionTitle, why: describeError(e), ours });
     }
   }
-  return { wrote, stillNeedFacts, left: Math.max(0, pending.length - done), problems };
+  return tallyWriteAll(outcomes, pending.length, limit);
 }

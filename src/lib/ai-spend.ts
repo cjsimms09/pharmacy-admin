@@ -118,9 +118,11 @@ export const dollars = (n: number): string =>
  * Asked for the moment the pharmacist saw a button that spends money on his own account: "am I
  * about to pay a fortune?" The arithmetic says no, but arithmetic is not reassurance — a limit is.
  *
- * Enforced at the one place every model call passes through, so it covers the manual audit, the
- * invoice reader, the CQI drafting and anything added later, rather than the one screen somebody
- * remembered to guard. Blank means no ceiling.
+ * Enforced in client() in ai.ts, which the manual audit, the invoice reader and the CQI drafting
+ * all go through, rather than on the one screen somebody remembered to guard. The contract reader
+ * has its own door: it asks this same question before it queues a batch, and its two synchronous
+ * test reads (testReader, proveReader) do not. Anything added later that reaches the model another
+ * way has to ask it itself. Blank means the built-in ceiling below, and 0 means none.
  */
 /**
  * The ceiling that applies when nobody has set one.
@@ -132,13 +134,33 @@ export const dollars = (n: number): string =>
  */
 export const DEFAULT_MONTHLY_CAP = 50;
 
+/** The ceiling the box on Settings holds: blank is the built-in one, a number above zero is that number, and 0 or anything else is none. */
+export function ceilingFrom(typed: string | null | undefined): { cap: number | null; isDefault: boolean } {
+  const t = (typed ?? "").trim();
+  const n = Number(t);
+  return { cap: t === "" ? DEFAULT_MONTHLY_CAP : Number.isFinite(n) && n > 0 ? n : null, isDefault: t === "" };
+}
+
+/** What saving that box does, in the words Settings gives back, and the same fact short for the audit trail. */
+export function ceilingSaid(typed: string | null | undefined): { says: string; logged: string } {
+  const { cap, isDefault } = ceilingFrom(typed);
+  const t = (typed ?? "").trim();
+  if (isDefault) {
+    return { says: `The monthly ceiling is the built-in ${dollars(DEFAULT_MONTHLY_CAP)}, because the box is empty.`, logged: `ceiling=${dollars(DEFAULT_MONTHLY_CAP)} (built in)` };
+  }
+  if (cap !== null) return { says: `The monthly ceiling is now ${dollars(cap)}.`, logged: `ceiling=${dollars(cap)}` };
+  if (Number(t) === 0) {
+    return { says: "There is no monthly ceiling: nothing limits what the buttons that use Claude can cost.", logged: "no ceiling (0 entered)" };
+  }
+  return {
+    says: `"${t}" is not an amount above zero, so there is no monthly ceiling. Enter a number to set one, or leave the box empty for the built-in ${dollars(DEFAULT_MONTHLY_CAP)}.`,
+    logged: `no ceiling ("${t}" is not an amount above zero)`,
+  };
+}
+
 export async function monthlyCap(): Promise<{ cap: number | null; spent: number; left: number; over: boolean; isDefault: boolean }> {
   const s = await getSettings();
-  const typed = (s.ai_monthly_cap ?? "").trim();
-  const raw = Number(typed);
-  // An explicit 0 means "no ceiling" for somebody who has decided that deliberately.
-  const cap = typed === "" ? DEFAULT_MONTHLY_CAP : Number.isFinite(raw) && raw > 0 ? raw : null;
-  const isDefault = typed === "";
+  const { cap, isDefault } = ceilingFrom(s.ai_monthly_cap);
   const spent = (await spend(31)).cost;
   return {
     cap,

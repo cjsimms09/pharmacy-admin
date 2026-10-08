@@ -147,3 +147,23 @@ export function keyAgeSays(hasKey: boolean, setOn: string | null, today?: string
   }
   return keyExpirySays(left);
 }
+
+/** The figures over the feed list. A row that nothing is expected to arrive on is counted beside the others, not among those that did not arrive. */
+export function arrivalCounts(states: FeedState[]): { onTime: number; expected: number; notProved: number; off: number } {
+  const count = (s: FeedState) => states.filter((x) => x === s).length;
+  const off = count("off");
+  const notProved = count("unproven");
+  return { onTime: count("on_time"), expected: states.length - off - notProved, notProved, off };
+}
+
+/** The line under the number of feeds that arrived on time: out of those switched on, with the ones nothing could prove beside that, not inside it. */
+export function arrivalSaid(c: { expected: number; notProved: number }): string {
+  return `of ${c.expected} switched on${c.notProved > 0 ? `; ${c.notProved} more ${c.notProved === 1 ? "is" : "are"} not proved` : ""}`;
+}
+
+/** The notice after a live check, naming only the rows that were checked, so it cannot claim a check that had no key or account to run with. */
+export function liveChecksSaid(ran: string[]): string {
+  if (ran.length === 0) return "No live check ran, so no row was checked live.";
+  const names = ran.length === 1 ? ran[0] : `${ran.slice(0, -1).join(", ")} and ${ran[ran.length - 1]}`;
+  return `${ran.length === 1 ? "A live check ran" : "Live checks ran"} against ${names}. What ${ran.length === 1 ? "it" : "each"} said is on its row. No other row was checked live.`;
+}

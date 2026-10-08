@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireManager } from "@/lib/auth";
 import { feedsNow, type Feed } from "@/lib/feeds";
-import { agoWords } from "@/lib/feed-rules";
+import { agoWords, arrivalCounts, arrivalSaid, liveChecksSaid } from "@/lib/feed-rules";
 import { familyTabs } from "@/lib/families";
 import { PageHeader, Notice, BackLink, Card, Figure } from "@/components/ui";
 
@@ -26,8 +26,7 @@ export default async function FeedsPage({ searchParams }: { searchParams: Promis
   const { feeds, late } = await feedsNow({ probe: probing, now });
   const arriving = feeds.filter((f) => f.group === "arriving");
   const services = feeds.filter((f) => f.group === "services");
-  const onTime = feeds.filter((f) => f.state === "on_time").length;
-  const off = feeds.filter((f) => f.state === "off").length;
+  const { onTime, expected, notProved, off } = arrivalCounts(feeds.map((f) => f.state));
 
   return (
     <>
@@ -40,7 +39,7 @@ export default async function FeedsPage({ searchParams }: { searchParams: Promis
           probing ? (
             <Link href="/settings/feeds" className="btn">Done checking</Link>
           ) : (
-            <Link href="/settings/feeds?check=1" className="btn btn-primary">Check the outside services now</Link>
+            <Link href="/settings/feeds?check=1" prefetch={false} className="btn btn-primary">Check the outside services now</Link>
           )
         }
       />
@@ -52,17 +51,17 @@ export default async function FeedsPage({ searchParams }: { searchParams: Promis
       ) : (
         <Notice kind="ok">Nothing that should have arrived is missing.</Notice>
       )}
-      {probing && <Notice>Live checks ran against CMS, the mailbox, Claude and the facilitator&rsquo;s tool. What each said is on its row.</Notice>}
+      {probing && <Notice>{liveChecksSaid(feeds.filter((f) => f.probe).map((f) => f.label))} Claude is not asked from here: testing it is a call to the API, and only the Test connection and Save and test buttons under Settings → Claude make that call.</Notice>}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Figure size="sm" value={onTime} label="Arriving on time" sub={`of ${feeds.length - off} switched on`} tone={late.length ? "warn" : "ok"} />
+        <Figure size="sm" value={onTime} label="Arriving on time" sub={arrivalSaid({ expected, notProved })} tone={late.length ? "warn" : "ok"} />
         <Figure size="sm" value={late.length} label="Stopped or broken" sub={late.length ? late.map((f) => f.label).slice(0, 3).join(", ") : "none"} tone={late.length ? "crit" : "ok"} />
         <Figure size="sm" value={feeds.filter((f) => f.state === "never").length} label="Never arrived" sub="switched on, nothing yet" tone="muted" />
         <Figure size="sm" value={off} label="Switched off" sub="not expected, so not late" tone="muted" />
       </div>
 
       <FeedTable title="Reports and files" subtitle="What lands in the tables, in the order it should worry you." feeds={arriving} now={now} />
-      <FeedTable title="Outside services" subtitle="The things the site talks to. A stored key is not a working connection; the live check is." feeds={services} now={now} />
+      <FeedTable title="Outside services" subtitle="The things the site talks to. A stored key is not a working connection; the live check is, on the rows that have one." feeds={services} now={now} />
 
       <Card title="How to know, and what to do" className="mt-6 text-sm">
         <ol className="list-decimal space-y-2 pl-5 text-ink-2">
@@ -70,7 +69,7 @@ export default async function FeedsPage({ searchParams }: { searchParams: Promis
             <b>Cadence</b> — the newest row in the table the feed fills, against how often it should arrive. A daily report gets two days and a bit so a closed Sunday is not an alarm; a Monday file gets nine days for a bank holiday; a monthly statement gets forty days. Late here means the report stopped, not that it is slow.
           </li>
           <li>
-            <b>Live check</b> — the button above asks CMS for its newest NADAC date and compares it to the one held, logs into the mailbox, asks Claude to answer, and runs the facilitator&rsquo;s tool. A stored key that no longer works fails here and nowhere else.
+            <b>Live check</b> — the button above asks CMS for its newest NADAC date and compares it to the one held, logs into the mailbox where one is connected, and runs the facilitator&rsquo;s tool where a key is stored. A key can be stored and no longer work; this check is what tries it. Claude is the exception: asking it is a call to the API, and only the Test connection and Save and test buttons under Settings → Claude make that call.
           </li>
           <li>
             <b>Proof</b> — arriving is not the same as complete. Claims are checked for a day with no fills; 835s for the share of fills two to ten weeks old that have a paid line behind them, and for payers that have gone quiet; invoices for suppliers with nothing in three weeks; a price file for a size that says it is a partial export.

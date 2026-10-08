@@ -16,8 +16,10 @@ import { judgeFeed, keyAgeSays, missingDays, mtfPull, MTF_QUIET_DAYS, type FeedS
  * So each feed says what it is, how often it should arrive, when it last did, and whether that
  * is recently enough — judged from the data itself (the newest row in the table it fills), never
  * from a job saying it ran. Where a feed can be checked against the outside — CMS's newest NADAC
- * date, the mailbox, the Claude API, the facilitator's tool — that check is offered as a probe,
- * run only when asked, because probes cost time and the Today page must not wait on them.
+ * date, the mailbox, the facilitator's tool — that check is offered as a probe, run only when
+ * asked, because probes cost time and the Today page must not wait on them. Claude is not probed
+ * here: a test of it is a call to the API, which only the Test connection and Save and test
+ * buttons under Settings → Claude make.
  *
  * "Off" is a legitimate state: a pharmacy that has not switched a feed on is not late with it.
  *
@@ -400,22 +402,19 @@ async function loadFeeds(opts: { probe?: boolean; now?: Date }): Promise<{ feeds
     });
 
     const aiOn = Boolean(s.anthropic_api_key_enc);
-    let ai: Feed["probe"] = null;
-    if (opts.probe && aiOn) {
-      const { testConnection } = await import("./ai");
-      ai = await withTimeout(testConnection().then((x) => (x.ok ? { ok: true, says: `Answered as ${x.model}.` } : { ok: false, says: x.error })), 20_000, { ok: false, says: "Claude did not answer within twenty seconds." });
-    }
     feeds.push({
       key: "claude",
       label: "Claude",
       group: "services",
       cadence: "on demand: reads invoices, contracts and photographs",
       lastAt: null,
-      state: !aiOn ? "off" : ai ? (ai.ok ? "on_time" : "broken") : "unproven",
-      detail: aiOn ? "A key is stored." : "No key is stored, so nothing can be read from a document.",
+      state: !aiOn ? "off" : "unproven",
+      detail: aiOn
+        ? "A key is stored. Whether it still works is tested only by the Test connection and Save and test buttons under Settings → Claude: testing it is a call to the API, and nothing on this page makes one."
+        : "No key is stored, so nothing can be read from a document.",
       proof: null,
-      probe: ai,
-      href: "/settings/connections",
+      probe: null,
+      href: "/settings#claude",
     });
 
     const { automationStatus } = await import("./automation-status");

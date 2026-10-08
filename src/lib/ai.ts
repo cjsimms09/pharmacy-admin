@@ -73,7 +73,8 @@ export class AiCapReachedError extends Error {
 }
 
 /*
- * Every model call in this system goes through here, which is why the ceiling is here.
+ * Every model call but the contract reader's goes through here, which is why the ceiling is here;
+ * the contract reader has its own door: it asks the ceiling before it queues a batch, and its two test reads do not.
  *
  * Guarding the manual audit alone would leave the invoice reader, the CQI drafting and anything
  * added next year unguarded — and the point of a limit somebody sets to stop worrying is that they

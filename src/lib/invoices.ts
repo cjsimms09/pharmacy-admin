@@ -19,6 +19,7 @@ import { invoicesOwed, type OwedLine } from "./invoices-owed";
 import { duplicateKey } from "./books-check";
 import { dueDateFrom } from "./invoice-due-date";
 import type { InvoiceSchedule, DocumentCategory } from "@/db/schema";
+import { reasonShown, tally, type LineReadReport, type ModelReading, type OneInvoice } from "./invoice-lines-said";
 
 /**
  * Supplier invoices, filed so the Schedule IIs are genuinely kept apart.
@@ -1078,7 +1079,7 @@ export async function fileInvoice(
       const { NotAsked } = await import("./ai-gate");
       basis =
         e instanceof NotAsked
-          ? `${basis} A model reading was not attempted: nothing here reaches the model unless you press for it. Open the invoice and press the button if you want it read that way.`
+          ? `${basis} A model reading was not attempted: nothing on this site asks the model on its own. It is held for you to say what it carries.`
           : `${basis} It could not be read automatically either: ${e instanceof Error ? e.message : String(e)}. Held with the Schedule II records until somebody says otherwise.`;
     }
   }
@@ -1308,8 +1309,8 @@ export async function fileInvoice(
    *
    * The model is asked only where the rule read nothing at all, and only where the invoice carries
    * a total worth reading. A document with neither lines nor a total is not evidently an invoice,
-   * and paying to look at one is how a ceiling gets spent on junk. Beyond that, every model call in
-   * this site goes through one function that holds the month's ceiling, so the worst case is that
+   * and paying to look at one is how a ceiling gets spent on junk. Beyond that, this model call
+   * goes through the one function that holds the month's ceiling, so the worst case is that
    * an invoice is filed unread and says so — which is exactly what happens today, every time.
    *
    * What is bought for that: $1,530.89 of purchases currently reaching the cost of no drug, no
@@ -1423,15 +1424,18 @@ function textOf(buf: Buffer): string | null {
  * improved answer and never two copies. The counts on the invoice say how far the read got: an
  * invoice with twelve lines read and three unread is a different fact from one with twelve lines.
  *
- * Nothing is stored unless the lines add up to the total printed on the invoice's face. A partial
- * read is the outcome that does damage — every figure that was read looks perfectly sound, and the
- * product whose line was dropped simply appears cheaper than the pharmacy actually paid.
+ * Lines the rules read are kept even when they fall short of the total printed on the invoice's
+ * face, and the invoice carries the shortfall (`linesShortCents`) so the gap is on its row. A
+ * partial read is the outcome that does damage — every figure that was read looks perfectly
+ * sound, and the product whose line was dropped simply appears cheaper than the pharmacy paid —
+ * so it is named, not hidden. Lines Claude read are kept only when they add up to that total, or
+ * when there is no total, on file or on the page, to add them to.
  */
 export async function writeInvoiceLines(
   invoiceId: string,
   text: string,
   opts: { allowModel?: boolean; user?: { id?: string | null; name: string } } = {},
-): Promise<{ read: number; unread: number; reconciles: boolean | null; readBy: "rule" | "model" | null }> {
+): Promise<{ read: number; unread: number; reconciles: boolean | null; readBy: "rule" | "model" | null; model: ModelReading }> {
   const inv = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, invoiceId) });
   const r = await storeInvoiceLines(invoiceId, {
     supplier: inv?.supplier ?? null,
@@ -1466,10 +1470,19 @@ export async function writeInvoiceLines(
   }
   let readBy: "rule" | "model" | null = r.stored > 0 ? "rule" : null;
   let out = r;
+  const model: ModelReading = { sent: false, kept: false, why: null };
   if (r.stored === 0 && opts.allowModel && inv) {
+    const { readInvoiceLines, describeError, AiCapReachedError, AiNotConfiguredError } = await import("./ai");
+    const { NotAsked } = await import("./ai-gate");
     try {
-      const buf = await readStoredFile((await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) }))!.storageKey);
-      const { readInvoiceLines } = await import("./ai");
+      const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, inv.documentId) });
+      const buf = doc
+        ? await readStoredFile(doc.storageKey).catch(() => {
+            throw new Error("The invoice's file could not be opened.");
+          })
+        : null;
+      if (!buf) throw new Error("The invoice's file is no longer on record.");
+      model.sent = true;
       const read = await readInvoiceLines(buf, inv.supplier, {
         userId: opts.user?.id ?? "invoice-reader",
         userName: opts.user?.name ?? "Automatic check",
@@ -1478,9 +1491,15 @@ export async function writeInvoiceLines(
       if (stored.stored > 0) {
         out = stored;
         readBy = "model";
+        model.kept = true;
+      } else {
+        model.why = stored.reconciles === false ? "what Claude read did not add up to the invoice's total" : "Claude found no line that multiplied out";
       }
-    } catch {
-      // The cheap read already failed; a failed expensive one leaves the invoice exactly as it was.
+    } catch (e) {
+      // A failed expensive read leaves the invoice exactly as it was, and says why rather than nothing.
+      const refusal = e instanceof AiCapReachedError || e instanceof AiNotConfiguredError || e instanceof NotAsked;
+      if (refusal) model.sent = false;
+      model.why = reasonShown(describeError(e), refusal);
     }
   }
 
@@ -1488,7 +1507,7 @@ export async function writeInvoiceLines(
     .update(schema.supplierInvoices)
     .set({ linesRead: out.stored, linesUnread: out.unread })
     .where(eq(schema.supplierInvoices.id, invoiceId));
-  return { read: out.stored, unread: out.unread, reconciles: out.reconciles, readBy };
+  return { read: out.stored, unread: out.unread, reconciles: out.reconciles, readBy, model };
 }
 
 /**
@@ -1498,7 +1517,7 @@ export async function writeInvoiceLines(
  * digit produces a line that does not reconcile, and a line that does not reconcile is not stored —
  * which is the same rule that caught a real McKesson line worth eighty-three dollars going missing.
  */
-async function storeModelInvoiceLines(
+export async function storeModelInvoiceLines(
   invoiceId: string,
   inv: SupplierInvoice,
   read: import("./ai").ReadInvoiceLinesT,
@@ -1551,10 +1570,17 @@ async function storeModelInvoiceLines(
     controlled: (l as { controlled?: boolean | null }).controlled ?? null,
   }));
   for (let i = 0; i < rows.length; i += 200) await db.insert(schema.invoiceLines).values(rows.slice(i, i + 200));
+  // The lines on the row are Claude's now, so a shortfall recorded against the rules' lines goes with them.
   // A total read off the page where none was held is worth keeping: it is the figure to reconcile against.
-  if (inv.totalCents === null && read.totalCents !== null) {
-    await db.update(schema.supplierInvoices).set({ totalCents: read.totalCents }).where(eq(schema.supplierInvoices.id, invoiceId));
-  }
+  await db
+    .update(schema.supplierInvoices)
+    .set({
+      linesShortCents: null,
+      linesShortCount: null,
+      linesShortNote: null,
+      ...(inv.totalCents === null && read.totalCents !== null ? { totalCents: read.totalCents } : {}),
+    })
+    .where(eq(schema.supplierInvoices.id, invoiceId));
   return { stored: rows.length, unread, reconciles, readCents: sum };
 }
 
@@ -1594,37 +1620,32 @@ const HAS_NO_LINES = or(isNull(schema.supplierInvoices.linesRead), eq(schema.sup
  */
 export async function backfillInvoiceLines(
   opts: { allowModel?: boolean; user?: { id?: string | null; name: string } } = {},
-): Promise<{ invoices: number; linesRead: number; unreadable: number; unreconciled: number; byModel: number }> {
+): Promise<LineReadReport> {
   const rows = await db.query.supplierInvoices.findMany({ where: HAS_NO_LINES });
   const { readFile } = await import("./files");
-  let invoicesDone = 0;
-  let linesRead = 0;
-  let unreadable = 0;
-  let unreconciled = 0;
-  let byModel = 0;
+  const results: OneInvoice[] = [];
   for (const row of rows) {
     const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, row.documentId) });
-    if (!doc) continue;
+    if (!doc) {
+      results.push({ kind: "failed" });
+      continue;
+    }
     try {
       const text = textOf(await readFile(doc.storageKey));
       if (!text) {
         // A scan. Recorded as read with nothing found, so it is not asked again every time.
         await db.update(schema.supplierInvoices).set({ linesRead: 0, linesUnread: 0 }).where(eq(schema.supplierInvoices.id, row.id));
-        unreadable++;
+        results.push({ kind: "scan" });
         continue;
       }
-      const r = await writeInvoiceLines(row.id, text, opts);
-      invoicesDone++;
-      linesRead += r.read;
-      if (r.readBy === "model") byModel++;
-      // Read, but the lines did not add up to the printed total, so none were kept. Named
-      // separately: it is a layout this reader does not fully know, not a scan.
-      if (r.reconciles === false) unreconciled++;
+      const written = await writeInvoiceLines(row.id, text, opts);
+      const after = await db.query.supplierInvoices.findFirst({ where: eq(schema.supplierInvoices.id, row.id), columns: { linesShortCents: true } });
+      results.push({ kind: "read", ...written, shortCents: after?.linesShortCents ?? 0 });
     } catch {
-      unreadable++;
+      results.push({ kind: "failed" });
     }
   }
-  return { invoices: invoicesDone, linesRead, unreadable, unreconciled, byModel };
+  return tally(results);
 }
 
 /**
@@ -2720,7 +2741,7 @@ export async function adoptDocument(documentId: string, ctx: { userId: string; u
       const { NotAsked } = await import("./ai-gate");
       basis =
         e instanceof NotAsked
-          ? `${basis} A model reading was not attempted: nothing here reaches the model unless you press for it.`
+          ? `${basis} A model reading was not attempted: nothing on this site asks the model on its own.`
           : `${basis} It could not be read automatically either: ${e instanceof Error ? e.message : String(e)}.`;
     }
   }
@@ -2951,16 +2972,7 @@ export async function awaitingReceipt(): Promise<SupplierInvoice[]> {
     .sort((a, b) => (b.invoiceDate ?? "").localeCompare(a.invoiceDate ?? ""));
 }
 
-/**
- * Stores the item lines of an invoice, where they can be read and where they add up.
- *
- * Only when they reconcile against the total printed on the invoice's face. A partial read is the
- * outcome that does damage: every figure that was read looks perfectly sound, and the product
- * whose line was dropped simply appears cheaper than the pharmacy actually paid. Where the sum does
- * not match, nothing is stored and the count of unread lines is left for the invoice page to say,
- * because a purchasing recommendation built on three quarters of an invoice is worse than one built
- * on none of it.
- */
+/** Stores the lines the rules read, kept even when a half falls short of what the invoice prints; the shortfall goes on the invoice's row (`linesShortCents`). */
 export async function storeInvoiceLines(
   invoiceId: string,
   meta: {

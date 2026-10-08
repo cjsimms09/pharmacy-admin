@@ -432,7 +432,7 @@ export async function register() {
       const r = await backfillInvoiceLines({ allowModel: false, user: { name: "the nightly re-read" } });
       const said = [
         `${r.linesRead} lines read off ${r.invoices} invoice${r.invoices === 1 ? "" : "s"}`,
-        r.unreconciled ? `${r.unreconciled} short of the printed total` : null,
+        r.short ? `${r.short} short of what the invoice prints` : null,
         r.unreadable ? `${r.unreadable} with no text to read` : null,
       ]
         .filter(Boolean)

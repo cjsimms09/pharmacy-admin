@@ -1603,3 +1603,168 @@ place, and an arithmetic check before anything is stored.
     force, and a blank date there wipes the date. (e) Two kinds of one type with different labels get due items with the
     same title. (f) A pharmacy certificate with no date recorded gets no due item (the inspection list says no expiry
     date is on file; Today says nothing); a "no expiry date recorded" item was not built.
+
+- **7 October, the presses that reach Claude: LEADS, NOT FINDINGS (prefix A6).** Found while the presses that reach
+  Claude were put under the site's gate (`asked()` in `src/lib/ai-gate.ts`), by the author and by seven fresh readers
+  (subagents), each given the change and not the author's reasoning. What was confirmed against the code is in four
+  OPEN-ITEMS rows, each easy to find by its opening words: 'Thirteen presses that reach Claude', 'The "Read the lines
+  off the invoices" press', 'The sentences around the monthly Claude ceiling' and 'The "Write every fix that needs no
+  answer" button'. What follows is the rest. Each lead was read back against the code by the author on 7 and 8
+  October, and where it depends on data against the live rows, read-only and counts only; no press was run. A reader's
+  hand-back is a lead and some of it was wrong, so each point goes as far as the author checked it and no further. To
+  take one: read the code it names, read the live database read-only where it depends on data (counts and sums, never
+  rows), write it in three lines or drop it, and fix it with a test that fails without the fix. Code is named by
+  function and not by line. Q marks a question for him; none has been asked. A6-7 is not listed: it was a stale
+  comment above `storeInvoiceLines`, corrected in the same commit. The numbering continues the 6 October leads above
+  (A2 to A5).
+  - **A6-1** (what the gate says and what it records) (a) The comment on `asked()` in `ai-gate.ts` said the reason
+    given as `why` is on the usage log. It was not: `why` is held in the store for one call tree and nothing writes it
+    down; `whoAsked()` and `wasAsked()` have no caller outside `ai-gate.ts` and `tests/ai-gate.test.ts`, and every
+    `logUsage(` call (twelve in `ai.ts`, one in `business-docs.ts`) takes its own user and a fixed action name. The
+    comment is corrected in this commit. Still open: either record the press on the usage event, or never expect the
+    bill to be read that way; until then no screen or document may say it can be. (b) `client()` takes a name for what
+    is being done, but it is called with none at twelve places in `ai.ts` and one in `business-docs.ts`, so a refusal
+    from those always begins "This needs the model" and names nothing. (c) The refusal ends "Open the page and press
+    the button, and it will run then", which is wrong where no page can run the thing (the mailbox sweep on its timer,
+    A6-4).
+  - **A6-2** (`scripts/` is not scanned) `tests/ai-presses.test.ts` reads `src/` and not `scripts/`.
+    `scripts/read-contracts.ts` imports and calls `queueExtraction`, `collectExtraction`, `recoverFailures`,
+    `queueTriage` and `collectTriage` from `contract-extract.ts` under no `asked()`, so the gate refuses it and it
+    spends nothing. No `package.json` script and no page runs it, and the pages that used it are retired. Before this
+    note it was named in tracked files only in `docs/HANDOFF.md` and the OPEN-ITEMS row. Delete it, or wrap it and
+    extend the scan to `scripts/`; whether a script he runs by hand counts as pressing a button is his to say.
+  - **A6-3** (what the test cannot see) The test is a source scan and has the limits of one. The `ALLOWED` guards
+    (`ok`) test the text of a call, mostly with regular expressions. An `asked(` inside a server action is accepted
+    wherever the action is wired, so an action that a page calls on load instead of from a button is not detected. Two
+    functions of one name are told apart only by a guard (`testConnection`, for the PioneerRx SQL tool and for
+    Claude). The reach scan follows top-level names in `src/lib`, treats every identifier as a reference (so it
+    over-reports), and no test shows what it does with a path that runs through a name declared somewhere else. A
+    reader's lead that a guard on the Today page's `feedsNow` call could be defeated by passing `probe` through a
+    variable no longer applies: the guard is gone, and `feedsNow` and `setupNow` must reach no door at all. Tighten
+    the test the next time a door to the model is added.
+  - **A6-4** (the mailbox reaches the model under no `asked()`) `importRecognised` in `mailbox.ts` files each document
+    by kind, and two kinds call the model there: `readPurchaseDrillDown`, when the McKesson Purchase Drill Down's
+    layout cannot be read directly (its only caller is `importRecognised`), and `readReturnPolicy` (its other caller,
+    the supplier terms page, is under `asked()`). `importRecognised` is reached by the sweep, on its timer and from
+    the Inbox "Check for new mail now" button (`sweepNow`), by `importDropped` (the Inbox re-route and the Intake), by
+    `rereadInboxItem` (the Inbox re-reads) and by `resortInbox`. None of those is under `asked()`, by design (the
+    `FILING` reason in the test: wrapping them would make every filing spend), so the gate refuses both readings
+    however the document arrives, and the catch files it as "Filed, but could not be loaded: This needs the model, and
+    nothing calls it on its own. Open the page and press the button, and it will run then." `alerts.ts`
+    (`needsTheModel`) and `engine/proofs.ts` leave such rows out of alarms on purpose, and `inbox-line.ts` (the branch
+    on /needs the model/i) tells him the report is "filed; read with the model on your button", but no button can make
+    it run. Not checked: whether either kind of document has arrived since the gate was added, and what the live rows
+    say. Question A6-Q1.
+  - **A6-5** (suspect; never tried, because no invoice has reached it) `storeModelInvoiceLines` holds the model's
+    lines to `inv.totalCents ?? read.totalCents` with no allowance for freight or tax, while `storeInvoiceLines`
+    compares the lines with the goods subtotal where the page prints one (`readGoodsSubtotalCents`) and counts the
+    charges it read. A model reading of an invoice that prints freight or tax would therefore fail to add up whenever
+    the total it is held to includes them, and where there is no total anywhere the model's lines are kept with
+    nothing to prove them against (the press counts those as `keptUnchecked` and says so). On 7 October all 228
+    invoices on file had lines, so nothing has reached this path.
+  - **A6-6** (a reading that is not kept is paid for again on every press) An invoice that Claude read and the code
+    did not keep has no lines, so every later press sends it again, and a reading Claude finishes is charged whether
+    or not it is kept. No count of tries is stored. The press now says so in its "not kept" sentence. Question A6-Q2.
+  - **A6-8** (`fileInvoice`'s comments and `emptyInvoiceWarning`) `emptyInvoiceWarning` and its call in `fileInvoice`
+    (`invoices.ts`) are used only as yes or no: the warning is never shown or stored. The comment above the call says
+    the reason is written into `basis` and the one below says it is not written down. `modelTried: worthReading` is
+    passed to it although filing never asks the model for lines (the gate refuses, and `writeInvoiceLines` reports
+    that nothing was sent), so its sentence "Both readers have had this document" would be false if it were ever
+    shown. Pass `written?.model.sent`, or drop the argument, and make the two comments agree. Separately, `textOf`
+    treats a page with 200 characters of text or fewer as a scan; not checked: whether a short real invoice can be
+    mistaken for one.
+  - **A6-9** (counted as sent when it may not have been) `model.sent = true` is set just before `readInvoiceLines`
+    runs, so a request that fails after it has left counts as sent whether or not it was charged. Usage events are
+    written when a request finishes and could be read instead.
+  - **A6-10** (has he met a refusal?) Unknown. A refused press writes no usage event and, as far as read, no audit
+    entry, so nothing on file shows whether he pressed one of the thirteen and was turned away. The live usage events
+    end on 8 September.
+  - **A6-11** (`readInvoice` is refused for good) `readInvoice` (`ai.ts`) has two callers, `fileInvoice` and
+    `adoptDocument`, both filing and neither under `asked()`, so it is refused every time. `fileInvoice` also still
+    passes `allowModel: worthReading` to the line writer. Either a button reaches it, or the call and the code behind
+    it go.
+  - **A6-12** (the nightly re-read's wording) The nightly re-read writes "N with no text to read" from `r.unreadable`,
+    which holds scans and failures together (`instrumentation.ts`); the report now carries `failed`, so the sentence
+    can tell them apart. `invoice_lines_backfill_result` is written in `instrumentation.ts` and listed in
+    `settings.ts`, and nothing else in `src` names it.
+  - **A6-13** (the CQI "drafted" count counts asks, not drafts) `runCqiAutomation` (`cqi-auto.ts`) does `drafted++`
+    for each queued review whether or not the draft was written: `writeIncidentAnalysisInBackground` catches every
+    error, the gate's refusal included, and marks the incident failed, and `cqiTick` (`instrumentation.ts`) then
+    records "N analysis drafted". Dormant on the live data: no review is due.
+  - **A6-14** (the contract reader, and three sentences about the ceiling) (i) Nine handlers on the retired payers
+    contracts and sort pages (the `RETIRED_PAGE` entries of the test) still call contract readers, and the two test
+    reads among them (`testReader` and `proveReader`, on the retired Sort page) send without checking the ceiling
+    first; they do log their tokens, so the spend counts them afterwards. `src/lib/retired.ts` redirects the
+    addresses; delete the handlers with the pages. (ii) Three sentences say more than the code does: the Settings
+    status paragraph ("Nothing is being sent to Claude until the month rolls on or you raise it",
+    `settings/page.tsx`), the Today alarm in `alerts.ts` ("has been spent in the last month, so nothing further is
+    being sent — the manual will not be read, …"), and the refusal in `ai.ts` ("wait for the month to roll on").
+    "Monthly" is a rolling 31 days (`spend()` in `ai-spend.ts`), so spending drops out a day at a time and not all at
+    once when a month turns, and the alarm's claim about the manual is no longer true of anything that runs on its
+    own. Question for him: a calendar month, or a rolling 31 days?
+  - **A6-15** (what is sent) The Settings → Claude card says the key is used to read scanned CQI packets and draft
+    analyses, and its redaction sentence ("Prescription numbers and staff names are redacted from text sent for
+    drafting") covers drafting only, while `readInvoiceLines` sends the whole invoice PDF as it is. Whether a
+    supplier's invoice ever carries patient information is not known. Nor does the redaction take out a patient's
+    name: `redactText` replaces only digit runs of six or more and the staff names it is given, so a name typed into an
+    incident's description, or into the extra context for a draft, would go to the model as typed. Whether one is ever
+    typed there is not known; he has said he does not want the site to get patient names.
+  - **A6-16** ("short of the amount printed on it") The sentence compares the lines with the goods subtotal where one
+    can be read (`readGoodsSubtotalCents(text) ?? meta.printedTotalCents`) and with the total on file otherwise, and a
+    shortfall that nets to nothing across two halves of one invoice is stored as none (`shortCents` sums the halves,
+    and the row gets `linesShortCents: shortCents || null`).
+  - **A6-17** (the Feeds page's all-clear) The Feeds page prints "Nothing that should have arrived is missing."
+    whenever no feed is late or broken (`late` is the feeds in state late or broken), even if a feed that is switched
+    on has never delivered or has not been proved. True on 7 October, when none was late and none had never arrived.
+  - **A6-18** (the write-all press asks about the least important findings first) `openFindings()` and
+    `findingsForOthers()` (`manual-audit.ts`) order by `severity` and then `createdAt`, and `severity` is a text
+    column, so the order is blocking, note, should. The "Write every fix that needs no answer" press takes the first
+    six findings without text in that order, so the six "note" findings (wording) come before the 26 "should" ones
+    (weaknesses): on 7 October the first six it would ask about were all notes, across four sections. Fix: order by a
+    CASE expression in both places (blocking, then should, then note, as the audit's own instructions define them in
+    `reviewPolicy`) with a scratch-database test.
+  - **A6-19** ("could not write because a fact was missing" counts every finding without text) `blockedOnFacts()`
+    counts the open findings with an empty `suggestedBody`, and the manual page says of them "Those are the ones the
+    reviewer could not write because a fact was missing". A section longer than 4,000 characters
+    (`TOO_LONG_TO_REWRITE` in `reviewPolicy`) is "reviewed, not rewritten" and gives no text for any of its findings,
+    and the fallback path gives none either. On 7 October 29 of the 32 open findings without text were in four
+    sections longer than that (by the lengths of their bodies on that day) and the other 3 were in a section whose
+    body was empty, so the sentence describes few if any of them.
+  - **A6-20** (the same findings are asked again) The press asks about every finding without text, up to six, on each
+    press, and nothing records that one was already asked about, so a finding that always comes back needing a fact
+    uses up one of the six every time. Recording when it was asked needs a column. Question for him: should a finding
+    that has come back needing a fact wait until he answers it?
+  - **A6-21** (no price beside the button) The button's label and the card say "needs no answer" before anything has
+    been asked, and no price is shown beside the button. One measured finding-fix call cost $0.21 (9,391 tokens in,
+    6,573 out). The ceiling and the spend count only calls that returned (`logUsage` runs after the response is in
+    hand), and the ceiling is checked once per `client()` call, so a press can pass it by one call.
+  - **A6-22** (several findings in one section each rewrite the whole section) `applyFinding` saves the finding's
+    `suggestedBody` as the whole section body (`saveSection`, "applied from the audit, not yet reviewed") and does not
+    check that the section is unchanged since the text was written. Where several findings sit in one section (the 32
+    live ones are in five sections), applying a second written fix replaces the first, and a section edited by hand
+    after a fix was written is overwritten by it. Not checked: whether `saveSection` keeps the text it replaces.
+  - **A6-23** (the Claude row on the Feeds page is always "not proved") The Claude row in `feeds.ts`
+    (`state: !aiOn ? "off" : "unproven"`, `href: "/settings#claude"`) has no way to become anything else, because
+    nothing records when Test connection last ran or what it said. Record the time and result of the last test so the
+    row can read them. Registered, not built.
+  - **A6-24** (the Settings banner reads words, and a good save says little)
+    `blockedByCeiling = /ceiling/i.test(t.error ?? "")` in `settings/page.tsx` reads the text of the error and not its
+    class (`AiCapReachedError`), so any other message containing the word counts and a change of wording breaks it
+    silently. After a Save and test that succeeds the page redirects with only the ceiling sentence ("The monthly
+    ceiling is now ..."), so the banner never says that the connection test passed.
+  - **A6-25** (the Mailbox rows judge by the last try) The Mailbox row on the Feeds page (`feeds.ts`, `judgeFeed` on
+    `mail_last_sweep`) and the "Mailbox sweep" row on the automation list (`automation-status.ts`,
+    `judge("mail", ..., s.mail_last_sweep)`) decide on time or late from `mail_last_sweep`, which `sweepMailbox`
+    stamps at the end of every try, failed or not (`mailbox.ts`). `mail_last_result` is shown as the detail but the
+    state does not read it, and the morning check reads the result separately (`daily-check-store.ts`). That is the
+    corollary in rule 7: a time that moves when something fails is not a clock for whether it worked.
+  - **A6-26** (two pages name the Claude key's home differently, and both link the wrong page) `manual/page.tsx` says
+    "Settings → Claude" and links `/settings/connections`; `intake/page.tsx` says "Settings → Connections" and links
+    the same page. The Claude card (key, model, ceiling, Test connection, Save and test) is on `/settings`.
+  - **A6-Q1** (question for him) Which buttons may spend on his account? The Inbox's re-read, re-route, re-sort and
+    "Check for new mail now" buttons are deliberately not under `asked()` (wrapping them would make every filing
+    spend), so the Purchase Drill Down and the return policies the mailbox files can never be read by a press, while
+    the Inbox line for such a report says they can (A6-4). Either those buttons become asks with the price beside
+    them, or the Inbox line stops promising a button.
+  - **A6-Q2** (question for him) An invoice that Claude read and the code did not keep is sent again on every press
+    (A6-6). Should one try be the limit, with the invoice then shown for hand entry?

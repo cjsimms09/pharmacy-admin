@@ -48,12 +48,7 @@ export class NotAsked extends Error {
   }
 }
 
-/**
- * Run something the owner asked for. Everything inside it may reach the model.
- *
- * `why` is recorded on the usage log, so the bill can be read as a list of things somebody pressed
- * rather than as a total.
- */
+/** Run something the owner asked for. Everything inside it may reach the model. */
 export function asked<T>(who: string, why: string, fn: () => Promise<T>): Promise<T> {
   return store.run({ who, why }, fn);
 }

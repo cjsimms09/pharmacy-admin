@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser, requireManager } from "@/lib/auth";
 import { audit } from "@/lib/audit";
+import { asked } from "@/lib/ai-gate";
+import { saidAboutLineRead } from "@/lib/invoice-lines-said";
+import { DEFAULT_MONTHLY_CAP, dollars as dollarAmount } from "@/lib/ai-spend";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { fmt } from "@/lib/dates";
@@ -494,19 +497,19 @@ export default async function InvoicesPage({
      * IPD's invoices come out of text extraction with their columns shredded — every NDC on the
      * page in one run of digits — so no rule can read them, and until now they contributed nothing
      * to any purchasing question. This is a press somebody made deliberately, which is the right
-     * place for the one path that costs money.
+     * place for the one path that costs money. The press is also the ask the gate waits for.
      */
-    const r = await backfillInvoiceLines({ allowModel: true, user: u });
-    await audit({ action: "invoice.lines.backfill", userId: u.id, userName: u.name, details: `${r.invoices} invoices, ${r.linesRead} lines, ${r.byModel} by model` });
+    const r = await asked(u.name, "Reading the lines off the invoices", () => backfillInvoiceLines({ allowModel: true, user: u }));
+    await audit({
+      action: "invoice.lines.backfill",
+      userId: u.id,
+      userName: u.name,
+      details: `${r.invoices} invoices with text to read, ${r.unreadable} without (${r.failed} would not open), ${r.linesRead} lines read, ${r.short} short of what they print, ${r.model.sent} sent to Claude and ${r.byModel} of them kept, ${r.model.refused} stopped before sending`,
+    });
     revalidatePath("/inventory/invoices");
     revalidatePath("/purchasing");
-    const bits = [`${r.linesRead.toLocaleString()} item line${r.linesRead === 1 ? "" : "s"} read off ${r.invoices} invoice${r.invoices === 1 ? "" : "s"}`];
-    // Named apart, because they are different problems: a scan has no text at all, while an
-    // invoice whose lines do not add up to its printed total was read and deliberately not kept.
-    if (r.unreconciled > 0) bits.push(`${r.unreconciled} did not add up to the total printed on them and were left out rather than counted short`);
-    if (r.byModel > 0) bits.push(`${r.byModel} ${r.byModel === 1 ? "was" : "were"} in a layout no rule can read — the page itself was read instead, and the figures still had to add up to the printed total`);
-    if (r.unreadable > 0) bits.push(`${r.unreadable} ${r.unreadable === 1 ? "is a scan" : "are scans"} with no text to read`);
-    redirect("/inventory/invoices?ok=" + encodeURIComponent(bits.join(". ") + "."));
+    const { says, trouble } = saidAboutLineRead(r);
+    redirect(`/inventory/invoices?${trouble ? "error" : "ok"}=${encodeURIComponent(says)}`);
   }
 
   /**
@@ -1693,6 +1696,17 @@ export default async function InvoicesPage({
             read for the NDC and the amount, and marked as partial; nothing is assumed for a quantity or a price the
             page did not print. Each invoice records how many lines were read and how many could not be, so a sum of
             lines is never mistaken for the total of the invoice.
+          </p>
+          <p className="mt-2 text-xs text-ink-3">
+            Where the rules find no line at all on an invoice, pressing this also has Claude read the invoice
+            itself. Up to {noLinesCount} invoice{noLinesCount === 1 ? "" : "s"} could be sent: that count includes any
+            invoice whose page has no text to read or whose file will not open, and those are never sent. That is
+            charged to the pharmacy&apos;s own Claude account. The monthly ceiling under Settings → Claude (the built-in {dollarAmount(DEFAULT_MONTHLY_CAP)} unless one was set there,
+            and 0 there means no ceiling at all) is checked before each invoice is sent, so the last one sent can take
+            the spending a little past it. What Claude reads is kept only if the lines that multiply out add up
+            to the invoice&apos;s total, or if there is no total to add them up to. Otherwise the invoice stays
+            without lines and is sent again the next time this is pressed, and a reading Claude finishes is charged
+            for whether or not it is kept.
           </p>
         </Card>
       )}

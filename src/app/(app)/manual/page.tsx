@@ -46,6 +46,7 @@ import { manualJob, startPutRight, runPutRight, isRunning, isStale, summarise, a
 import { decisionsOutstanding } from "@/lib/practice-decisions";
 import { acknowledgementBoard, settleVersions } from "@/lib/manual-acknowledgement";
 import { estimateSentence } from "@/lib/ai-spend";
+import { saidAboutWriteAll, CHANGE_IT_LABEL, NOT_A_PROBLEM_LABEL, TELL_IT_LABEL } from "@/lib/write-all-said";
 import { pharmacyFacts, namedRoles } from "@/lib/pharmacy-facts";
 import { fmt, todayIso } from "@/lib/dates";
 import { PageHeader, Card, Figure, Notice, Field, Empty } from "@/components/ui";
@@ -391,7 +392,7 @@ export default async function ManualPage({
     const u = await requireManager();
     const id = String(fd.get("id") ?? "");
     try {
-      const r = await draftFindingFix(id, u);
+      const r = await asked(u.name, "Writing a fix for an audit finding", () => draftFindingFix(id, u));
       await audit({ action: "manual.finding.draft", userId: u.id, userName: u.name, entity: "manual", entityId: id });
       revalidatePath("/manual");
       redirect(
@@ -418,7 +419,9 @@ export default async function ManualPage({
       await answerFinding(id, answer, u);
       await audit({ action: "manual.finding.answer", userId: u.id, userName: u.name, entity: "manual", entityId: id, details: answer.slice(0, 200) });
       // Answering and then having to press a second button is the loop left half open.
-      const r = answer.trim() ? await draftFindingFix(id, u) : { wrote: false, changed: "", stillNeeded: null };
+      const r = answer.trim()
+        ? await asked(u.name, "Writing a fix from the answer to an audit finding", () => draftFindingFix(id, u))
+        : { wrote: false, changed: "", stillNeeded: null };
       revalidatePath("/manual");
       redirect(
         "/manual?ok=" +
@@ -441,18 +444,16 @@ export default async function ManualPage({
     "use server";
     const u = await requireManager();
     try {
-      const r = await draftAllFindingFixes(u);
-      await audit({ action: "manual.finding.draft_all", userId: u.id, userName: u.name, details: `${r.wrote} written` });
+      const r = await asked(u.name, "Writing the fixes for the audit findings", () => draftAllFindingFixes(u));
+      const said = saidAboutWriteAll(r);
+      await audit({
+        action: "manual.finding.draft_all",
+        userId: u.id,
+        userName: u.name,
+        details: `${r.tried} asked about, ${r.wrote} written, ${r.needFacts.length} wanting a fact, ${r.failed.length} failed, ${r.notTried} not tried`,
+      });
       revalidatePath("/manual");
-      redirect(
-        "/manual?ok=" +
-          encodeURIComponent(
-            `${r.wrote} written and waiting for you to read.` +
-              (r.stillNeedFacts ? ` ${r.stillNeedFacts} still need a fact about this pharmacy — each says which, on the finding.` : "") +
-              (r.left ? ` ${r.left} left; press again to carry on.` : "") +
-              (r.problems.length ? ` ${r.problems[0]}` : ""),
-          ) + "#audit",
-      );
+      redirect(`/manual?${said.trouble ? "error" : "ok"}=` + encodeURIComponent(said.says) + "#audit");
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not write those.") + "#audit");
@@ -769,7 +770,8 @@ export default async function ManualPage({
      * and returning immediately means the press is instant, the site stays usable, and the panel
      * on this page shows what is happening.
      */
-    if (r.started) after(() => runPutRight(u, r.runId));
+    // The ask is made inside the callback, so it holds whether or not the request's context reaches code that runs after the response.
+    if (r.started) after(() => asked(u.name, "Putting the manual right", () => runPutRight(u, r.runId)));
     revalidatePath("/manual");
     redirect(`/manual?${r.started ? "ok" : "error"}=` + encodeURIComponent(r.message));
   }
@@ -1555,7 +1557,7 @@ export default async function ManualPage({
                         */}
                         <details open={Boolean(f.answer)}>
                           <summary className="cursor-pointer text-xs text-ink-3 hover:text-accent">
-                            {f.answer ? "Change what you told it" : "This turns on how we do it here — tell it"}
+                            {f.answer ? CHANGE_IT_LABEL : TELL_IT_LABEL}
                           </summary>
                           <form action={answerFindingAction} className="mt-1 flex flex-wrap items-start gap-1.5">
                             <input type="hidden" name="id" value={f.id} />
@@ -1573,7 +1575,7 @@ export default async function ManualPage({
                         <form action={dismissFindingAction} className="flex flex-wrap items-center gap-1.5">
                           <input type="hidden" name="id" value={f.id} />
                           <input name="reason" required className="field w-56 py-1 text-xs" placeholder="Why this is not a problem here" />
-                          <button className="btn btn-sm">Not a problem</button>
+                          <button className="btn btn-sm">{NOT_A_PROBLEM_LABEL}</button>
                         </form>
                       </div>
                     )}

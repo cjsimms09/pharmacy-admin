@@ -8,6 +8,58 @@ file is how they talk.
 
 ## Open items
 
+- **7 October, pharmacy session (the commit after `48c5a78`; NOT deployed or pushed; NOT to be deployed without the
+  commit after it): the thirteen presses that reach Claude now run under the site's gate, the feeds page no longer
+  asks Claude anything, and a test fails when a press is left outside the gate.** (1) The gate (`asked()` in
+  `src/lib/ai-gate.ts`, committed 10 September as `66f2084`, an ancestor of the last pushed tip `7a888eb`) refuses
+  anything that reaches the model unless a button he pressed started it. Thirteen presses ran outside it (five on the
+  CQI pages, four on the manual page, two on Settings, one that reads a document at the intake, and "Read the lines
+  off the invoices"), so by the code the live site very likely refuses each of them today with a message telling him
+  to press the button he has just pressed. Each now runs under `asked(user.name, …)`; the five that start in `after()`
+  ask inside the callback. Not checked: that the running process is the 2 October build; no press was run, because a
+  press is what calls the model. (2) `runManualAudit` (`src/lib/manual-audit.ts`) refuses once, at its first
+  statement. (3) The feeds page (`src/lib/feeds.ts`, `src/app/(app)/settings/feeds/page.tsx`, `src/lib/feed-rules.ts`)
+  asks Claude nothing: the Claude row reads "unproven" and links to `/settings#claude`, which has the buttons that
+  test the key, and "Arriving on time" no longer counts it as a feed that did not arrive. (4) Filing at the intake no
+  longer asks for a model reading of the lines, and the sentence in `src/lib/invoices.ts` that told him to press a
+  button that does not exist is gone. (5) New `src/lib/invoice-lines-said.ts` and `src/lib/write-all-said.ts` (pure):
+  what the "Read the lines off the invoices" and "Write every fix that needs no answer" presses count and say; the
+  second no longer counts a finding as done whether or not it was written. (6) The sentences around the monthly Claude
+  ceiling (`src/lib/ai-spend.ts`, `src/app/(app)/settings/page.tsx`) are worded from the rule the site applies and not
+  from what he typed in the box. (7) New `tests/ai-presses.test.ts` reads every file under `src` with the TypeScript
+  parser and fails on any call that can reach the model from outside `asked()`; each of the 20 `asked()` wrappers was
+  removed one at a time and the test fails for each. With the other new and changed tests the whole suite passes on a
+  scratch database (4,965 of 4,965), with `tests/answer-again.test.ts`, the undo test for A4-1b, out of the tree
+  because it fails until the undo exists. **Registered, not fixed, in `docs/BACKLOG.md` as A6-1 to A6-26** (leads, not
+  findings; A6-7 was fixed in this commit) **with two questions for him, A6-Q1** (which buttons may spend on his
+  account: the mailbox's Purchase Drill Down and return-policy readings can never run, though the Inbox says a button
+  will) **and A6-Q2** (what happens to an invoice Claude read and the code did not keep). The evidence is in four rows
+  of `docs/OPEN-ITEMS.md`, found by their opening words: 'Thirteen presses that reach Claude', 'The "Read the lines
+  off the invoices" press', 'The sentences around the monthly Claude ceiling' and 'The "Write every fix that needs no
+  answer" button'. **Not to be deployed without the commit after this one.** That commit removes the manual's idle
+  tick (`manualAuditTick` in `src/instrumentation.ts`), the "Policy manual audit" row that reads its clock, and the
+  copy that promises an automatic audit. Without it the tick stays in place, is refused at `runManualAudit`'s first
+  statement, and its empty `catch` swallows the refusal, so it does nothing and writes nothing (no section of the
+  manual falls due until 2027-09-04), and the false "Something the site does for you has stopped — Policy manual
+  audit" alarm stays on Today. **Files changed on `feature/compliance`, so say so on your pull request before editing
+  one:** `src/lib/ai-gate.ts`, `src/lib/ai.ts`, `src/lib/ai-spend.ts`, `src/lib/manual-audit.ts`,
+  `src/lib/invoices.ts`, `src/lib/feeds.ts`, `src/lib/feed-rules.ts`, `src/instrumentation.ts`,
+  `src/app/(app)/cqi/ai-actions.ts`, `src/app/(app)/intake/actions.ts`, `src/app/(app)/inventory/invoices/page.tsx`,
+  `src/app/(app)/manual/page.tsx`, `src/app/(app)/settings/page.tsx`, `src/app/(app)/settings/feeds/page.tsx`, new
+  `src/lib/invoice-lines-said.ts`, new `src/lib/write-all-said.ts`, `tests/ai-spend.test.ts`,
+  `tests/feed-rules.test.ts`, new `tests/ai-presses.test.ts`, new `tests/claude-test-buttons.test.ts`, new
+  `tests/invoice-line-read-report.test.ts`, new `tests/invoice-lines-said.test.ts`, new
+  `tests/model-invoice-lines-store.test.ts`, new `tests/write-all-said.test.ts`, and `docs/OPEN-ITEMS.md`,
+  `docs/BACKLOG.md`, `docs/HANDOFF.md`. **Read by:** seven fresh Claude subagents read the change cold, each at a
+  different stage of it and each given the change itself and not the message or the author's reasoning; every
+  hand-back was treated as a lead and checked against the code, and what held was fixed or registered. The corrections
+  made after the seventh reading, the tests and the docs were read by their author only, which is the weaker form.
+  They are models: no person has read this, no press was run, nothing was rendered in a browser, and he has not seen
+  the new sentences. **History:** the commits after `7a888eb` were rewritten (new hashes) on 7 October, before any
+  push, to keep a real identifier out of the public repository; the old tip is kept locally and must never be pushed.
+  No pull request from the other session was open when this was written. Nothing is asked of him or of you beyond the
+  note on a pull request.
+
 - **7 October, pharmacy session (the commit after `825c572`; NOT deployed or pushed): the Compliance register no longer
   paints a period covered that nothing judged, and no screen says "clean" over a duty still waiting for its answer.**
   (1) New `src/lib/judged.ts` (pure): which periods of a duty are judged at all (none while it waits for its yes or no,
