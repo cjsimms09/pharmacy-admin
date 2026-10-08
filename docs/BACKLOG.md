@@ -1701,7 +1701,10 @@ place, and an arithmetic check before anything is stored.
     being sent — the manual will not be read, …"), and the refusal in `ai.ts` ("wait for the month to roll on").
     "Monthly" is a rolling 31 days (`spend()` in `ai-spend.ts`), so spending drops out a day at a time and not all at
     once when a month turns, and the alarm's claim about the manual is no longer true of anything that runs on its
-    own. Question for him: a calendar month, or a rolling 31 days?
+    own. Question for him: a calendar month, or a rolling 31 days? (8 October: with the manual's idle tick removed,
+    "the manual will not be read" is true of a press of "Put it right" only, which the ceiling does refuse; the
+    alarm was not edited. "Spent" is the site's own audit log of Claude calls priced at the stored rates, not the
+    Anthropic bill.)
   - **A6-15** (what is sent) The Settings → Claude card says the key is used to read scanned CQI packets and draft
     analyses, and its redaction sentence ("Prescription numbers and staff names are redacted from text sent for
     drafting") covers drafting only, while `readInvoiceLines` sends the whole invoice PDF as it is. Whether a
@@ -1761,6 +1764,55 @@ place, and an arithmetic check before anything is stored.
   - **A6-26** (two pages name the Claude key's home differently, and both link the wrong page) `manual/page.tsx` says
     "Settings → Claude" and links `/settings/connections`; `intake/page.tsx` says "Settings → Connections" and links
     the same page. The Claude card (key, model, ceiling, Test connection, Save and test) is on `/settings`.
+  - **A6-27** (the manual's parked sections: six loose ends, five not showing on the live rows) The first five show on
+    no live row today (0 of the 75 sections the pharmacy owns are parked, read on 8 October, and nothing falls due
+    before 4 September 2027). The sixth shows in part (A6-28): the page lists three problems today and a press acts on
+    none of them (it has no section to read, no heading to fill and no marker to remove; it still rebuilds the
+    sections the site writes), so both buttons are offered although a press has nothing to do for the list; the notice
+    needs a pass that died, which can happen on any day, and the last pass finished. Four readers who had not seen the
+    change to the manual page found or sharpened them, and each was read back against the code. Most were there before
+    this change; the paragraph about the queue in (v) and the notice in (vi) are sentences this change wrote. (i)
+    `auditFailCount` counts failures over the section's whole life, not failures in a row: the branch of
+    `runManualAudit` that reads with the model clears `auditFailedOn` and `auditError` on a success but not the count
+    (the branch with no model does clear it), so a section that fails twice one year and once the next is parked on
+    the third and the page says "failed three times" as if they had come together. (ii) `rereadBlockedSections()`
+    clears `auditedOn`, `auditFailedOn` and `auditError` but not the count, so a parked section it queues is still
+    skipped by a press and, with no failure date, is no longer listed as stuck. (iii) `runManualAudit` writes "the
+    whole manual is current" into `manual_audit_result` when `due(9999)` is empty, and `due` leaves the parked
+    sections out, so a press that reads the last section it will read says the whole manual is current while parked
+    ones remain. (iv) The price under the button (`estimateSentence(audit_.due, …)`) and the "due" line in "What is
+    wrong with the manual" count the parked sections, which a press does not read; `AuditProgress.parked` is the
+    number to take off. (v) The list of sections that could not be read shows five names under a heading that counts
+    all of them, with no "and N more". The paragraph about the queue ("Nothing reads the manual unless you press it",
+    then "press it again after each pass, until only the N that a press skips are left") is shown whenever any section
+    is due, parked or not, so it is also shown when a press would read none of them, when there is no key to press
+    with, and to staff who have no button to press; and the N in it counts a section that (ii) leaves unlisted. (vi)
+    The notice "The last pass stopped before it finished" and both "Put it right" buttons test `problems.length > 0`,
+    and that list also counts the blocking and weaker findings and the review date, which a press neither answers nor
+    signs (`summarise` in `manual-job.ts` lists what a press does): the notice can say "Press Put it right to carry
+    on" when a press would do nothing, or point at a button that is greyed out (the card's whenever Claude is not
+    connected, the header's when Claude is not connected and no empty section or footnote marker is waiting), and with
+    nothing outstanding it stays on the page beside "nothing to carry on", because only a press clears it and none is
+    offered. Fix: zero the count when a read succeeds and in `rereadBlockedSections`; build the sentence in
+    `manual_audit_result` in a pure function from `remaining` and `parked`, with a test; take `parked` off the price
+    and the line; name the rest of the list; show the queue paragraph and the notice's advice only when a press has
+    something it will read or write and an enabled button to press (A6-28 is the same condition for the button
+    itself). The yearly nudge before the first sections fall due is question A6-Q3.
+  - **A6-28** (the manual page says one press fixes everything it lists, and a press acts on none of the three it
+    lists today) Observation, read on 8 October from the code and from the live rows (counts only; nothing was
+    rendered and no press was run): the card "What is wrong with the manual" lists three problems, 17 blocking
+    findings, 33 weaker findings and 75 sections with no review date; its subtitle says "Everything here is fixed by
+    one press, except the last line of each"; and "Put it right" is offered under the list. Should be: a button under
+    a list clears the list, or the list says which of its lines the button clears; the comment above the card in the
+    page's source says the button underneath "does all of it" so that the pharmacist-in-charge does not have to know
+    which operation fixes which symptom. Difference: a press (`putRight`) reads the sections that are due (none are),
+    fills the empty headings (none), removes the footnote markers (none) and rebuilds the sections the site writes, so
+    it acts on none of the three; the line under each says what does ("Applied or dismissed with a reason, one at a
+    time or all together", "Only you can sign that"), and the card's other buttons are "Apply all N suggested
+    rewrites" and "I have reviewed the manual — record today". The card and the button are as they were before this
+    change, which does not touch them. Not checked: what a press returns on these rows (the rebuild of the generated
+    sections was not run) and the page in a browser. Fix: say under the button which lines it clears, or offer it only
+    when a line it clears is present.
   - **A6-Q1** (question for him) Which buttons may spend on his account? The Inbox's re-read, re-route, re-sort and
     "Check for new mail now" buttons are deliberately not under `asked()` (wrapping them would make every filing
     spend), so the Purchase Drill Down and the return policies the mailbox files can never be read by a press, while
@@ -1768,3 +1820,7 @@ place, and an arithmetic check before anything is stored.
     them, or the Inbox line stops promising a button.
   - **A6-Q2** (question for him) An invoice that Claude read and the code did not keep is sent again on every press
     (A6-6). Should one try be the limit, with the invoice then shown for hand entry?
+  - **A6-Q3** (question for him) The first policy-manual sections fall due for their yearly reading on 4 September
+    2027. Nothing reads them unless he presses "Put it right", and nothing tells him beforehand: the manual page shows
+    how many are due only from that day. Should Today, or the weekly email, say that N sections fall due within 30
+    days?

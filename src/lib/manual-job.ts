@@ -252,24 +252,3 @@ export function summarise(r: PutRightResult): string {
     .filter(Boolean)
     .join(". ");
 }
-
-/**
- * Clears a job whose process is no longer there.
- *
- * A pharmacy computer gets switched off at the end of the day, sometimes with a pass in flight.
- * Nothing would ever finish that job or mark it failed, and a "running" that never clears means a
- * button that can never be pressed again — the failure looks exactly like the one this whole file
- * exists to fix. So the background beat sweeps it up.
- */
-export async function reapStale(): Promise<boolean> {
-  const job = await manualJob();
-  if (!isStale(job) || !job) return false;
-  await write({
-    ...job,
-    state: "failed",
-    finishedAt: new Date().toISOString(),
-    step: "Stopped",
-    error: "It stopped before finishing — normally the computer being switched off or restarted. Everything done up to that point was saved.",
-  });
-  return true;
-}

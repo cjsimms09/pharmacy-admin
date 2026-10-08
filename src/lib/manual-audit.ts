@@ -12,18 +12,18 @@ import { pharmacyFacts } from "./pharmacy-facts";
 import { allSections, saveSection, outline } from "./manual-store";
 
 /**
- * Reading the manual against the rules, a few sections at a time, for ever.
+ * Reading the manual against the rules, a few sections at a time.
  *
  * The pharmacy's annual review was a date somebody put their name to. That is what the regulation
  * asks for and it is worth nothing on its own: a manual can be reviewed on time for five years
  * running and still say the pharmacy does something it stopped doing in year one. Nobody rereads
  * a hundred and fifty sections against Kansas, DEA, HIPAA and OSHA once a year. They sign.
  *
- * So the audit is continuous rather than annual, and the annual part is only the deadline. Every
- * section has a date it was last actually read against the requirements; anything older than a
- * year is due; a handful are done on each idle turn of the background job. The pharmacy never
- * waits for a long run and never pays for one, and by the time the year is up the whole manual
- * has been through it.
+ * So the audit is a date on every section rather than a signature on the whole, and the annual
+ * part is only the deadline. Every section has a date it was last actually read against the
+ * requirements, and anything older than a year is due. Nothing reads a section by itself: the
+ * site asks Claude nothing unless he presses a button, so a due section waits for "Put it right"
+ * on the manual page, and each press reads a bounded number of them and says how many are left.
  *
  * Findings are rows to work through rather than a report to file. Each carries the replacement
  * text where one could be written, so acting on it is a button; each has to be applied or
@@ -34,19 +34,21 @@ import { allSections, saveSection, outline } from "./manual-store";
 export const AUDIT_INTERVAL_DAYS = 365;
 
 /**
- * How many times a section may fail before it stops being retried on its own.
+ * How many times a section may fail before a press stops trying it.
  *
- * A section that fails stays due, and a thing that is always due is retried for ever. Once
- * everything else has been read, the only sections left are the ones that cannot be, and the
- * half-hourly beat would retry them every half hour indefinitely — a model call each time, on the
- * pharmacy's own account, with nobody at the computer to notice. Three attempts is enough to ride
- * out a bad afternoon at the API and few enough that a genuinely unreadable section costs pennies
- * rather than running until somebody looks at a bill.
+ * A section that fails stays due, and a thing that is always due is tried again by every press.
+ * Once everything else has been read, the only sections left are the ones that cannot be, and
+ * each press would pay for a model call on every one of them to meet the same failure again.
+ * Three attempts is enough to ride out a bad afternoon at the API and few enough that a genuinely
+ * unreadable section costs pennies rather than a charge on every press.
  *
  * Parked is not resolved. It is still due, still counted, still named on the page with its reason.
  * What changes is that a person has to ask for it again.
  */
 export const MAX_AUDIT_ATTEMPTS = 3;
+
+/** Whether a press skips a section: it has failed `MAX_AUDIT_ATTEMPTS` times and nobody has asked for it to be tried again. */
+export const isParked = (failCount: number | null | undefined) => (failCount ?? 0) >= MAX_AUDIT_ATTEMPTS;
 
 export type Finding = typeof schema.manualFindings.$inferSelect;
 
@@ -56,6 +58,8 @@ export type AuditProgress = {
   /** Of those, read against the requirements within the last year. */
   current: number;
   due: number;
+  /** Of those, the ones that failed three times, which a press skips until somebody asks for them to be tried again. */
+  parked: number;
   /** Findings nobody has applied or dismissed. */
   open: number;
   blocking: number;
@@ -63,8 +67,6 @@ export type AuditProgress = {
   lastResult: string | null;
   /** Whether it can run at all. */
   ready: boolean;
-  /** Off when the pharmacy has switched the automatic pass off. */
-  automatic: boolean;
 };
 
 /**
@@ -95,12 +97,12 @@ export async function auditProgress(): Promise<AuditProgress> {
     total: rows.length,
     current,
     due: rows.length - current,
+    parked: rows.filter((r) => isAuditDue(r.auditedOn, today) && isParked(r.auditFailCount)).length,
     open: findings.length,
     blocking: findings.filter((f) => f.severity === "blocking").length,
     lastRunAt: s.manual_audit_last || null,
     lastResult: s.manual_audit_result || null,
     ready,
-    automatic: s.manual_audit_auto !== "no",
   };
 }
 
@@ -125,7 +127,7 @@ export function isAuditDue(auditedOn: string | null | undefined, today: string):
  * attempt is not a read — the section is still due — but it is an attempt, and something tried an
  * hour ago should go behind something never tried at all.
  */
-async function due(limit: number, opts: { includeParked?: boolean } = {}) {
+export async function due(limit: number, opts: { includeParked?: boolean } = {}) {
   const rows = await auditable();
   const today = todayIso();
   const lastTried = (r: { auditedOn: string | null; auditFailedOn: string | null }) =>
@@ -133,7 +135,7 @@ async function due(limit: number, opts: { includeParked?: boolean } = {}) {
   return rows
     .filter((r) => isAuditDue(r.auditedOn, today))
     // Parked sections are still due; they are simply not tried again without being asked for.
-    .filter((r) => (opts.includeParked ? true : (r.auditFailCount ?? 0) < MAX_AUDIT_ATTEMPTS))
+    .filter((r) => (opts.includeParked ? true : !isParked(r.auditFailCount)))
     .sort((a, b) => lastTried(a).localeCompare(lastTried(b)))
     .slice(0, limit);
 }
@@ -151,7 +153,7 @@ export async function auditFailures(): Promise<
       when: r.auditFailedOn!,
       why: r.auditError ?? "No reason was recorded.",
       attempts: r.auditFailCount ?? 0,
-      parked: (r.auditFailCount ?? 0) >= MAX_AUDIT_ATTEMPTS,
+      parked: isParked(r.auditFailCount),
     }))
     .sort((a, b) => b.when.localeCompare(a.when));
 }
@@ -163,8 +165,8 @@ export type AuditRun = { audited: number; findings: number; remaining: number; p
  *
  * Not decoration. This runs for minutes against a model, and a button with no visible effect is
  * one somebody presses again, and again, and then reports as broken — which is exactly what
- * happened. Whoever starts the job decides what to do with these; the background beat throws
- * them away, the page writes them where it can show them.
+ * happened. Whoever starts the job decides what to do with these; the page writes them where it
+ * can show them.
  */
 export type Progress = (p: { step: string; done: number; total: number }) => void | Promise<void>;
 
@@ -173,8 +175,8 @@ export type Progress = (p: { step: string; done: number; total: number }) => voi
  *
  * Bounded on purpose. A hundred and fifty model calls in one request is a page that appears to
  * hang, a bill nobody chose, and a job that cannot be interrupted — and none of that buys
- * anything, because the deadline is a year away. Small batches run on the idle beat and the work
- * finishes long before it is due.
+ * anything, because the deadline is a year away. A press reads a small batch and says how many are
+ * left, and pressing again carries on.
  *
  * An empty heading naming a form this system produces is dealt with without a model at all: that
  * is a fact about this site, not a judgement, and it should not cost a call to establish.
@@ -285,9 +287,9 @@ export async function runManualAudit(
           auditFailCount: attempts,
         })
         .where(eq(schema.manualSections.id, sec.id));
-      if (attempts >= MAX_AUDIT_ATTEMPTS) {
+      if (isParked(attempts)) {
         out.problems.push(
-          `“${sec.title}” has now failed ${attempts} times and will not be tried again on its own. It is still due and still listed; ask for it and it will be tried again.`,
+          `“${sec.title}” has now failed ${attempts} times, so a press will skip it from now on. It is still due; “Try them again” on the manual page puts it back in the queue.`,
         );
       }
     }
@@ -450,9 +452,8 @@ export async function putRight(
    * before the server does — so the button appeared to do nothing at all, which is the worst
    * possible failure for the one button the page is built around.
    *
-   * A press now does a minute of work and says exactly what is left. Pressing again continues,
-   * and the background job continues on its own regardless, so nothing depends on anybody
-   * pressing it a second time.
+   * A press now does a minute of work and says exactly what is left. Pressing again continues
+   * from where it stopped.
    */
   const auditLimit = opts.auditLimit ?? 5;
   const draftLimit = opts.draftLimit ?? 5;
@@ -465,9 +466,8 @@ export async function putRight(
    * assume anything.
    *
    * Thirty seconds, because that is about as long as somebody will watch a button before deciding
-   * it is broken. The press is not where the bulk of the work happens — the background pass is,
-   * and it runs whether or not anybody presses anything. This is the part that shows you it is
-   * working. Whatever finishes is saved as it goes, so stopping early loses nothing.
+   * it is broken. Whatever finishes is saved as it goes, so stopping early loses nothing, and the
+   * next press carries on.
    */
   const deadline = Date.now() + (opts.budgetMs ?? 30_000);
 
@@ -664,7 +664,7 @@ export async function blockedOnFacts(): Promise<number> {
  */
 export async function retryParked(): Promise<number> {
   const rows = await auditable();
-  const parked = rows.filter((r) => (r.auditFailCount ?? 0) >= MAX_AUDIT_ATTEMPTS);
+  const parked = rows.filter((r) => isParked(r.auditFailCount));
   for (const r of parked) {
     await db.update(schema.manualSections).set({ auditFailCount: 0 }).where(eq(schema.manualSections.id, r.id));
   }

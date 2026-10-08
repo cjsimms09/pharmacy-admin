@@ -33,7 +33,6 @@ import {
   blockedOnFacts,
   findingsForOthers,
   openFindings,
-  runManualAudit,
   applyFinding,
   dismissFinding,
   applyAllFindings,
@@ -106,6 +105,10 @@ export default async function ManualPage({
     manualJob(),
   ]);
   const working = isRunning(job);
+  const untilThen =
+    audit_.parked > 0
+      ? `until only the ${audit_.parked === 1 ? "one" : audit_.parked} that a press skips ${audit_.parked === 1 ? "is" : "are"} left`
+      : "until nothing is outstanding";
   // Who has signed for this manual, and who signed for an older one. Read after the sections,
   // because it fingerprints exactly what is on this page.
   /*
@@ -318,44 +321,6 @@ export default async function ManualPage({
     } catch (e) {
       if (e && typeof e === "object" && "digest" in e) throw e;
       redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "Could not remove that."));
-    }
-  }
-
-  /**
-   * Reads the sections that are due, now rather than waiting for the background job.
-   *
-   * The pass runs itself a few sections at a time on the idle beat, which is the right pace for a
-   * deadline a year away. This is for the day before an inspection, when the right pace is
-   * "as much as you can before I get back from lunch".
-   */
-  async function auditNow() {
-    "use server";
-    const u = await requireManager();
-    try {
-      const r = await asked(u.name, "Auditing the manual", () => runManualAudit(u, { limit: 20 }));
-      await audit({
-        action: "manual.audit",
-        userId: u.id,
-        userName: u.name,
-        details: `${r.audited} read, ${r.findings} raised`,
-      });
-      revalidatePath("/manual");
-      redirect(
-        `/manual?${r.problems.length ? "error" : "ok"}=` +
-          encodeURIComponent(
-            [
-              r.audited
-                ? `${r.audited} section${r.audited === 1 ? "" : "s"} read against the requirements`
-                : "Nothing was due",
-              r.findings ? `${r.findings} finding${r.findings === 1 ? "" : "s"} raised` : "nothing found",
-              r.remaining ? `${r.remaining} still due — press again, or leave it to run on its own` : "the whole manual is now current",
-              ...r.problems,
-            ].join(". ") + ".",
-          ) + "#audit",
-      );
-    } catch (e) {
-      if (e && typeof e === "object" && "digest" in e) throw e;
-      redirect("/manual?error=" + encodeURIComponent(e instanceof Error ? e.message : "The audit could not run."));
     }
   }
 
@@ -724,25 +689,7 @@ export default async function ManualPage({
     );
   }
 
-  /** Stops, or restarts, the reading that happens on its own. The off switch, which had none. */
-  async function setAutoAction(fd: FormData) {
-    "use server";
-    const u = await requireManager();
-    const on = String(fd.get("auto") ?? "") === "yes";
-    await setSetting("manual_audit_auto", on ? "yes" : "no");
-    await audit({ action: "manual.audit.auto", userId: u.id, userName: u.name, details: on ? "on" : "off" });
-    revalidatePath("/manual");
-    redirect(
-      "/manual?ok=" +
-        encodeURIComponent(
-          on
-            ? "The manual will be read a few sections at a time while nobody is using the site."
-            : "Stopped. Nothing will be read on its own — the button still works when you want it to.",
-        ),
-    );
-  }
-
-  /** Tries again the sections that stopped being retried after three failures. */
+  /** Tries again the sections that a press stopped trying after three failures. */
   async function retryParkedAction() {
     "use server";
     const u = await requireManager();
@@ -752,7 +699,9 @@ export default async function ManualPage({
     redirect(
       "/manual?ok=" +
         encodeURIComponent(
-          n === 0 ? "Nothing was parked." : `${n} section${n === 1 ? "" : "s"} will be tried again on the next pass.`,
+          n === 0
+            ? "Nothing was parked."
+            : `${n} section${n === 1 ? "" : "s"} put back in the queue, behind every section not tried since ${n === 1 ? "it" : "they"} failed. Press “Put it right”: a press works down the queue and reaches ${n === 1 ? "it when its turn comes" : "them when their turn comes"}.`,
         ),
     );
   }
@@ -847,8 +796,13 @@ export default async function ManualPage({
       {!working && isStale(job) && (
         <Notice kind="warn">
           <b>The last pass stopped before it finished.</b> That normally means the computer was switched off or
-          restarted while it was working. Everything it had done by then was saved. Press <b>Put it right</b> to carry
-          on from there.
+          restarted while it was working. Everything it had done by then was saved.
+          {canManage &&
+            (problems.length > 0 ? (
+              <> Press <b>Put it right</b> to carry on from there.</>
+            ) : (
+              " The manual is in order now, so there is nothing to carry on."
+            ))}
         </Notice>
       )}
 
@@ -1000,33 +954,12 @@ export default async function ManualPage({
                     of them, or eight minutes&rsquo; worth, whichever comes first.
                   </p>
                   <p>
-                    <b className="text-ink-2">You do not have to keep pressing it.</b> The same reading happens on its
-                    own while nobody is using the site — about eight sections every half hour — so {audit_.due} left is
-                    roughly {Math.max(1, Math.round(audit_.due / 16))} hour{Math.max(1, Math.round(audit_.due / 16)) === 1 ? "" : "s"} of
-                    the computer being switched on and idle. The button is for when you would rather not wait.
+                    <b className="text-ink-2">Nothing reads the manual unless you press it.</b> The sections still to
+                    read stay due until a press reads them, so press it again after each pass, {untilThen}.
                   </p>
                 </>
               )}
               {audit_.lastResult && <p>Last pass: {audit_.lastResult}</p>}
-
-              {/*
-                The off switch, which did not exist.
-                
-                Reading the manual costs money on the pharmacy's own account and happens while
-                nobody is at the computer. Whether that runs at all was a setting with no screen —
-                so the honest position was that it could not be stopped except by pulling the API
-                key out, from inside the pharmacy.
-              */}
-              {canManage && (
-                <form action={setAutoAction} className="pt-1">
-                  <input type="hidden" name="auto" value={audit_.automatic ? "no" : "yes"} />
-                  <button className="text-xs text-ink-3 underline hover:text-ink">
-                    {audit_.automatic
-                      ? "Stop reading the manual on its own"
-                      : "Reading on its own is switched off — turn it back on"}
-                  </button>
-                </form>
-              )}
             </div>
 
             {/*
@@ -1061,9 +994,8 @@ export default async function ManualPage({
                 {stuck.some((f) => f.parked) && canManage && (
                   <div className="mt-2 border-t border-warn/40 pt-2">
                     <p className="text-xs text-ink-2">
-                      {stuck.filter((f) => f.parked).length} of these failed three times and are no longer tried on
-                      their own. They are still due and still listed — parking only stops the site retrying them every
-                      half hour for ever, which would spend money on a section that cannot be read.
+                      {stuck.filter((f) => f.parked).length} of these failed three times, so a press skips them now.
+                      They are still due — skipping them only stops every press paying to meet the same failure again.
                     </p>
                     <form action={retryParkedAction} className="mt-1.5">
                       <button className="btn btn-sm">Try them again</button>
@@ -1418,7 +1350,7 @@ export default async function ManualPage({
                     const state = ch.managedBy
                       ? { badge: "badge-muted", text: `maintained by ${ch.managedBy} — not read as yours` }
                       : ch.source === "site"
-                        ? { badge: "badge-muted", text: "written by the site — kept current automatically, not audited" }
+                        ? { badge: "badge-muted", text: "written by the site — rebuilt when you press Put it right, not audited" }
                         : { badge: "badge-ok", text: `read by the audit — ${ours} section${ours === 1 ? "" : "s"}${site ? `, ${site} written by the site` : ""}${open ? `, ${open} open finding${open === 1 ? "" : "s"}` : ""}` };
                     return (
                       <li key={ch.id} className="flex flex-wrap items-center justify-between gap-3 py-2">

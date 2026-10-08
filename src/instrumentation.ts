@@ -723,7 +723,6 @@ export async function register() {
     });
     await whenIdle("digest", digestTick);
     await whenIdle("updates", updateTick);
-    await whenIdle("manual-audit", manualAuditTick);
     await whenIdle("deliveries", deliveryTick);
     await whenIdle("payer-learn", payerLearnTick);
     await whenIdle("ar-report", arReportTick);
@@ -814,53 +813,6 @@ export async function register() {
       await refreshUpdateCheck();
     } catch {
       // Never allowed to stop the app. The outcome is recorded in settings either way.
-    }
-  };
-
-  /**
-   * Reads a few sections of the policy manual against the requirements.
-   *
-   * The regulation asks for an annual review, which in practice is a signature: nobody rereads a
-   * hundred and fifty sections against Kansas, DEA, HIPAA and OSHA once a year, so a manual can be
-   * reviewed on time for years and still describe a practice that stopped in year one.
-   *
-   * Four sections per turn, at most once an hour. That is deliberately slow — the deadline is a
-   * year away, a long run would be a bill nobody chose and a page that appears to hang, and at
-   * this rate the whole manual has been read long before it is due.
-   */
-  const manualAuditTick = async () => {
-    try {
-      const { getSettings } = await import("./lib/settings");
-      const s = await getSettings();
-      if (s.manual_audit_auto === "no") return;
-      /*
-       * Never at the same time as a pass somebody started by hand.
-       *
-       * Two passes reading and rewriting the same sections at once would race each other, and the
-       * one a person is watching should win. This is also where a job whose process went away —
-       * the computer switched off mid-pass — gets marked as stopped, so the button is never left
-       * permanently unpressable.
-       */
-      const { reapStale, isRunning, manualJob } = await import("./lib/manual-job");
-      await reapStale();
-      if (isRunning(await manualJob())) return;
-      const { hasApiKey } = await import("./lib/ai");
-      if (!(await hasApiKey())) return;
-      const last = s.manual_audit_last ? Date.parse(s.manual_audit_last) : 0;
-      if (Number.isFinite(last) && Date.now() - last < 25 * 60 * 1000) return;
-      const { runManualAudit, auditProgress } = await import("./lib/manual-audit");
-      /*
-       * Faster while there is a backlog, and idle to a crawl once there is not.
-       *
-       * This is where the bulk of the reading happens — the button on the page is only the part
-       * that shows somebody it is working. A hundred and fifty sections at four an hour is most
-       * of two days; at eight every half hour it is a few hours, all of it while nobody is using
-       * the site, and it costs nothing once the manual is current because there is nothing due.
-       */
-      const progress = await auditProgress();
-      await runManualAudit({ id: "system", name: "Annual audit" }, { limit: progress.due > 20 ? 8 : 4 });
-    } catch {
-      // The outcome is recorded in settings and shown on the manual page.
     }
   };
 

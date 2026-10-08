@@ -252,7 +252,6 @@ export const SETTING_KEYS = [
   "driver_invoice_last_result",
   "manual_audit_last",
   "manual_audit_result",
-  "manual_audit_auto",
   /**
    * The roles the inherited manual keeps naming, and who actually holds them here.
    *

@@ -66,7 +66,7 @@ describe("what a button press allows", () => {
     const sweep = (async () => {
       await new Promise((r) => setTimeout(r, 1));
       try {
-        mustBeAsked("The nightly manual audit");
+        mustBeAsked("A scheduled sweep");
       } catch {
         sweepRefused = true;
       }

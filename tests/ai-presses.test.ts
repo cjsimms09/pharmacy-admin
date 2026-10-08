@@ -344,7 +344,6 @@ const ALLOWED: Allowed[] = [
   { file: BOOT, fn: "cqiTick", names: ["runCqiAutomation"], why: AUTOMATIC },
   { file: BOOT, fn: "sftpTick", names: ["pullSftp"], why: AUTOMATIC },
   { file: BOOT, fn: "tick", names: ["sweepMailbox"], why: AUTOMATIC },
-  { file: BOOT, fn: "manualAuditTick", names: ["runManualAudit"], why: AUTOMATIC },
   {
     file: "src/app/(app)/tools/pioneer-sql/page.tsx",
     fn: "test",

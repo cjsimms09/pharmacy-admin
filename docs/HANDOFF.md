@@ -8,9 +8,59 @@ file is how they talk.
 
 ## Open items
 
-- **7 October, pharmacy session (the commit after `48c5a78`; NOT deployed or pushed; NOT to be deployed without the
-  commit after it): the thirteen presses that reach Claude now run under the site's gate, the feeds page no longer
-  asks Claude anything, and a test fails when a press is left outside the gate.** (1) The gate (`asked()` in
+- **8 October, pharmacy session (the commit after `e982a06`; NOT deployed or pushed; a deploy takes it together with
+  the commit in the bullet below): the "Policy manual audit" alarm on Today, the half-hourly job it watched and the
+  copy that promised an automatic audit are removed, and the manual page now says that nothing reads the manual unless
+  he presses "Put it right".** (1) The alarm was false: nothing was overdue (the live manual's first section falls due
+  on 4 September 2027) and the site does not read the manual on its own, so the row on the strip
+  (`src/lib/automation-status.ts`) was reading the age of `manual_audit_last`, which `runManualAudit` writes each time
+  it is handed at least one due section, whether or not any reading succeeds, and not at all when none is due. The row
+  and its 31-day entry are gone, with the idle job (`manualAuditTick` in `src/instrumentation.ts`), `reapStale` in
+  `src/lib/manual-job.ts`, the `manual_audit_auto` setting key (`src/lib/settings.ts`), `AuditProgress.automatic`, and
+  on the manual page `auditNow` and the "Stop reading the manual on its own" link and action. (2) The manual page
+  (`src/app/(app)/manual/page.tsx`) said "You do not have to keep pressing it. The same reading happens on its own
+  while nobody is using the site"; it now says "Nothing reads the manual unless you press it" and that the sections
+  still to read stay due until a press reads them. The stuck block and the message after "Try them again" no longer
+  say the sections are retried on their own, the chapter badge no longer says "kept current automatically", and the
+  banner for a pass that stopped part-way (nothing now marks a dead pass as failed) has three cases: to a manager with
+  something wrong it adds "Press Put it right to carry on from there", to a manager with nothing wrong that the manual
+  is in order so there is nothing to carry on, and to staff neither (the button it names can be greyed out where
+  Claude is not connected: A6-27). (3) `src/lib/manual-audit.ts` has one definition of a skipped section, `isParked`
+  (failed `MAX_AUDIT_ATTEMPTS`, three, times), and `AuditProgress.parked` counts the due ones a press skips (`due()`
+  is now exported, so that a test can ask who a press will try); `src/db/schema.ts` has only a comment changed (no
+  migration); `tests/ai-presses.test.ts` loses the removed job's allowance and `tests/ai-gate.test.ts` a fixture
+  label; two new tests: `tests/automation-status-manual.test.ts` fails on the old strip, and
+  `tests/manual-audit-progress.test.ts` fails, one change at a time, on a parked count that ignores the due date or is
+  forced to zero, on a `due()` that lets a parked or a current section through, on a parked flag forced to false in
+  the list of failures, and on a limit moved by one; it cannot run on the code before this change, which did not
+  export `due()` or `isParked`, and the due-date clause of `auditFailures()` is covered by neither. The whole suite
+  passes on a scratch database (4,971 of 4,971 tests, run after the last edit to the code and the tests). (4)
+  **Registered, not fixed,** in `docs/BACKLOG.md`: A6-Q3 (a question for him: nothing tells him beforehand that the
+  first sections fall due on 4 September 2027), a note on A6-14 (the Today alarm about the monthly ceiling still says
+  "the manual will not be read"), A6-27 (six loose ends in how parked sections are counted and shown; the first five
+  show on no live row today, and the sixth shows in part) and A6-28 (the card "What is wrong with the manual" says
+  that one press fixes everything it lists, and a press acts on none of the three problems it lists on the live rows
+  today: 17 blocking findings, 33 weaker findings and 75 sections with no review date, read on 8 October). The
+  evidence is in the row of `docs/OPEN-ITEMS.md` that opens 'The Today alarm "Something the site does for you has
+  stopped — Policy manual audit" was false'. **A deploy takes this commit and the one in the bullet below together:**
+  that one makes the idle tick refuse, this one removes it. **Files changed on `feature/compliance`, so say so on your
+  pull request before editing one:** `src/lib/automation-status.ts`, `src/instrumentation.ts`,
+  `src/lib/manual-job.ts`, `src/lib/manual-audit.ts`, `src/lib/settings.ts`, `src/db/schema.ts` (a comment),
+  `src/app/(app)/manual/page.tsx`, `tests/ai-presses.test.ts`, `tests/ai-gate.test.ts`, new
+  `tests/automation-status-manual.test.ts`, new `tests/manual-audit-progress.test.ts`, and `docs/OPEN-ITEMS.md`,
+  `docs/BACKLOG.md`, `docs/HANDOFF.md`. **Read by:** four fresh subagents, models and not people, read it cold: two at
+  earlier stages, each given the change itself and not the message, a third given only the staged diff, and a fourth
+  given the staged diff and the draft message; none read it as it now stands, and each lead was read against the code
+  before it was used (six, seven, six and seven leads; the last two gave thirteen, of which ten were distinct; all
+  dealt with in the row of `docs/OPEN-ITEMS.md` named above). What came after the fourth reading (the corrections, the
+  mutation runs, the second read of the live rows, A6-27 and A6-28), the tests, the docs and this bullet were read by
+  their author only, which is the weaker form; no second session read it, and nobody has seen the manual page in a
+  browser. No pull request from the other session was open when this was written. Nothing is asked of him or of you
+  beyond the note on a pull request.
+
+- **7 October, pharmacy session (the commit after `48c5a78`; NOT deployed or pushed; a deploy takes it together with
+  the commit in the bullet above): the thirteen presses that reach Claude now run under the site's gate, the feeds
+  page no longer asks Claude anything, and a test fails when a press is left outside the gate.** (1) The gate (`asked()` in
   `src/lib/ai-gate.ts`, committed 10 September as `66f2084`, an ancestor of the last pushed tip `7a888eb`) refuses
   anything that reaches the model unless a button he pressed started it. Thirteen presses ran outside it (five on the
   CQI pages, four on the manual page, two on Settings, one that reads a document at the intake, and "Read the lines
@@ -36,12 +86,12 @@ file is how they talk.
   will) **and A6-Q2** (what happens to an invoice Claude read and the code did not keep). The evidence is in four rows
   of `docs/OPEN-ITEMS.md`, found by their opening words: 'Thirteen presses that reach Claude', 'The "Read the lines
   off the invoices" press', 'The sentences around the monthly Claude ceiling' and 'The "Write every fix that needs no
-  answer" button'. **Not to be deployed without the commit after this one.** That commit removes the manual's idle
-  tick (`manualAuditTick` in `src/instrumentation.ts`), the "Policy manual audit" row that reads its clock, and the
-  copy that promises an automatic audit. Without it the tick stays in place, is refused at `runManualAudit`'s first
-  statement, and its empty `catch` swallows the refusal, so it does nothing and writes nothing (no section of the
-  manual falls due until 2027-09-04), and the false "Something the site does for you has stopped — Policy manual
-  audit" alarm stays on Today. **Files changed on `feature/compliance`, so say so on your pull request before editing
+  answer" button'. **A deploy takes this commit and the one in the bullet above together.** This commit left the
+  manual's idle tick (`manualAuditTick` in `src/instrumentation.ts`) in place, where it is refused at
+  `runManualAudit`'s first statement and its empty `catch` swallows the refusal, so it does nothing and writes nothing
+  (no section of the manual falls due until 2027-09-04); the commit in the bullet above removes the tick, the "Policy
+  manual audit" row that read its clock (the false "Something the site does for you has stopped" alarm on Today) and
+  the copy that promises an automatic audit. **Files changed on `feature/compliance`, so say so on your pull request before editing
   one:** `src/lib/ai-gate.ts`, `src/lib/ai.ts`, `src/lib/ai-spend.ts`, `src/lib/manual-audit.ts`,
   `src/lib/invoices.ts`, `src/lib/feeds.ts`, `src/lib/feed-rules.ts`, `src/instrumentation.ts`,
   `src/app/(app)/cqi/ai-actions.ts`, `src/app/(app)/intake/actions.ts`, `src/app/(app)/inventory/invoices/page.tsx`,
