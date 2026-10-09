@@ -43,6 +43,7 @@ import { reconcileCogs, reconcileRevenue, type Check as ReconCheck } from "./rec
 import { cashCostOfGoods, countedTwiceInCash } from "./cash-cogs";
 import { standingLines } from "./standing-math";
 import { todayIso } from "./dates";
+import { rebateOnDispensed } from "./rebate-on-dispensed";
 import { formatCents } from "./money";
 import { SITE_STARTS_ON, monthIsOutOfBooks } from "./books-start";
 import type { MonthFees } from "./payer-fees";
@@ -280,6 +281,8 @@ export type PLInputs = {
    * month that earned it rather than the month the cheque cleared.
    */
   rebatesCents: number | null;
+  /** How that estimate was reached, in words, when it was worked out on what was dispensed. */
+  rebatesNote?: string | null;
   /** Every confirmed bill in the month, already placed on the right side of the account. */
   expenses: { categoryId: string | null; categoryName: string; kind: string; amountCents: number }[];
   /**
@@ -680,7 +683,8 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
       note:
         i.basis === "cash"
           ? "Settled this month, on buying done a month or two ago. A discount arriving late, so it reduces cost rather than adding to revenue."
-          : "Estimated from this month's invoice lines at the ladder in force, until the wholesaler's statement is entered on Spending under Wholesaler rebates, which then takes its place. A discount, so it reduces cost rather than adding to revenue.",
+          : i.rebatesNote ??
+            "Estimated from this month's invoice lines at the ladder in force, until the wholesaler's statement is entered on Spending under Wholesaler rebates, which then takes its place. A discount, so it reduces cost rather than adding to revenue.",
     });
   }
   const dropStatedRebate = i.basis === "cash" && rebateReceipts !== 0;
@@ -1044,7 +1048,9 @@ export type SharedInputs = {
   /** Money banked in each month for prescriptions nobody collected: real cash today, owed back to the payer. */
   bankedForUncollected: Map<string, { cents: number; n: number }>;
   /** Per month: the bills on the basis asked for, the receipts entered, the rebate earned, and the driver's invoices where the pharmacy pays them. */
-  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; driverCents: number }>;
+  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; rebatesOtherCents: number; rebateRates: { contractPercent: number | null; brandPercent: number | null } | null; driverCents: number }>;
+  /** For the laddered wholesaler: each product its invoices show, by NDC, true where the latest line is flagged as earning the contract rebate. */
+  rebateFlags: Map<string, boolean>;
   /** The wholesalers' own ledgers: what cleared, when, and under which ACH. */
   statementLines: { supplier: string; invoiceNumber: string; netCents: number; clearingDate: string | null; checkNumber: string | null }[];
   /**
@@ -1157,6 +1163,7 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
   ]);
 
   const byMonth: SharedInputs["byMonth"] = new Map();
+  let ladderSupplierId: string | null = null;
   for (const month of sorted) {
     /*
      * Every supplier's rebate for the month, from one read of the month's invoice lines.
@@ -1174,10 +1181,14 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
       earningForMonth(month),
       driverCostFor(month, basis),
     ]);
+    const ladder = earned.find((e) => e && e.contractRatePercent !== null) ?? null;
+    if (ladder) ladderSupplierId = ladder.supplierId;
     byMonth.set(month, {
       bills,
       receipts: receipts.map((r) => ({ kind: r.kind, amountCents: r.amountCents })),
       rebatesCents: earned.reduce((n, e) => n + (e?.estimatedRebateCents ?? 0), 0) || null,
+      rebatesOtherCents: earned.filter((e) => e && e.contractRatePercent === null).reduce((n, e) => n + (e?.estimatedRebateCents ?? 0), 0),
+      rebateRates: ladder ? { contractPercent: ladder.contractRatePercent, brandPercent: ladder.brandRatePercent } : null,
       driverCents,
     });
   }
@@ -1199,8 +1210,14 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
    */
   const { payerFeesByMonth } = await import("./payer-fees-store");
   const payerFees = await payerFeesByMonth();
+  const rebateFlags = new Map<string, boolean>();
+  if (ladderSupplierId) {
+    const flagRows = (await db.all(sql`select ndc11, rebated from invoice_lines where supplier_id = ${ladderSupplierId} and ndc11 is not null and rebated is not null order by invoice_date asc`)) as { ndc11: string; rebated: number }[];
+    for (const r of flagRows) rebateFlags.set(r.ndc11, Number(r.rebated) === 1);
+  }
   return {
     basis,
+    rebateFlags,
     beforeBooksPaid: new Map(beforeBooksRows.map((r) => [r.month, Number(r.cents)])),
     payerFees,
     sales,
@@ -1235,7 +1252,7 @@ function feeInputs(f: MonthFees | undefined): Pick<PLInputs, "remitFeesCents" | 
 /** One month's inputs, sliced from what was loaded. Nothing here computes; `monthlyPL` does. */
 export function monthInputs(month: string, basis: "accrual" | "cash", shared: SharedInputs): PLInputs {
   const { sales: months, cats, fills, invoices, lines, counts } = shared;
-  const per = shared.byMonth.get(month) ?? { bills: [], receipts: [], rebatesCents: null, driverCents: 0 };
+  const per = shared.byMonth.get(month) ?? { bills: [], receipts: [], rebatesCents: null, rebatesOtherCents: 0, rebateRates: null, driverCents: 0 };
   const sales = months.find((m) => m.month === month) ?? null;
 
   /*
@@ -1317,6 +1334,7 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     unbilledCostCents: monthFills.reduce((n, f) => n + (f.unbilledCostCents ?? 0), 0),
   };
   const dispensedCostCents = mine.length ? mine.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0) : null;
+  const onDispensed = basis === "accrual" && per.rebateRates && shared.rebateFlags.size > 0 ? rebateOnDispensed(mine, shared.rebateFlags, per.rebateRates) : null;
   const laterMoneyCents = monthFills.reduce((n, f) => n + f.laterPaymentsCents, 0);
 
   /* What the wholesalers billed in the month, for the stock comparison only — never as accrual cost of goods. */
@@ -1467,7 +1485,8 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     standing,
     openingStockCents,
     closingStockCents,
-    rebatesCents: per.rebatesCents,
+    rebatesCents: onDispensed ? onDispensed.cents + per.rebatesOtherCents : per.rebatesCents,
+    rebatesNote: onDispensed ? onDispensed.note : null,
     onAccount,
     expenses: [
       ...per.bills.map((b) => {
