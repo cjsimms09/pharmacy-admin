@@ -24,6 +24,10 @@ const base: PLInputs = {
     { categoryId: "r", categoryName: "Rent and occupancy", kind: "operating", amountCents: 600_000 },
     { categoryId: "c", categoryName: "Card processing and bank fees", kind: "operating", amountCents: 180_000 },
     { categoryId: "s", categoryName: "Software and systems", kind: "operating", amountCents: 120_000 },
+    { categoryId: "pt", categoryName: "Payroll taxes and benefits", kind: "operating", amountCents: 400_000 },
+    { categoryId: "u", categoryName: "Utilities", kind: "operating", amountCents: 100_000 },
+    { categoryId: "t", categoryName: "Telephone and internet", kind: "operating", amountCents: 30_000 },
+    { categoryId: "i", categoryName: "Insurance", kind: "operating", amountCents: 70_000 },
     { categoryId: "d", categoryName: "DIR fees and price concessions", kind: "revenue_offset", amountCents: 900_000 },
   ],
 };
@@ -109,7 +113,7 @@ describe("what the month made", () => {
     const withoutDir = monthlyPL({ ...base, expenses: base.expenses.filter((e) => e.kind !== "revenue_offset") });
     assert.equal(withDir.revenueCents, 66_949_738, "revenue as billed is unchanged");
     assert.equal(withDir.netRevenueCents, 66_949_738 - 900_000, "but net revenue is not");
-    assert.equal(withDir.operatingCents, 5_400_000, "and it is not sitting in overheads");
+    assert.equal(withDir.operatingCents, 6_000_000, "and it is not sitting in overheads");
     assert.ok(
       withDir.grossMarginPercent !== null && withDir.grossMarginPercent < withoutDir.grossMarginPercent!,
       "the dispensing margin falls, as it should",
@@ -118,8 +122,8 @@ describe("what the month made", () => {
 
   test("the bottom line", () => {
     const pl = monthlyPL(base);
-    assert.equal(pl.operatingCents, 5_400_000);
-    assert.equal(pl.netProfitCents, pl.grossProfitCents - 5_400_000);
+    assert.equal(pl.operatingCents, 6_000_000);
+    assert.equal(pl.netProfitCents, pl.grossProfitCents - 6_000_000);
     assert.equal(pl.usable, true, "every big line is present");
   });
 
@@ -430,7 +434,7 @@ describe("what the cash account is allowed to carry", () => {
     assert.equal(cash.otherCashOutCents, 1_800_000);
     assert.equal(cash.cashChangeCents, cash.netProfitCents - 1_800_000);
     const accrual = monthlyPL({ ...base, expenses: [...base.expenses, ...below] });
-    assert.equal(accrual.operatingCents, 5_400_000, "profit is before them");
+    assert.equal(accrual.operatingCents, 6_000_000, "profit is before them");
     assert.deepEqual(accrual.otherCashOut, []);
     assert.equal(accrual.cashChangeCents, null);
   });
@@ -457,5 +461,24 @@ describe("the same money twice", () => {
     assert.ok(accrual.missing.some((m) => m.includes("Drug purchases")));
     const cash = monthlyPL({ ...base, basis: "cash", sales: null, receipts: [{ kind: "third_party", amountCents: 1 }], billedPurchasesCents: 3_000_000, expenses: [bill] });
     assert.equal(cash.costOfGoodsCents, 3_000_000);
+  });
+});
+
+describe("costs every pharmacy has every month are asked for by name on the accrual account", () => {
+  const withoutThem = base.expenses.filter((e) => !["Payroll taxes and benefits", "Utilities", "Telephone and internet", "Insurance"].includes(e.categoryName));
+
+  test("an accrual month with none of them says each is missing and is not called usable", () => {
+    const pl = monthlyPL({ ...base, expenses: withoutThem });
+    for (const what of [/Payroll taxes/, /Utilities/, /Telephone/, /Insurance/]) assert.ok(pl.missing.some((m) => what.test(m)), String(what));
+    assert.equal(pl.usable, false, "net profit that omits them is overstated, so the account does not call itself usable");
+  });
+
+  test("entered, or on file as a standing monthly amount, they are no longer missing", () => {
+    assert.equal(monthlyPL(base).missing.some((m) => /Payroll taxes|Utilities|Telephone|Insurance/.test(m)), false);
+  });
+
+  test("the cash account is not asked for them: an annual premium is not a cost of every cash month", () => {
+    const cash = monthlyPL({ ...base, basis: "cash", expenses: withoutThem });
+    assert.equal(cash.missing.some((m) => /Payroll taxes|Utilities|Telephone|Insurance/.test(m)), false);
   });
 });

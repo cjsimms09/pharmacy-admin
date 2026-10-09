@@ -19,6 +19,10 @@ function month(m: string, over: Partial<PLInputs> = {}): PLInputs {
       { categoryId: "w", categoryName: "Wages and salaries", kind: "operating", amountCents: 800_000 },
       { categoryId: "r", categoryName: "Rent and occupancy", kind: "operating", amountCents: 200_000 },
       { categoryId: "c", categoryName: "Card processing and bank fees", kind: "operating", amountCents: 50_000 },
+      { categoryId: "pt", categoryName: "Payroll taxes and benefits", kind: "operating", amountCents: 10_000 },
+      { categoryId: "u", categoryName: "Utilities", kind: "operating", amountCents: 10_000 },
+      { categoryId: "t", categoryName: "Telephone and internet", kind: "operating", amountCents: 10_000 },
+      { categoryId: "i", categoryName: "Insurance", kind: "operating", amountCents: 10_000 },
       { categoryId: "d", categoryName: "DIR fees and price concessions", kind: "revenue_offset", amountCents: 150_000 },
     ],
     ...over,
@@ -58,8 +62,8 @@ describe("a quarter is its months added line by line", () => {
     assert.equal(pl.netRevenueCents, 18_000_000 - 450_000);
     assert.equal(pl.costOfGoodsCents, 3 * (4_500_000 - 100_000));
     assert.equal(pl.grossProfitCents, 17_550_000 - 13_200_000);
-    assert.equal(pl.operatingCents, 3 * 1_050_000);
-    assert.equal(pl.netProfitCents, 4_350_000 - 3_150_000);
+    assert.equal(pl.operatingCents, 3 * 1_090_000);
+    assert.equal(pl.netProfitCents, 4_350_000 - 3_270_000);
     assert.equal(pl.grossMarginPercent, Math.round((4_350_000 / 17_550_000) * 1000) / 10);
     assert.equal(pl.stockMovementCents, 600_000);
     assert.equal(pl.usable, true);
