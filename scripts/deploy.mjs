@@ -85,6 +85,11 @@ function processes() {
       .filter(Boolean)
       .map(Number);
     const holder = Number(ps(`(Get-NetTCPConnection -LocalPort ${PORT} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1).OwningProcess`)) || null;
+    /* Windows shows an empty command line for a launcher started hidden, so the filter above can miss it. The launcher is the app's parent. */
+    if (holder) {
+      const parent = Number(ps(`$p = Get-CimInstance Win32_Process -Filter "ProcessId=${holder}"; $q = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ParentProcessId)"; if ($q.Name -eq 'node.exe') { $q.ProcessId }`)) || null;
+      if (parent && !launchers.includes(parent)) launchers.push(parent);
+    }
     return { launchers, holder };
   }
   const launchers = (spawnSync("pgrep", ["-f", "launch.mjs"], { encoding: "utf8" }).stdout || "").split(/\s+/).filter(Boolean).map(Number);
