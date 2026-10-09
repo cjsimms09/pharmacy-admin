@@ -40,7 +40,7 @@ Some departments at WWFP require uniforms. Employees working in clinical or lab/
 - Layering under scrubs (e.g., long-sleeve shirts) for warmth is encouraged.
 - WWFP-branded T-shirts may be worn any day of the week.
 - Outerwear worn while performing job duties must be WWFP-branded. Clothing with other companies'' logos (e.g., sweatshirts, jackets) is not permitted.
-- Jeans are allowed on Fridays (following the standards set out for the clerical & non-clinical staff) with a company branded top.
+- Jeans are allowed daily (following the standards set out for the clerical & non-clinical staff) with a company branded top.
 
 Fingernails
 - Artificial nails and nail jewelry are not to be worn.

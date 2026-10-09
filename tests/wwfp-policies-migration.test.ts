@@ -63,6 +63,8 @@ describe("the migration that takes WWFP's dress code and attendance point polici
     assert.match(dress, /closed-toe shoes with a closed heel/);
     assert.match(dress, /bloodborne pathogens exposure control plan/);
     assert.match(dress, /Pharmacy staff may wear scrubs/);
+    assert.match(dress, /Jeans are allowed daily/);
+    assert.doesNotMatch(dress, /on Fridays/);
     assert.match(att, /needlestick/);
     assert.match(att, /compounded preparation/);
     assert.doesNotMatch(att, /job abandonment|voluntary resignation/);
