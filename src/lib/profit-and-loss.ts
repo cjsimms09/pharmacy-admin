@@ -434,9 +434,19 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
      * where they are given and the whole is used where they are not.
      */
     const splitKnown = i.claimsRemitCents !== null && i.claimsRemitCents !== undefined;
-    const remitCents = i.sales?.rxRemitCents ?? (splitKnown ? i.claimsRemitCents : null) ?? null;
-    const patientCents = i.sales?.rxPatientCents ?? (splitKnown ? i.claimsPatientCents : null) ?? null;
-    const fromClaims = !i.sales?.rxRemitCents && !i.sales?.rxPatientCents;
+    /*
+     * The claims are the authority for prescription revenue, because they are where the cost comes from.
+     *
+     * The owner, 9 October 2026: "you have the same data as pioneer... pioneer literally gives you cost and reimbursement amount."
+     * Revenue from the till and cost from the claims are two populations: the till counts what was picked up and includes
+     * prescriptions filled before the books began, the claims count the fills this account holds. Where they disagreed the
+     * account carried a caveat saying gross profit was wrong by up to the gap, or took the excess back out as an adjustment.
+     * Revenue and cost now come from the same fills, so neither can be wrong in a direction the other cannot see. The till
+     * still supplies retail, which has no other source, and is compared with the claims below as a check.
+     */
+    const remitCents = (splitKnown ? i.claimsRemitCents : null) ?? i.sales?.rxRemitCents ?? null;
+    const patientCents = (splitKnown ? i.claimsPatientCents : null) ?? i.sales?.rxPatientCents ?? null;
+    const fromClaims = splitKnown;
     if (remitCents) {
       revenue.push({
         label: "Third-party remittance",
@@ -452,41 +462,21 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
       });
     }
     /*
-     * Sales the dispensing record cannot cost, taken back out before gross profit.
+     * The till, as a check on the claims and no longer a source of revenue.
      *
-     * The summary is the till: every prescription picked up in the month, including ones filled before the books
-     * began — in September 2026, $55,000-odd of August-filled prescriptions picked up in the first days of the books.
-     * The cost line below is the fills the site holds. Revenue from one population against cost from another
-     * flattered September's gross profit by about $52,000: found 2 October 2026 when the owner asked whether the
-     * figure was right. So what the till took beyond what the held fills account for is named and taken out before
-     * gross profit: the cost of those sales is not held, and a sale counted with no cost against it is profit
-     * invented. The till's own figure stays on the lines above, so revenue still agrees with the bank.
+     * It counts every prescription picked up in the month, including ones filled before the books began, and the fills this
+     * account holds are the ones with a cost. When the two disagree the difference is named, because a gap nobody sees is a gap
+     * nobody closes; it does not move gross profit, which is the claims' revenue less the claims' cost.
      */
-    if (!fromClaims && remitCents && patientCents && i.claimsRevenueCents !== null && i.claimsRevenueCents !== undefined) {
-      const tillRx = remitCents + patientCents;
-      const held = i.claimsRevenueCents + (i.costUnknownRevenueCents ?? 0);
-      const beyond = tillRx - held;
-      /*
-       * The other direction, found 2 October 2026 once the record was complete: the fills collected in the month came
-       * to $14,646.88 more than the till, almost all on the patient side. The till's figure stays on the lines above
-       * and the record's cost stays below, so gross profit is understated by up to the gap until the two are
-       * reconciled day by day. Said here, because a check nobody sees is not a check.
-       */
-      if (beyond < 0) {
-        const patientGap = (i.claimsPatientCents ?? 0) - patientCents;
-        const remitGap = (i.claimsRemitCents ?? 0) - remitCents;
-        const side = (c: number, what: string) => `${what} ${formatCents(Math.abs(c))} ${c >= 0 ? "above" : "below"} the till's`;
+    if (fromClaims && i.sales?.rxRemitCents && i.sales?.rxPatientCents && i.claimsRevenueCents !== null && i.claimsRevenueCents !== undefined) {
+      const tillRx = i.sales.rxRemitCents + i.sales.rxPatientCents;
+      const held = i.claimsRevenueCents;
+      const gap = tillRx - held;
+      if (Math.abs(gap) >= 100) {
         caveats.push(
-          `The dispensing record says ${formatCents(held)} was collected for prescriptions this month; the till says ${formatCents(tillRx)}, ${formatCents(-beyond)} less — the record's ${side(patientGap, "patient money is")}, its ${side(remitGap, "plan money")}. ` +
-            `Revenue here is the till's and the cost is the record's, so gross profit is understated by up to ${formatCents(-beyond)} until the two are reconciled, day by day.`,
+          `The till took ${formatCents(tillRx)} for prescriptions this month and the dispensing record accounts for ${formatCents(held)}, ${formatCents(Math.abs(gap))} ${gap > 0 ? "less" : "more"}. ` +
+            `Revenue and cost here are both the record's, so gross profit does not depend on which is right; the difference is for reconciling, day by day.`,
         );
-      }
-      if (beyond > 0) {
-        revenue.push({
-          label: "— less prescriptions the till sold that the dispensing record does not account for",
-          amountCents: -beyond,
-          note: `The summary took ${formatCents(tillRx)} for prescriptions; the fills held here and picked up this month come to ${formatCents(held)}. The rest is prescriptions filled before the books began, or sales not in the claims file, and their cost is not held — so they are taken out before gross profit rather than counted as pure profit.`,
-        });
       }
     }
     if (i.sales?.retailCents) {

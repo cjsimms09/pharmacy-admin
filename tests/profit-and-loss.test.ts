@@ -29,22 +29,21 @@ const base: PLInputs = {
 };
 
 describe("the till against the dispensing record, 2 October 2026", () => {
-  test("prescriptions the till sold that the held fills do not account for are taken out before gross profit, and named", () => {
+  test("prescription revenue is the claims' and the till is only a check, so revenue and cost come from the same fills", () => {
     /*
      * September 2026: the sales summary counted every prescription picked up in the month, including ones filled in
-     * late August; the cost line was the fills the site holds, which begin on 1 September. Revenue from one population
-     * against cost from another flattered gross profit by about $52,000. The till's figure stays; the part the held
-     * fills cannot account for is taken out before gross profit, because its cost is not held.
+     * late August; the cost line was the fills the site holds. Revenue from one population against cost from another
+     * moved gross profit by tens of thousands in either direction. The owner, 9 October 2026: the claims carry the cost
+     * and the reimbursement, so gross profit is the claims' revenue less the claims' cost.
      */
     const pl = monthlyPL({ ...base, claimsRevenueCents: 60_000_000, claimsRemitCents: 52_000_000, claimsPatientCents: 8_000_000, costUnknownRevenueCents: 0 });
-    const less = pl.revenue.find((l) => /does not account for/.test(l.label));
-    assert.ok(less, "the line is there, and named");
-    assert.equal(less!.amountCents, -(57_077_894 + 9_325_956 - 60_000_000));
-    assert.equal(pl.revenueCents, 66_949_738 - (66_403_850 - 60_000_000));
+    const rx = pl.revenue.filter((l) => /remittance|Patient payments/.test(l.label)).reduce((n, l) => n + l.amountCents, 0);
+    assert.equal(rx, 60_000_000, "prescription revenue is what the held fills brought in, not the till's figure");
+    assert.equal(pl.revenue.some((l) => /does not account for/.test(l.label)), false, "nothing is taken back out: revenue already matches the cost");
+    assert.ok(pl.caveats.some((c) => /till took/.test(c)), "the difference from the till is named, for reconciling");
     const whole = monthlyPL({ ...base, claimsRevenueCents: 66_403_850, claimsRemitCents: 57_077_894, claimsPatientCents: 9_325_956 });
-    assert.equal(whole.revenue.some((l) => /does not account for/.test(l.label)), false, "a month the fills fully account for has no such line");
+    assert.equal(whole.caveats.some((c) => /till took/.test(c)), false, "a month where the two agree says nothing");
   });
-
   test("payer fees taken on remittances come out of revenue, measured; none is a sentence, never a demand to type", () => {
     const fees = monthlyPL({ ...base, remitFeesCents: 123_45 });
     assert.ok(fees.offsets.some((l) => /remittances/.test(l.label) && l.amountCents === 123_45));
