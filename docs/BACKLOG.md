@@ -1388,7 +1388,7 @@ place, and an arithmetic check before anything is stored.
     that leaves out the read-denied remits folder, by nothing else. A reader that could not run is never-measured, not
     measured-and-none (rule 5; CLAUDE.md rule 7, first corollary). Not checked: whether any of these has thrown on the
     live site, which would be seen only in the server log, and what each of the null results renders as. The shape to
-    copy is `checkCouldNotRun`, one line saying which reader could not run and why. Not started.
+    copy is `checkCouldNotRun`, one line saying which reader could not run and why. **Done for `alerts.ts` on 9 October 2026**: each of the nine catches now adds a row, "<area> could not be checked", with the first line of the reason; run against the live rows read-only it added none. Still open: the four `dashboard/page.tsx` places and the `instrumentation.ts` one.
   - **A3-12** (found 7 October, from the code) `getSettings()` gives every key it does not hold an empty string, so
     `s.key ?? "a sentence"` never prints the sentence. `automation-status.ts` near lines 91, 113, 121, 129 and 229 and
     `feeds.ts` near line 396 each hold one ("No backup has run yet.", "Not connected. Reports emailed here are not

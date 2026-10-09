@@ -75,6 +75,26 @@ export const SOON_DAYS = 30;
  */
 export const DELIVERY_GRACE_DAYS = 1;
 
+/**
+ * What the list shows when one of its own checks threw.
+ *
+ * Each block below used to swallow its error, so a check that could not run left no row at all, and no row reads exactly like a
+ * thing that is fine. A check that did not run has not passed: the row says which one, with the first line of the reason (long
+ * digit runs masked), and opening the list again runs it again.
+ */
+function couldNotCheck(out: Alert[], key: string, area: string, href: string, reason: unknown): void {
+  const raw = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "";
+  const why = raw.split("\n")[0].replace(/\d{5,}/g, "#####").trim().slice(0, 160);
+  out.push({
+    key,
+    level: "soon",
+    title: `${area} could not be checked`,
+    why: `It stopped with an error${why ? ` (${why})` : ""}, so nothing in it was looked at just now. Its not being on this list does not mean it is clear. Opening this list again tries it again.`,
+    href,
+    action: "Look at it",
+  });
+}
+
 export async function alerts(): Promise<Alert[]> {
   const today = todayIso();
   const out: Alert[] = [];
@@ -300,8 +320,7 @@ export async function alerts(): Promise<Alert[]> {
       });
     }
   } catch (e) {
-    /* Never worth taking the morning list down for. */
-    void e;
+    couldNotCheck(out, "check-failed-no-claim", "The payments that tie to no claim", "/claims/no-claim", e);
   }
 
   // ── A sender wrote and this turned them away ──────────────────────
@@ -356,8 +375,7 @@ export async function alerts(): Promise<Alert[]> {
       });
     }
   } catch (e) {
-    /* The inbox failing to answer is not a reason to lose the rest of the morning's list. */
-    void e;
+    couldNotCheck(out, "check-failed-inbox-refused", "The mail that was refused", "/inbox", e);
   }
 
   // ── Card money the register took with no batch on file ────────────
@@ -388,8 +406,8 @@ export async function alerts(): Promise<Alert[]> {
         action: "Look at it",
       });
     }
-  } catch {
-    /* A setting that will not parse is no reason to lose the rest of the list. */
+  } catch (e) {
+    couldNotCheck(out, "check-failed-card-batches", "The register's card batches", "/money", e);
   }
 
   // ── The things that run themselves, when they stop ────────────────
@@ -470,8 +488,8 @@ export async function alerts(): Promise<Alert[]> {
         action: "Raise it",
       });
     }
-  } catch {
-    // No key, no settings, nothing to say. A cost ceiling is never the reason a page fails to load.
+  } catch (e) {
+    couldNotCheck(out, "check-failed-ai-cap", "The Claude cost ceiling", "/settings#claude", e);
   }
 
   const { pendingUpdates } = await import("./updates");
@@ -655,8 +673,7 @@ export async function alerts(): Promise<Alert[]> {
       });
     }
   } catch (e) {
-    // Never let the supplies board take the whole dashboard down with it.
-    void e;
+    couldNotCheck(out, "check-failed-supplies", "The supplies board", "/purchasing/supplies", e);
   }
 
   /*
@@ -703,8 +720,7 @@ export async function alerts(): Promise<Alert[]> {
       }
     }
   } catch (e) {
-    /* A checklist is never worth taking the dashboard down for. */
-    void e;
+    couldNotCheck(out, "check-failed-checklist", "The month's checklist", "/expected", e);
   }
 
   /*
@@ -787,7 +803,7 @@ export async function alerts(): Promise<Alert[]> {
       });
     }
   } catch (e) {
-    void e;
+    couldNotCheck(out, "check-failed-reports-refused", "The reports the mailbox turned away", "/inbox", e);
   }
 
   /*
@@ -852,7 +868,7 @@ export async function alerts(): Promise<Alert[]> {
       }
     }
   } catch (e) {
-    void e;
+    couldNotCheck(out, "check-failed-cqi", "The state quality report (CQI)", "/cqi", e);
   }
 
   /*
@@ -889,7 +905,7 @@ export async function alerts(): Promise<Alert[]> {
       });
     }
   } catch (e) {
-    void e;
+    couldNotCheck(out, "check-failed-temps", "The temperature log sign-off", "/temps", e);
   }
   // Worst first, and within a level the oldest problem first — which is the order somebody would
   // work them in anyway.
