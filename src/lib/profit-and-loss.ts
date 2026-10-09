@@ -280,8 +280,6 @@ export type PLInputs = {
    * month that earned it rather than the month the cheque cleared.
    */
   rebatesCents: number | null;
-  /** How that estimate was reached, in words, when it came from what the wholesaler last paid. */
-  rebatesNote?: string | null;
   /** Every confirmed bill in the month, already placed on the right side of the account. */
   expenses: { categoryId: string | null; categoryName: string; kind: string; amountCents: number }[];
   /**
@@ -682,8 +680,7 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
       note:
         i.basis === "cash"
           ? "Settled this month, on buying done a month or two ago. A discount arriving late, so it reduces cost rather than adding to revenue."
-          : i.rebatesNote ??
-            "Estimated from this month's invoice lines at the ladder in force, until the wholesaler's statement is entered on Spending under Wholesaler rebates, which then takes its place. A discount, so it reduces cost rather than adding to revenue.",
+          : "Estimated from this month's invoice lines at the ladder in force, until the wholesaler's statement is entered on Spending under Wholesaler rebates, which then takes its place. A discount, so it reduces cost rather than adding to revenue.",
     });
   }
   const dropStatedRebate = i.basis === "cash" && rebateReceipts !== 0;
@@ -1047,7 +1044,7 @@ export type SharedInputs = {
   /** Money banked in each month for prescriptions nobody collected: real cash today, owed back to the payer. */
   bankedForUncollected: Map<string, { cents: number; n: number }>;
   /** Per month: the bills on the basis asked for, the receipts entered, the rebate earned, and the driver's invoices where the pharmacy pays them. */
-  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; rebatesNote: string | null; driverCents: number }>;
+  byMonth: Map<string, { bills: Awaited<ReturnType<typeof import("./expenses").expensesIn>>; receipts: { kind: string; amountCents: number }[]; rebatesCents: number | null; driverCents: number }>;
   /** The wholesalers' own ledgers: what cleared, when, and under which ACH. */
   statementLines: { supplier: string; invoiceNumber: string; netCents: number; clearingDate: string | null; checkNumber: string | null }[];
   /**
@@ -1062,43 +1059,6 @@ export type SharedInputs = {
   /** By the remittance's month: what the payers took off the remittances, counted once from the best record of each (payer-fees.ts). */
   payerFees: Map<string, MonthFees>;
 };
-
-/**
- * The rebate to put against a month until the wholesaler's statement for it is entered, taken from what the wholesaler last paid.
- *
- * The owner, 9 October 2026: the ladder estimate put $8,374 of rebate against nine days of October, when the last two payments were
- * $9,706.52 and $10,697.24 for whole months. The ladder assumes the top tier and prices every flagged invoice line at it, and the tier is
- * not known until the wholesaler's report arrives. What was actually paid is a fact; so the estimate is the average of the last two
- * months' payments, and for the month still open it is spread by the day, as payroll and rent are. Null where nothing has been paid yet,
- * in which case the ladder estimate stands.
- */
-export async function rebateFromLastPayments(month: string, today: string = todayIso()): Promise<{ cents: number; note: string } | null> {
-  const { db, schema } = await import("@/db");
-  const { lte, eq, and, desc, sql } = await import("drizzle-orm");
-  const rows = await db
-    .select({ month: schema.cashReceipts.month, cents: sql<number>`sum(${schema.cashReceipts.amountCents})` })
-    .from(schema.cashReceipts)
-    .where(and(eq(schema.cashReceipts.kind, "rebate"), lte(schema.cashReceipts.month, month)))
-    .groupBy(schema.cashReceipts.month)
-    .orderBy(desc(schema.cashReceipts.month))
-    .limit(2);
-  const paid = rows.filter((r) => Number(r.cents) > 0);
-  if (paid.length === 0) return null;
-  const average = Math.round(paid.reduce((n, r) => n + Number(r.cents), 0) / paid.length);
-  const open = today.slice(0, 7) === month;
-  const [y, m] = month.split("-").map(Number);
-  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const elapsed = open ? Math.min(days, Number(today.slice(8, 10))) : days;
-  const cents = open ? Math.round((average * elapsed) / days) : average;
-  const paidSaid = paid.map((r) => `${formatCents(Number(r.cents))} in ${r.month}`).join(" and ");
-  return {
-    cents,
-    note:
-      `Estimated from what the wholesaler last paid: ${paidSaid}, averaging ${formatCents(average)} a month` +
-      `${open ? `, spread by the day (${elapsed} of ${days})` : ""}. It is replaced by the statement for this month once that is entered on Spending under Wholesaler rebates. ` +
-      "A discount, so it reduces cost rather than adding to revenue.",
-  };
-}
 
 export async function loadShared(months: string[], basis: "accrual" | "cash"): Promise<SharedInputs> {
   /*
@@ -1214,12 +1174,10 @@ export async function loadShared(months: string[], basis: "accrual" | "cash"): P
       earningForMonth(month),
       driverCostFor(month, basis),
     ]);
-    const lastPaid = basis === "accrual" ? await rebateFromLastPayments(month) : null;
     byMonth.set(month, {
       bills,
       receipts: receipts.map((r) => ({ kind: r.kind, amountCents: r.amountCents })),
-      rebatesCents: lastPaid ? lastPaid.cents : earned.reduce((n, e) => n + (e?.estimatedRebateCents ?? 0), 0) || null,
-      rebatesNote: lastPaid ? lastPaid.note : null,
+      rebatesCents: earned.reduce((n, e) => n + (e?.estimatedRebateCents ?? 0), 0) || null,
       driverCents,
     });
   }
@@ -1277,7 +1235,7 @@ function feeInputs(f: MonthFees | undefined): Pick<PLInputs, "remitFeesCents" | 
 /** One month's inputs, sliced from what was loaded. Nothing here computes; `monthlyPL` does. */
 export function monthInputs(month: string, basis: "accrual" | "cash", shared: SharedInputs): PLInputs {
   const { sales: months, cats, fills, invoices, lines, counts } = shared;
-  const per = shared.byMonth.get(month) ?? { bills: [], receipts: [], rebatesCents: null, rebatesNote: null, driverCents: 0 };
+  const per = shared.byMonth.get(month) ?? { bills: [], receipts: [], rebatesCents: null, driverCents: 0 };
   const sales = months.find((m) => m.month === month) ?? null;
 
   /*
@@ -1510,7 +1468,6 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     openingStockCents,
     closingStockCents,
     rebatesCents: per.rebatesCents,
-    rebatesNote: per.rebatesNote,
     onAccount,
     expenses: [
       ...per.bills.map((b) => {

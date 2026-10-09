@@ -1,3 +1,4 @@
+import { isGlp1 } from "./scrubbed-products";
 import "server-only";
 import { allSuppliers, supplierRecordFor } from "./suppliers-registry";
 import { rebateProgramsInForce, rebateProgramsFor } from "./supplier-terms-store";
@@ -44,7 +45,7 @@ export type SupplierRates = {
   driftPercent?: number | null;
 };
 
-export async function ratesFor(supplierId: string, on = todayIso()): Promise<SupplierRates | null> {
+export async function ratesFor(supplierId: string, on = todayIso(), gcrForMonth: number | null = null): Promise<SupplierRates | null> {
   const rows = await allSuppliers(true);
   const supplier = rows.find((s) => s.id === supplierId);
   if (!supplier) return null;
@@ -91,7 +92,7 @@ export async function ratesFor(supplierId: string, on = todayIso()): Promise<Sup
    * nobody editing anything.
    */
   const dailyScrubbed = dailyIsOurs && daily.scrubbed === true && daily.gcrPercent !== null;
-  const selectsBand = dailyScrubbed ? daily.gcrPercent : scrubbed;
+  const selectsBand = gcrForMonth ?? (dailyScrubbed ? daily.gcrPercent : scrubbed);
   const ratioSource =
     dailyScrubbed ? "daily report" : scrubbed !== null ? "monthly statement" : dailyIsOurs && daily.gcrPercent !== null ? "daily report" : null;
   /*
@@ -270,6 +271,8 @@ export type EarningSoFar = {
   month: string;
   contractPurchasedCents: number;
   brandPurchasedCents: number;
+  /** GLP-1 purchases left out of the brand figure above, because McKesson leaves them out of the purchases its brand factor is paid on. */
+  glp1ExcludedCents: number;
   unmarkedPurchasedCents: number;
   totalPurchasedCents: number;
   /**
@@ -321,7 +324,7 @@ export type EarningSoFar = {
  * So the read and the placement happen here, once, and each supplier's figures are taken from the
  * result. `earningSoFar` below is a thin reading of this, so nothing that already calls it changes.
  */
-type PlacedLine = { id: string; supplierId: string | null; supplier: string | null; extendedCents: number; itemClass: string | null; rebated: boolean | null };
+type PlacedLine = { id: string; supplierId: string | null; supplier: string | null; extendedCents: number; itemClass: string | null; rebated: boolean | null; glp1: boolean };
 
 type MonthLines = {
   /** Every line in the month, placed against the supplier that owns it (null where none does). */
@@ -340,7 +343,7 @@ async function linesForMonth(m: string): Promise<MonthLines> {
     const lines = await db.query.invoiceLines.findMany({
       where: and(gte(schema.invoiceLines.invoiceDate, `${m}-01`), lte(schema.invoiceLines.invoiceDate, `${m}-31`)),
       // Six of fourteen columns. The other eight were read and thrown away on every call.
-      columns: { id: true, supplierId: true, supplier: true, extendedCents: true, itemClass: true, rebated: true },
+      columns: { id: true, supplierId: true, supplier: true, extendedCents: true, itemClass: true, rebated: true, description: true },
     });
     /*
      * Which supplier each line belongs to — the identifier first, the name only where there is none.
@@ -358,7 +361,7 @@ async function linesForMonth(m: string): Promise<MonthLines> {
         const printed = (l.supplier ?? "").trim();
         unplacedNames.add(printed === "" ? "(no supplier printed on the line)" : printed);
       }
-      return { ...l, owner };
+      return { id: l.id, supplierId: l.supplierId, supplier: l.supplier, extendedCents: l.extendedCents, itemClass: l.itemClass, rebated: l.rebated, glp1: isGlp1(l.description), owner };
     });
     return { lines: placed, unplacedLines, unplacedCents, unplacedNames: [...unplacedNames].sort() };
   });
@@ -408,6 +411,7 @@ async function earningFrom(supplierId: string, m: string, month: MonthLines): Pr
 
   let contract = 0;
   let brand = 0;
+  let glp1Excluded = 0;
   let unmarked = 0;
   let unmarkedLines = 0;
   let rx = 0;
@@ -426,7 +430,10 @@ async function earningFrom(supplierId: string, m: string, month: MonthLines): Pr
     if (l.rebated === true) contract += l.extendedCents;
     // The brand factor is paid on brand prescription purchases; an over-the-counter line marked
     // "not rebated" is neither, and earned the factor here until the class letter was read.
-    else if (l.rebated === false && isRx(l)) brand += l.extendedCents;
+    else if (l.rebated === false && isRx(l)) {
+      if (l.glp1) glp1Excluded += l.extendedCents;
+      else brand += l.extendedCents;
+    }
     else if (l.rebated === false) unmarked += l.extendedCents;
     else {
       unmarked += l.extendedCents;
@@ -440,7 +447,9 @@ async function earningFrom(supplierId: string, m: string, month: MonthLines): Pr
    * known (the statement on file, or the current drill-down), because statements are held one per
    * supplier rather than one per period — see money-ledger.md §7.1.
    */
-  const rates = await ratesFor(supplierId, `${m}-${String(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0)).getUTCDate()).padStart(2, "0")}`);
+  const ownDrill = await latestRatio();
+  const monthGcr = ownDrill && ownDrill.scrubbed === true ? (ownDrill.months.find((x) => x.month === m)?.gcrPercent ?? null) : null;
+  const rates = await ratesFor(supplierId, `${m}-${String(new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0)).getUTCDate()).padStart(2, "0")}`, monthGcr);
   const contractRate = rates?.view.contractGenericPercent ?? null;
   const brandRate = rates?.view.brandPercent ?? null;
   const contractRebate = contractRate === null ? null : Math.round((contract * contractRate) / 100);
@@ -452,8 +461,9 @@ async function earningFrom(supplierId: string, m: string, month: MonthLines): Pr
     month: m,
     contractPurchasedCents: contract,
     brandPurchasedCents: brand,
+    glp1ExcludedCents: glp1Excluded,
     unmarkedPurchasedCents: unmarked,
-    totalPurchasedCents: contract + brand + unmarked,
+    totalPurchasedCents: contract + brand + glp1Excluded + unmarked,
     rxPurchasedCents: rx,
     contractRatePercent: contractRate,
     brandRatePercent: brandRate,
