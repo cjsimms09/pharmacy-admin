@@ -808,22 +808,6 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
 
   absent("Wages and salaries", "Wages and salaries. Usually the largest cost a pharmacy has — without it this account is not conservative, it is wrong.");
   absent("Rent and occupancy", "Rent and occupancy.");
-  /*
-   * Costs every pharmacy has every month, asked for by name on the accrual account.
-   *
-   * The owner, 9 October 2026: "make sure everything is accounted for correctly for accrual, nothing is missing." September's
-   * account listed ten operating lines and said nothing was missing, with wages a round $45,000, no payroll tax, no
-   * insurance, no utilities and no telephone. The categories exist on Spending; nothing had been entered under them, and
-   * an empty category reads as a cost of nothing, which flatters the bottom line as surely as a missing bill. Gross profit
-   * does not depend on them; net profit does. The accrual account carries what is on file by the day, so a standing amount
-   * (an annual premium divided by twelve, say) is how each of these belongs to every month.
-   */
-  if (i.basis === "accrual") {
-    absent("Payroll taxes and benefits", "Payroll taxes and benefits. The employer's share of Social Security and Medicare alone is 7.65% of wages, and unemployment tax, workers' compensation and any benefits come on top; with wages on the account and none of this, net profit is overstated.");
-    absent("Utilities", "Utilities: electricity, water, gas. Every premises has them every month; none is on the account.");
-    absent("Telephone and internet", "Telephone and internet. Every premises has them every month; none is on the account.");
-    absent("Insurance", "Insurance: liability, property, workers' compensation. An annual premium belongs to every month of the year; enter it on Spending as a standing monthly amount.");
-  }
   absent(
     "Card processing and bank fees",
     "Card processing fees — about five per cent of card takings in August. Global Payments' monthly statement books them when it is forwarded to the inbox; typing them on Spending as well counts them twice.",
