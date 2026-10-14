@@ -189,6 +189,14 @@ export async function sweepMailbox(ctx: { userId: string | null; userName: strin
     result.errors.push(`Could not retry the reports held by the ceiling: ${e instanceof Error ? e.message : String(e)}`);
   }
 
+  /* A reader mended since a report was refused gets to read it again, once per build (retry-refused.ts). */
+  try {
+    const again = await retryRefusedReports({ userId: ctx.userId ?? "mailbox-sweep", userName: ctx.userName ?? "Automatic check" });
+    result.imported += again.loaded;
+  } catch (e) {
+    result.errors.push(`Could not read the refused reports again: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   let client: ImapFlow | null = null;
   try {
     client = await connect();
@@ -1737,6 +1745,43 @@ export async function retryHeldByBudget(ctx: { userId: string; userName: string 
     }
   }
   return { retried: held.length, loaded, stillHeld };
+}
+
+/**
+ * Gives every report a reader refused another go, once per build of the site (retry-refused.ts).
+ *
+ * The readers are mended from time to time, and a refusal written before the mend is not news. Run
+ * at the start of every sweep so a fix reaches the lines it was written for with nobody pressing
+ * anything. Reads are keyed so a report read twice books nothing twice.
+ */
+export async function retryRefusedReports(ctx: { userId: string; userName: string }): Promise<{ retried: number; loaded: number }> {
+  const { readFile: readText } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const build = await readText(join(process.cwd(), ".next", "BUILD_ID"), "utf8").then((t) => t.trim(), () => "");
+  if (!build) return { retried: 0, loaded: 0 };
+  const since = new Date(Date.now() - 45 * 86_400_000).toISOString();
+  const { wantsAnotherRead, triedMark } = await import("./retry-refused");
+  const rows = await db.query.inboxItems.findMany({
+    where: (i, { gte, like: lk, and: both }) => both(gte(i.receivedAt, since), lk(i.routeResult, "%Held, nothing stored%")),
+    columns: { id: true, routeResult: true, imported: true, documentId: true, receivedAt: true },
+  });
+  let retried = 0;
+  let loaded = 0;
+  for (const row of rows) {
+    if (!wantsAnotherRead(row, build, since)) continue;
+    retried++;
+    let text = "";
+    try {
+      text = await rereadInboxItem(row.id, ctx);
+    } catch {
+      // One line that will not read again must not stop the others; it is marked so it is not retried every sweep.
+      text = row.routeResult ?? "";
+    }
+    const after = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.id, row.id), columns: { routeResult: true, imported: true } });
+    if (after?.imported === true) loaded++;
+    await db.update(schema.inboxItems).set({ routeResult: `${(after?.routeResult ?? text).replace(/ \[tried on build [^\]]*\]$/, "")} ${triedMark(build)}` }).where(eq(schema.inboxItems.id, row.id));
+  }
+  return { retried, loaded };
 }
 
 /**
