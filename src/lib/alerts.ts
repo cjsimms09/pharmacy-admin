@@ -784,9 +784,16 @@ export async function alerts(): Promise<Alert[]> {
      * widened phrase list is what closed the gap that lost September's sales summary.
      */
     const needsTheModel = /needs the model/i;
+    /*
+     * Not Health Mart Atlas's payment detail. Its money is banked by the 835 and by the bank line, so the detail only itemises it
+     * (the owner, 15 October 2026: "why do we need it if we have it from 835s and bank account"). A refusal of it stays on the
+     * Inbox line, and the sweep reads it again when the reader changes (retry-refused.ts), but it does not stand on the front page
+     * as a report that "was not counted": the money was counted.
+     */
+    const itemisationOnly = new Set(["accesshealth_payment"]);
     const refused = recent
       .map((r) => ({ row: r, story: storyOf(r) }))
-      .filter(({ row, story }) => (story.outcome === "held" || story.outcome === "rejected") && !needsTheModel.test(row.routeResult ?? ""))
+      .filter(({ row, story }) => (story.outcome === "held" || story.outcome === "rejected") && !needsTheModel.test(row.routeResult ?? "") && !itemisationOnly.has(row.routedAs ?? ""))
       .sort((a, b) => a.row.receivedAt.localeCompare(b.row.receivedAt));
     if (refused.length > 0) {
       const names = [...new Set(refused.map(({ row }) => kindWords(row.routedAs) ?? row.fileName ?? "a document"))];

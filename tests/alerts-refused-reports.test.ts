@@ -110,4 +110,15 @@ describe("a report arrived and was not counted", () => {
     assert.match(a.title, /2 reports/);
     assert.doesNotMatch(a.why, /System sales summary/);
   });
+
+  /*
+   * Health Mart Atlas's payment detail only itemises money the 835 and the bank line already carry (the owner, 15 October 2026),
+   * so a refusal of it stays on the Inbox and does not stand on the front page as a report that was not counted.
+   */
+  test("a refused Health Mart Atlas payment detail does not fire it", async () => {
+    const before = await refusedAlert();
+    await arrival("a9", "accesshealth_payment", "Held, nothing stored: the EFT does not hold together. Nothing was read from it.");
+    const after = await refusedAlert();
+    assert.equal(after?.title, before?.title);
+  });
 });

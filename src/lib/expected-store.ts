@@ -499,7 +499,7 @@ async function load(today: string): Promise<ExpectedNow> {
       key: "accesshealth",
       label: "Health Mart Atlas payment detail",
       from: "Health Mart Atlas",
-      whyItMatters: "Itemises an EFT into the claims it paid, which is what lets a deposit be believed.",
+      whyItMatters: "Optional. The 835 and the bank line already carry the money; this only itemises an EFT into the claims it paid and the fees taken from it.",
       cadence: { kind: "on_event", says: "with each EFT" },
       graceDays: 0,
       lastAt: route("accesshealth_payment").at,
