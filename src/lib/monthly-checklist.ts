@@ -131,16 +131,38 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
   /* ── 1. The PSAO's payment report ──────────────────────────────── */
   const { payerPaymentsFor } = await import("./payer-payments-store");
   const payer = await payerPaymentsFor(month);
+  /*
+   * The Wells Fargo account history is the better record of the ProviderPay payers' money (every deposit, with the payer's payment
+   * number; its sweeps add up to the transfers that reach the bank), and the 835s bank much of it too. So when a history taken after
+   * the month ended covers it, the question is whether each deposit it proves is in the books, from whichever document. The export's
+   * own date only decides when no such history is on file. The owner, 15 October 2026: September would not close on an export
+   * that stopped on the 18th while the history, and the 835s, held the rest to the cent.
+   */
+  const { accountHistories } = await import("./engine/remit-sweep");
+  const { distinctDeposits, depositsNotInBooks } = await import("./account-deposits");
+  const historyDocs = await db.query.documents.findMany({
+    where: and(like(schema.documents.fileName, "%ransaction%istory%"), gte(schema.documents.uploadedAt, dayAfter(month))),
+    columns: { id: true },
+  });
+  const monthDeposits = distinctDeposits(await accountHistories()).filter((d) => d.date.startsWith(month));
+  const historyCovers = historyDocs.length > 0 && monthDeposits.length > 0;
+  const receiptsAll = historyCovers ? await db.query.cashReceipts.findMany({ columns: { reference: true, amountCents: true, receivedOn: true } }) : [];
+  const notInBooks = historyCovers ? depositsNotInBooks(monthDeposits, receiptsAll) : [];
+  const exportCovers = coversTheMonth(payer.payments, payer.pulledAt, month);
   items.push({
     key: "provider_pay",
-    name: "ProviderPay payment report",
+    name: "ProviderPay payments",
     why:
-      "The largest thing on the cash account by a wide margin, and the only file that says which payer sent what. " +
-      "Until it is in, none of the month's payer money is on the account at all.",
-    from: "the ProviderPay portal: Data management → Payments, search the whole month, select all, then Export",
-    done: coversTheMonth(payer.payments, payer.pulledAt, month),
-    says:
-      payer.payments === 0
+      "The largest thing on the cash account by a wide margin, and the file that says which payer sent what. " +
+      "The Wells Fargo account history carries every ProviderPay payer's deposit with its payment number; the Payments export adds Health Mart Atlas, which pays the bank direct.",
+    from: "the ProviderPay portal: Data management → Payments, search the whole month, select all, then Export (or the Wells Fargo account history below, for the ProviderPay payers)",
+    done: historyCovers ? notInBooks.length === 0 : exportCovers,
+    says: historyCovers
+      ? notInBooks.length === 0
+        ? `all ${monthDeposits.length} deposits in the Wells Fargo history (${money(monthDeposits.reduce((n, d) => n + d.amountCents, 0))}) are in the books`
+        : `${notInBooks.length} of ${monthDeposits.length} deposits in the Wells Fargo history are not in the books: ${money(notInBooks.reduce((n, d) => n + d.amountCents, 0))}, ` +
+          `${[...new Set(notInBooks.map((d) => d.payer ?? "a payer"))].slice(0, 4).join(", ")}`
+      : payer.payments === 0
         ? "nothing of the month's payer money is on the account"
         : `${payer.payments} payments, ${money(payer.cents)}` + coverage(payer.pulledAt, payer.reaches, month),
     cents: payer.cents || null,

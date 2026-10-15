@@ -110,7 +110,7 @@ export function sweepDepositsFrom(histories: AccountMonth[], lines: BankLineRow[
  */
 const parsed = new Map<string, AccountMonth | null>();
 
-async function accountHistories(): Promise<AccountMonth[]> {
+export async function accountHistories(): Promise<AccountMonth[]> {
   const docs = await db.query.documents.findMany({
     where: and(eq(schema.documents.category, "report"), lte(schema.documents.sizeBytes, MAX_HISTORY_BYTES)),
     columns: { sha256: true, storageKey: true },
