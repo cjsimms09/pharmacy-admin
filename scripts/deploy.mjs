@@ -202,6 +202,19 @@ async function main() {
     fs.writeFileSync(flagFile, new Date().toISOString());
     say(`Launcher running (pid ${launchers.join(", ")}); stopping the app (pid ${holder}) so it installs ${head}…`);
     stopProcess(holder);
+    /*
+     * Say so when the stop did not stop it. The stop above is silent on failure, and from this session Windows has refused it
+     * ("Access is denied" on the app, 12 and 15 October 2026) while the script went on to report that the launcher "installed
+     * nothing", which sent the owner looking at the build when the app had simply never been stopped.
+     */
+    await sleep(4_000);
+    if (processes().holder === holder) {
+      fail(
+        `Windows would not let this session stop the app (pid ${holder}), so it is still running the old build (${buildBefore ?? "none"}). ` +
+          `${head} is on GitHub and the update request is on file: the launcher installs it the moment the app stops. ` +
+          `Double-click "Stop the old site.cmd" in the pharmacy-admin folder; the site is down for the rebuild, usually 10 to 25 minutes.`,
+      );
+    }
   } else if (launchers.length > 0) {
     // A launcher with no app on the port is one in the middle of a build or a recovery already.
     say(`Launcher running (pid ${launchers.join(", ")}) but nothing holds port ${PORT} — it is already building or recovering. Waiting for it.`);
