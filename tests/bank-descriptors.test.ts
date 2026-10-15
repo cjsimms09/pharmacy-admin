@@ -73,6 +73,16 @@ describe("what each line on the bank statement is", () => {
     assert.equal(m.lands, "balance_sheet");
   });
 
+  test("the online export's wording is read as well as the scanned statement's", () => {
+    const loan = readBankDescriptor("Loan Payment", -794_932);
+    assert.equal(loan.kind, "loan_payment");
+    assert.equal(loan.lands, "balance_sheet");
+    const jams = readBankDescriptor("Jams Wholesale/Payment", -735_063);
+    assert.equal(jams.kind, "wholesaler_payment");
+    assert.equal(jams.counterparty, "JamsRX");
+    assert.equal(jams.lands, "cost_of_goods");
+  });
+
   test("the wholesalers are told apart from each other", () => {
     assert.equal(readBankDescriptor("Independent Phar/WAREHOU SE 55501234 WEST WICHITA FAMILY PH", -157_18, { supplierAccounts: { IPC: "55501234" } }).counterparty, "IPC");
     assert.equal(readBankDescriptor("ParMed/)OOOOOOOOC( 2A571.67t99 222A Scott Kardatzke", -287_127).counterparty, "Parmed");

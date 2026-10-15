@@ -211,6 +211,16 @@ const RULES: Rule[] = [
   },
   {
     kind: "wholesaler_payment",
+    counterparty: "JamsRX",
+    test: /JAMSWHOLESALE/,
+    side: "out",
+    lands: "cost_of_goods",
+    category: null,
+    feed: "the JamsRX invoices on file",
+    why: "JamsRX is a wholesaler this pharmacy pays (the online bank export names it Jams Wholesale), so a debit should match one invoice by amount.",
+  },
+  {
+    kind: "wholesaler_payment",
     counterparty: "IN Pharma Solutions",
     test: /INPHARMASOLUTIO/,
     side: "out",
@@ -393,7 +403,8 @@ const RULES: Rule[] = [
   {
     kind: "loan_payment",
     counterparty: "the loan",
-    test: /\bLN[0-9]|LOANPMT|LNPMT/,
+    /* The online export writes it out ("Loan Payment", 15 October 2026) where the scanned statement printed "Ln 8319 Pmt". */
+    test: /\bLN[0-9]|LOANPMT|LNPMT|LOANPAYMENT/,
     side: "out",
     lands: "balance_sheet",
     category: "Loan principal",
