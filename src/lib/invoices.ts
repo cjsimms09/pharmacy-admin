@@ -2305,16 +2305,25 @@ async function loadInvoiceIssues(): Promise<InvoiceIssue[]> {
    * to chase a wholesaler about as goods that never arrived — which is what the first version of
    * the alert above told the owner about exactly these, on 15 September.
    */
-  if (prices.charges.length > 0 && !out.some((a) => a.key === "prices-disagree")) {
-    const n = prices.charges.length;
-    const c = `$${(Math.abs(prices.chargesCents) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  /*
+   * Only the ones the invoice does not explain.
+   *
+   * All fifteen on the live page were ParMed's printed sales tax, to the cent, and the alert called them "freight, a surcharge or a fee".
+   * A tax the invoice prints after its subtotal is the invoice being right, not something to look at, so the card on the page
+   * counts it and this never raises it. What is raised is a difference the document does not name.
+   */
+  const unexplained = prices.charges.filter((ch) => ch.basis !== "sales-tax");
+  const unreadable = unexplained.some((ch) => ch.basis === "unreadable");
+  if (unexplained.length > 0 && !out.some((a) => a.key === "prices-disagree")) {
+    const n = unexplained.length;
+    const c = `$${(Math.abs(prices.unexplainedCents) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     out.push({
       key: "invoice-charges",
       severity: "warn",
       title: `${c} of charges on ${n} invoice total${n === 1 ? "" : "s"}`,
       detail:
-        `Every item on ${n === 1 ? "this invoice" : "these invoices"} matches what PioneerRx booked in. The ${c} is on the total and on no line — freight, a surcharge or a fee — ` +
-        `so it is money paid for getting the goods here, not goods billed and never received.`,
+        `Every item on ${n === 1 ? "this invoice" : "these invoices"} matches what PioneerRx booked in. The ${c} is on the total and on no item line, and ${unreadable ? "the file could not be read to see what it is" : "no printed tax matches it"}. ` +
+        `Look at the last page of ${n === 1 ? "the invoice" : "each invoice"} to see what it is.`,
       href: "/inventory/invoices",
       action: "See the charges",
     });

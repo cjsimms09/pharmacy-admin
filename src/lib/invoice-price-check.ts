@@ -45,7 +45,9 @@
  */
 
 import { db, schema } from "@/db";
+import { eq } from "drizzle-orm";
 import { sameDrugCode } from "./invoice-lines";
+import { salesTaxOnInvoice, discountOnInvoice, pricesExplainedByDiscount } from "./invoice-tax";
 
 /** How far apart two figures may be before it is worth saying. Rounding, not a dispute. */
 const TOLERANCE_CENTS = 2;
@@ -124,12 +126,53 @@ export type PriceCheck = {
    * the wholesaler charged for getting them there. Kept apart so it is neither hidden nor mistaken
    * for goods billed and never received.
    */
-  charges: { invoiceNumber: string; supplier: string; invoiceDate: string | null; invoiceId: string; cents: number; say: string }[];
+  charges: { invoiceNumber: string; supplier: string; invoiceDate: string | null; invoiceId: string; cents: number; basis: ChargeBasis; say: string }[];
   chargesCents: number;
+  /** The part of `chargesCents` the invoice itself prints as sales tax, to the cent. */
+  taxCents: number;
+  /** The rest: a difference on the total that the invoice does not name, which is the only part worth a look. */
+  unexplainedCents: number;
+  /** Price differences set aside because the invoice prints a discount that accounts for them, kept so they can be seen and contested. */
+  discounted: { invoiceNumber: string; supplier: string; differenceCents: number; discountCents: number }[];
   /** Invoices with no delivery to check against, and why — so the coverage is not overstated. */
-  unchecked: { invoiceNumber: string | null; supplier: string | null; why: string }[];
+  unchecked: { invoiceNumber: string | null; supplier: string | null; why: string; state: UncheckedState }[];
   checkedAt: string;
 };
+
+/**
+ * What the difference on an invoice total is, said only when the invoice says so.
+ *
+ * "sales-tax" is the invoice's own printed subtotal, the item lines summing to it, and a labelled tax equal to the
+ * difference, all three agreeing (invoice-tax.ts). "unexplained" is everything else; it is called neither freight nor a
+ * fee, because nothing printed on the invoice says which.
+ */
+export type ChargeBasis = "sales-tax" | "unexplained" | "unreadable";
+
+/**
+ * Whether the difference between what the item lines came to and the invoice total is a printed sales tax.
+ *
+ * Pure. The reader keeps no record of what a difference was, so the only place that says it is the document itself.
+ */
+export function chargeBasis(text: string | null, goodsCents: number, invoiceTotalCents: number): ChargeBasis {
+  if (!text) return "unreadable";
+  const tax = salesTaxOnInvoice(text, goodsCents, invoiceTotalCents, 0);
+  return tax && tax.amountCents === invoiceTotalCents - goodsCents ? "sales-tax" : "unexplained";
+}
+
+/**
+ * Why an invoice has no delivery to be checked against, in the vocabulary the owner reads.
+ *
+ * "not-yet" is expected-not-yet: the invoice is newer than the newest delivery PioneerRx has reported, so the counter has not
+ * booked it in or the pull has not seen it. "credit-memo" is a credit, which is no delivery. "no-delivery" is the one worth a
+ * look: an older invoice that PioneerRx has no delivery for.
+ */
+export type UncheckedState = "not-yet" | "credit-memo" | "no-delivery" | "no-number";
+
+export function uncheckedState(invoice: { invoiceDate: string | null; totalCents: number | null }, newestDeliveryDate: string | null): UncheckedState {
+  if ((invoice.totalCents ?? 0) < 0) return "credit-memo";
+  if (invoice.invoiceDate && newestDeliveryDate && invoice.invoiceDate >= newestDeliveryDate) return "not-yet";
+  return "no-delivery";
+}
 
 type Line = { ndc11: string | null; description: string | null; quantity: number; unitCostCents: number | null; extendedCents: number };
 
@@ -252,6 +295,19 @@ function byNdc(lines: Line[]): { coded: Map<string, PerDrug>; uncoded: Uncoded[]
 
 const money = (c: number) => `$${(Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/** The invoice document's text, or null where it cannot be read, which leaves a charge unexplained rather than guessed. */
+async function invoiceText(documentId: string): Promise<string | null> {
+  try {
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId), columns: { storageKey: true } });
+    if (!doc) return null;
+    const { readFile } = await import("./files");
+    const { pdfText } = await import("./pdf-text");
+    return pdfText(await readFile(doc.storageKey));
+  } catch {
+    return null;
+  }
+}
+
 export async function checkInvoicePrices(): Promise<PriceCheck> {
   const purchases = await db
     .select({
@@ -270,6 +326,7 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
       invoiceNumber: schema.supplierInvoices.invoiceNumber,
       invoiceDate: schema.supplierInvoices.invoiceDate,
       totalCents: schema.supplierInvoices.totalCents,
+      documentId: schema.supplierInvoices.documentId,
     })
     .from(schema.supplierInvoices);
   const allLines = await db
@@ -311,20 +368,33 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
   const out: PriceDisagreement[] = [];
   const codeDifferences: CodeDifference[] = [];
   const unchecked: PriceCheck["unchecked"] = [];
+  const newestDelivery = purchases.map((p) => p.invoiceDate).filter((d): d is string => !!d).sort().pop() ?? null;
   let checked = 0;
   let agreeing = 0;
   let linesCompared = 0;
   const charges: PriceCheck["charges"] = [];
+  const discounted: PriceCheck["discounted"] = [];
 
   for (const inv of invoices) {
     const number = inv.invoiceNumber?.trim() ?? "";
     if (!number) {
-      unchecked.push({ invoiceNumber: null, supplier: inv.supplier, why: "The invoice carries no number, so there is nothing to tie it to a delivery." });
+      unchecked.push({ invoiceNumber: null, supplier: inv.supplier, why: "The invoice carries no number, so there is nothing to tie it to a delivery.", state: "no-number" });
       continue;
     }
     const delivery = deliveryBy.get(number);
     if (!delivery) {
-      unchecked.push({ invoiceNumber: number, supplier: inv.supplier, why: "No PioneerRx delivery carries this number, so there is no second copy of the price." });
+      const state = uncheckedState(inv, newestDelivery);
+      unchecked.push({
+        invoiceNumber: number,
+        supplier: inv.supplier,
+        state,
+        why:
+          state === "credit-memo"
+            ? "A credit memo: it is a credit, not a delivery, so PioneerRx has nothing to set it against."
+            : state === "not-yet"
+              ? "Dated on or after the newest delivery PioneerRx has reported, so its delivery may simply not be booked in yet."
+              : "No PioneerRx delivery carries this number, so there is no second copy of the price.",
+      });
       continue;
     }
     checked++;
@@ -351,15 +421,21 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
     if (reading.kind === "charge" && inv.totalCents !== null) {
       const cents = reading.cents;
       const invoiceLineCents = reading.goodsCents;
+      const basis = chargeBasis(await invoiceText(inv.documentId), invoiceLineCents, inv.totalCents);
       charges.push({
         invoiceNumber: number,
         supplier,
         invoiceDate: inv.invoiceDate ?? delivery.invoiceDate,
         invoiceId: inv.id,
         cents,
+        basis,
         say:
           `${supplier} ${number}: every item matches what PioneerRx booked in, to ${money(invoiceLineCents)}, and the invoice total is ${money(inv.totalCents)}. ` +
-          `The ${money(Math.abs(cents))} between them is on no line — a charge such as freight or a surcharge, not goods.`,
+          (basis === "sales-tax"
+            ? `The ${money(Math.abs(cents))} between them matches a tax line the invoice prints after its subtotal; it is not goods.`
+            : basis === "unreadable"
+              ? `The ${money(Math.abs(cents))} between them is on no item line, and the invoice file could not be read to see what it is.`
+              : `The ${money(Math.abs(cents))} between them is on no item line, and no printed tax on the invoice matches it, so this cannot say whether it is freight, a fee or something else.`),
       });
     } else if (reading.kind === "differ" && inv.totalCents !== null && delivery.totalCents !== null) {
       const diff = reading.cents;
@@ -579,6 +655,25 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
       });
     }
 
+    /*
+     * A price that is above the delivery by the discount the invoice prints is not a disagreement.
+     *
+     * ParMed prints its line prices before a DISCOUNT line and PioneerRx books the price after it, so a discounted line is
+     * "more than arrived" by exactly the discount. Only invoices already carrying price differences are opened to look, and
+     * only when the differences add up to the printed discount.
+     */
+    const priceRows = out.slice(before).filter((d) => d.kind === "price");
+    if (priceRows.length > 0) {
+      const text = await invoiceText(inv.documentId);
+      const lineSum = (linesOf.get(inv.id) ?? []).reduce((n, l) => n + l.extendedCents, 0);
+      const off = text && inv.totalCents !== null ? discountOnInvoice(text, lineSum, inv.totalCents, 0) : null;
+      if (off && pricesExplainedByDiscount(priceRows.map((d) => d.differenceCents), off.discountCents)) {
+        discounted.push({ invoiceNumber: number, supplier, differenceCents: priceRows.reduce((n, d) => n + d.differenceCents, 0), discountCents: off.discountCents });
+        const rest = out.splice(before).filter((d) => d.kind !== "price");
+        out.push(...rest);
+      }
+    }
+
     if (out.length === before) agreeing++;
   }
 
@@ -596,5 +691,8 @@ export async function checkInvoicePrices(): Promise<PriceCheck> {
     .reduce((n, d) => n + Math.max(0, d.differenceCents), 0);
 
   const chargesCents = charges.reduce((n, c) => n + c.cents, 0);
-  return { checked, agreeing, linesCompared, disagreements: out, codeDifferences, overbilledCents, charges, chargesCents, unchecked, checkedAt: new Date().toISOString() };
+  /* Absolute values: a +$1.15 and a -$1.15 must not cancel into a page that says nothing. */
+  const taxCents = charges.filter((c) => c.basis === "sales-tax").reduce((n, c) => n + Math.abs(c.cents), 0);
+  const unexplainedCents = charges.filter((c) => c.basis !== "sales-tax").reduce((n, c) => n + Math.abs(c.cents), 0);
+  return { checked, agreeing, linesCompared, disagreements: out, codeDifferences, overbilledCents, charges, chargesCents, taxCents, unexplainedCents, discounted, unchecked, checkedAt: new Date().toISOString() };
 }

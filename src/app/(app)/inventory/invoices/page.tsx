@@ -1364,7 +1364,20 @@ export default async function InvoicesPage({
                 {prices.charges.length > 0 && (
                   <>
                     {" "}
-                    {money(Math.abs(prices.chargesCents))} of freight or surcharges on {prices.charges.length} invoice{prices.charges.length === 1 ? "" : "s"}, not goods.
+                    {prices.charges.some((c) => c.basis === "sales-tax") && (
+                      <>
+                        {money(Math.abs(prices.taxCents))} matches a tax line the invoice prints after its subtotal, on{" "}
+                        {prices.charges.filter((c) => c.basis === "sales-tax").length} invoice
+                        {prices.charges.filter((c) => c.basis === "sales-tax").length === 1 ? "" : "s"}.
+                      </>
+                    )}
+                    {prices.charges.some((c) => c.basis !== "sales-tax") && (
+                      <>
+                        {prices.charges.some((c) => c.basis === "sales-tax") ? " " : ""}
+                        {money(Math.abs(prices.unexplainedCents))} on {prices.charges.filter((c) => c.basis !== "sales-tax").length} invoice
+                        {prices.charges.filter((c) => c.basis !== "sales-tax").length === 1 ? "" : "s"} is on no item line and no printed tax matches it{prices.charges.some((c) => c.basis === "unreadable") ? " (some files could not be read)" : ""}.
+                      </>
+                    )}
                   </>
                 )}
                 {prices.codeDifferences.length > 0 && (
@@ -1427,16 +1440,38 @@ export default async function InvoicesPage({
                   </ul>
                 </details>
               )}
-              {prices.unchecked.length > 0 && (
-                <p className="mt-2 text-xs text-ink-3">
-                  {prices.unchecked.length} invoice{prices.unchecked.length === 1 ? "" : "s"} not checked: no PioneerRx delivery carries{" "}
-                  {prices.unchecked.length === 1 ? "its" : "their"} number.
-                </p>
+              {prices.unchecked.length > 0 &&
+                (() => {
+                  const n = (st: string) => prices.unchecked.filter((u) => u.state === st).length;
+                  const notYet = n("not-yet");
+                  const credits = n("credit-memo");
+                  const rest = n("no-delivery");
+                  const parts = [
+                    notYet > 0 ? `${notYet} dated on or after the newest delivery PioneerRx has reported, so ${notYet === 1 ? "its delivery" : "their deliveries"} may not be booked in yet` : "",
+                    n("no-number") > 0 ? `${n("no-number")} with no invoice number, so nothing to match` : "",
+                    credits > 0 ? `${credits} with a negative total (credits), checked against nothing` : "",
+                    rest > 0 ? `${rest} with no PioneerRx delivery under ${rest === 1 ? "its" : "their"} number` : "",
+                  ].filter(Boolean);
+                  return <p className="mt-2 text-xs text-ink-3">Not checked: {parts.join("; ")}.</p>;
+                })()}
+              {prices.discounted.length > 0 && (
+                <details className="mt-2 text-xs">
+                  <summary className="cursor-pointer text-ink-3">
+                    {prices.discounted.length} price difference{prices.discounted.length === 1 ? "" : "s"} ({money(prices.discounted.reduce((n, d) => n + d.differenceCents, 0))}) set aside because the invoice prints a discount that accounts for {prices.discounted.length === 1 ? "it" : "them"}
+                  </summary>
+                  <ul className="mt-1 space-y-0.5 text-ink-3">
+                    {prices.discounted.map((d) => (
+                      <li key={d.invoiceNumber}>
+                        {d.supplier} {d.invoiceNumber}: lines above the delivery by {money(d.differenceCents)}; the invoice takes {money(d.discountCents)} off.
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               )}
               <details className="mt-2 text-xs">
                 <summary className="cursor-pointer text-ink-3">How this is checked</summary>
                 <p className="mt-1 text-ink-3">
-                  Two systems filled in separately: the wholesaler&rsquo;s invoice, and whoever booked the delivery in at the counter. Where both hold a figure the price is checked; where only one does, nobody has. A charge on a total whose every item matched is freight or a surcharge, not goods. A line the two systems wrote under different codes with the same count and money is the same item written two ways, or front-end goods with no NDC.
+                  Two systems filled in separately: the wholesaler&rsquo;s invoice, and whoever booked the delivery in at the counter. Where both hold a figure the price is checked; where only one does, nobody has. A difference on a total whose every item matched is not goods; it is called sales tax only where the invoice prints a subtotal that equals its item lines and a tax that equals the difference to the cent. A price above the delivery is set aside only where the invoice prints a discount that accounts for it; those are listed below. A line the two systems wrote under different codes with the same count and money is the same item written two ways, or front-end goods with no NDC.
                 </p>
               </details>
             </Card>

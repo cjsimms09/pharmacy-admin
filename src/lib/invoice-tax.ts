@@ -56,6 +56,82 @@ function labelled(text: string, label: RegExp): number[] {
   return found;
 }
 
+/**
+ * Every amount printed against a label with a minus sign: "DISCOUNT-1.22", "DISCOUNT -1.22" or "DISCOUNT(1.22)".
+ * Returned as positive cents; the sign is the label's meaning, not the number's.
+ */
+function labelledOff(text: string, label: RegExp): number[] {
+  const found: number[] = [];
+  for (const row of text.split(/\r?\n/).map((r) => r.trim())) {
+    const m = new RegExp(`^${label.source}\\s*[-(]\\s*(${MONEY})\\)?$`, "i").exec(row);
+    if (m) found.push(cents(m[1]));
+  }
+  return found;
+}
+
+export type DiscountRead = {
+  /** Positive: the amount taken off. */
+  discountCents: number;
+  /** The sales tax printed alongside it, where the gap is only explained by both; zero otherwise. */
+  taxCents: number;
+  says: string;
+};
+
+/**
+ * The discount ParMed prints after its subtotal, and why reading it takes the same three figures agreeing as tax.
+ *
+ * ParMed invoice 7492505037 of 21 September 2026: one line, 121.71, SUB TOTAL 121.71, DISCOUNT-1.22, GRAND TOTAL 120.49. The
+ * reader knew about tax and nothing about discount, so the line sum sat above the invoice total and nothing said so, and the
+ * price check set the line's 121.71 against the 120.48 PioneerRx booked in (the price after discount) and put "$1.23 more than
+ * arrived" on the screen about an invoice that was right. A second, $0.41 on 5 October, did the same.
+ *
+ * Taken only when the invoice prints a subtotal equal to what was read, exactly one labelled discount, and that discount
+ * accounts for the whole gap to the cent (alone, or against exactly one labelled tax). Anything else is null: a number beside
+ * a word is not a proof.
+ */
+export function discountOnInvoice(
+  text: string,
+  lineSumCents: number,
+  printedTotalCents: number | null,
+  otherChargesCents = 0,
+): DiscountRead | null {
+  if (printedTotalCents === null || lineSumCents <= 0) return null;
+  const gap = printedTotalCents - lineSumCents - otherChargesCents;
+  if (gap === 0) return null;
+  if (!labelled(text, /sub\s*total/).some((s) => s === lineSumCents)) return null;
+  const off = labelledOff(text, /discount/);
+  if (off.length !== 1) return null;
+  const d = off[0];
+  const f = (c: number) => (c / 100).toFixed(2);
+  if (gap === -d) {
+    return {
+      discountCents: d,
+      taxCents: 0,
+      says: `Discount ${f(d)}: the invoice prints a subtotal of ${f(lineSumCents)}, which is what its item lines come to, takes ${f(d)} off, and totals ${f(printedTotalCents)}.`,
+    };
+  }
+  const taxes = labelled(text, /tax/).filter((t) => t - d === gap);
+  if (taxes.length !== 1) return null;
+  return {
+    discountCents: d,
+    taxCents: taxes[0],
+    says: `Discount ${f(d)} and sales tax ${f(taxes[0])} after a subtotal of ${f(lineSumCents)}, totalling ${f(printedTotalCents)}.`,
+  };
+}
+
+/**
+ * Whether price differences on one invoice are the discount the invoice prints.
+ *
+ * PioneerRx books a delivery at the price after discount, so the invoice's line price is above it by the discount, spread over
+ * the lines it applied to. The differences explain the discount when they add up to it, within a cent a line for rounding.
+ */
+export function pricesExplainedByDiscount(differencesCents: number[], discountCents: number): boolean {
+  if (differencesCents.length === 0 || discountCents <= 0) return false;
+  if (differencesCents.some((d) => d <= 0)) return false;
+  const sum = differencesCents.reduce((n, d) => n + d, 0);
+  return Math.abs(sum - discountCents) <= differencesCents.length;
+}
+
 export type TaxRead = {
   amountCents: number;
   /** Said in full, because this is a figure that changes whether an invoice balances. */
