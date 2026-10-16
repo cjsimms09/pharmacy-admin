@@ -1,0 +1,1 @@
+ALTER TABLE `manual_sections` ADD `managed_by` text;

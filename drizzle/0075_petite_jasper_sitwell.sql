@@ -1,0 +1,1 @@
+ALTER TABLE `contract_docs` ADD `extraction_failed_at` text;
