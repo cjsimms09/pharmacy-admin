@@ -205,7 +205,7 @@ export function retireNav(groups: NavGroup[]): NavGroup[] {
     if (isRetired(g.href) && g.href !== "/purchasing") continue;
     const items = g.items
       .filter((i) => !isRetired(i.href))
-      .map((i) => ({ ...i, gated: false, ...(RELABEL[i.href] ?? {}), ...(i.href === "/temps" || i.href === "/cqi" ? { hidden: false } : {}), ...(i.href === "/records" ? { hidden: true } : {}) }));
+      .map((i) => ({ ...i, gated: false, ...(RELABEL[i.href] ?? {}), ...(i.href === "/temps" || i.href === "/cqi" ? { hidden: false } : {}), ...(i.href === "/records" || i.href === "/licenses" ? { hidden: true } : {}) }));
     if (g.href === "/purchasing") {
       const invoices = items.find((i) => i.href === "/inventory/invoices");
       const rest = items.filter((i) => i.href !== "/inventory/invoices");
