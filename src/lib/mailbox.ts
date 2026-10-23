@@ -17,6 +17,7 @@ import { getSettings, setSetting } from "./settings";
 import { decryptText, encryptText, newId } from "./crypto";
 import { storeFile, ALLOWED_MIME, EXCEL_MIME, MAX_FILE_BYTES } from "./files";
 import { classify, parseSupplierRules, supplierFor, unknownSenderInvoiceReason, type RouteKind } from "./autoroute";
+import { isEmbeddedPicture } from "./embedded-picture";
 import { importClaims } from "./claims";
 import { remittanceKindsSay } from "./remittance-counts";
 import { importPioneerCatalog } from "./suppliers";
@@ -569,7 +570,9 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
               return [a];
             }
           });
-          const verdicts = expanded.map((a) => ({ a, v: acceptableAttachment({ filename: a.filename, contentType: a.contentType, content: a.content as Buffer }) }));
+          /* A logo or signature the sender's mail program embedded is part of the message, not something attached to it. */
+          const embedded = expanded.filter((a) => isEmbeddedPicture({ filename: a.filename, contentType: a.contentType, contentId: a.contentId, size: a.size, content: a.content as Buffer }, typeof parsed.html === "string" ? parsed.html : null));
+          const verdicts = expanded.filter((a) => !embedded.includes(a)).map((a) => ({ a, v: acceptableAttachment({ filename: a.filename, contentType: a.contentType, content: a.content as Buffer }) }));
           const attachments = verdicts.filter((x) => x.v.ok).map((x) => x.a);
           if (attachments.length === 0) {
             /*
@@ -679,10 +682,12 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
                * that one empty field.
                */
               routedAs: "not_for_filing",
-              routeResult: declined.length ? "Nothing on it was a type this reads." : "Nothing was attached.",
+              routeResult: declined.length ? "Nothing on it was a type this reads." : embedded.length ? "Nothing was attached: the only picture on it is a logo or signature built into the message." : "Nothing was attached.",
               reason: declined.length
                 ? `Nothing on this message was a type this reads: ${declined.slice(0, 5).join("; ")}${declined.length > 5 ? "; …" : ""}.`
-                : "No attachment on this message.",
+                : embedded.length
+                  ? "No attachment on this message; the only picture on it is a logo or signature built into the message."
+                  : "No attachment on this message.",
             });
             result.ignored++;
             await client.messageFlagsAdd(String(uid), ["\\Seen"], { uid: true });
