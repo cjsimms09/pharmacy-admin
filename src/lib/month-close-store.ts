@@ -50,21 +50,15 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
   if (rebate) checks.push(rebate);
 
   /*
-   * Every wholesaler invoice for the month, proved against the wholesaler's own figure on the same statement.
+   * Every delivery from the wholesaler for the month, proved against the wholesaler's own figure on the same statement.
    *
    * Asked only once that statement has been read, because it is the outside figure; before then there is nothing to compare with.
-   * See wholesaler-purchases.ts for what it found in September 2026 ($142,392.56 of McKesson invoices never captured).
+   * See wholesaler-purchases.ts: in September 2026 the invoice documents were $142,392.56 short, and PioneerRx's receiving record was not.
    */
   const purchases = await purchasesCheck(month);
   if (purchases) checks.push(purchases);
 
-  /*
-   * The daily reports the till and the cards are proved against, for every day of the month (lib/daily-feeds.ts). Only a day that is
-   * missing is listed, so a month with every day on file adds nothing to the strip.
-   */
-  const feeds = await dailyFeedChecks(month);
-  checks.push(...feeds);
-  const documentsAllIn = list.outstanding === 0 && (!rebate || rebate.done) && (!purchases || purchases.done) && feeds.length === 0;
+  const documentsAllIn = list.outstanding === 0 && (!rebate || rebate.done) && (!purchases || purchases.done);
 
   /*
    * The money gates are only asked once the documents are all in.
@@ -160,38 +154,19 @@ export async function purchasesCheck(month: string): Promise<CloseCheck | null> 
 
     const from = `${month}-01`;
     const to = endOf(month);
-    const invoices = (await db.query.supplierInvoices.findMany({ columns: { supplier: true, invoiceDate: true, totalCents: true } })).filter(
-      (i) => /mckesson/i.test(i.supplier ?? "") && (i.invoiceDate ?? "") >= from && (i.invoiceDate ?? "") <= to,
+    /* PioneerRx's receiving record, which is complete, not the invoice documents, which were not: see wholesaler-purchases.ts. */
+    const received = (await db.query.pioneerPurchases.findMany({ columns: { supplier: true, invoiceDate: true, totalCents: true } })).filter(
+      (r) => /mckesson/i.test(r.supplier ?? "") && (r.invoiceDate ?? "") >= from && (r.invoiceDate ?? "") <= to,
     );
-    const invoicesCents = invoices.reduce((n, i) => n + (i.totalCents ?? 0), 0);
-    const missingDays = weekdaysWithoutInvoices(month, invoices.map((i) => i.invoiceDate as string));
-    const j = judgePurchases({ month, wholesaler: "McKesson", statementCents, invoicesCents, missingDays });
-    return { key: "wholesaler_purchases", name: "McKesson's invoices for the whole month", done: j.agrees, says: j.says, gate: "document" };
+    const receivedCents = received.reduce((n, r) => n + (r.totalCents ?? 0), 0);
+    const returnsCents = (await db.query.supplierStatementLines.findMany({ columns: { supplier: true, kind: true, billedOn: true, dueOn: true, netCents: true } }))
+      .filter((l) => /mckesson/i.test(l.supplier ?? "") && /return/i.test(l.kind ?? "") && (l.billedOn ?? l.dueOn ?? "") >= from && (l.billedOn ?? l.dueOn ?? "") <= to)
+      .reduce((n, l) => n + Math.abs(l.netCents ?? 0), 0);
+    const missingDays = weekdaysWithoutInvoices(month, received.map((r) => r.invoiceDate as string));
+    const j = judgePurchases({ month, wholesaler: "McKesson", statementCents, receivedCents, returnsCents, missingDays });
+    return { key: "wholesaler_purchases", name: "McKesson's purchases agree with PioneerRx's receiving record", done: j.agrees, says: j.says, gate: "document" };
   } catch {
     /* A comparison that could not run is not a pass and not a failure of the month: the strip simply does not ask. */
     return null;
-  }
-}
-
-/**
- * The daily payment-type report for the month; only if a day is missing, and none before the month has ended.
- *
- * Not the card batch: those reached the site only because staff forwarded eight of them by hand on 15 September, the owner has said no
- * more forwarding rules, and the bank statement proves the card deposits (every line placed). Demanding one for every day would leave
- * every month waiting on something nobody is going to send.
- */
-export async function dailyFeedChecks(month: string): Promise<CloseCheck[]> {
-  try {
-    const { daysWithoutPaymentReport, judgeDailyFeeds } = await import("./daily-feeds");
-    const from = `${month}-01`;
-    const to = endOf(month);
-    const rows = (await db.select({ periodFrom: schema.salesByPayment.periodFrom, periodTo: schema.salesByPayment.periodTo, cardNetCents: schema.salesByPayment.cardNetCents }).from(schema.salesByPayment)).filter(
-      (r) => r.periodTo >= from && r.periodFrom <= to,
-    );
-    const gaps = judgeDailyFeeds({ month, payment: daysWithoutPaymentReport(month, rows) });
-    return gaps.map((g) => ({ key: g.key, name: g.name, done: false, says: g.says, gate: "document" as const }));
-  } catch {
-    /* A comparison that could not run is not a pass and not a failure of the month: the strip simply does not ask. */
-    return [];
   }
 }

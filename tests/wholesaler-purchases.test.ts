@@ -49,27 +49,35 @@ describe("weekdays with no invoice", () => {
   });
 });
 
-describe("the wholesaler's figure against the invoices on file", () => {
-  const base = { month: "2026-09", wholesaler: "McKesson", missingDays: ["2026-09-01", "2026-09-02", "2026-09-14"] };
+describe("the wholesaler's figure against PioneerRx's receiving record", () => {
+  const base = { month: "2026-09", wholesaler: "McKesson", missingDays: [] as string[], returnsCents: 0 };
 
-  test("a large shortfall is a disagreement, says how large, and names the days to fetch", () => {
-    const j = judgePurchases({ ...base, statementCents: 59_487_080, invoicesCents: 45_247_824 });
+  test("September's real shape agrees: receipts less returns come within 2 percent of McKesson's net purchases", () => {
+    /* $623,894.42 received, $17,745.41 returned, against a statement of $594,870.80: the difference is 1.9 percent. */
+    const j = judgePurchases({ ...base, statementCents: 59_487_080, receivedCents: 62_389_442, returnsCents: 1_774_541 });
+    assert.equal(j.agrees, true);
+    assert.equal(j.gapCents, -1_127_821);
+    assert.ok(j.says.includes("PioneerRx recorded receiving $623,894.42 from McKesson in 2026-09, less $17,745.41 returned, $606,149.01"), j.says);
+  });
+
+  test("a large shortfall in the receiving record is a disagreement, and names the days with no delivery recorded", () => {
+    const j = judgePurchases({ ...base, missingDays: ["2026-09-01", "2026-09-02", "2026-09-14"], statementCents: 59_487_080, receivedCents: 45_247_824 });
     assert.equal(j.agrees, false);
     assert.equal(j.gapCents, 14_239_256);
-    assert.match(j.says, /\$594,870\.80; the invoices on file come to \$452,478\.24, \$142,392\.56 \(24%\) short/);
-    assert.match(j.says, /No McKesson invoice is on file for 1, 2 and 14 Sep/);
-    assert.match(j.says, /controlled-substance invoice/);
+    assert.ok(j.says.includes("(24%) short"), j.says);
+    assert.match(j.says, /PioneerRx has no McKesson receipt on 1, 2 and 14 Sep/);
+    assert.match(j.says, /receive those deliveries into PioneerRx/);
   });
 
-  test("returns and rounding are not a disagreement", () => {
-    assert.equal(judgePurchases({ ...base, statementCents: 59_487_080, invoicesCents: 58_900_000 }).agrees, true);
-    assert.equal(judgePurchases({ ...base, statementCents: 59_487_080, invoicesCents: 59_487_000 }).agrees, true);
+  test("rounding and timing are not a disagreement", () => {
+    assert.equal(judgePurchases({ ...base, statementCents: 59_487_080, receivedCents: 59_000_000 }).agrees, true);
+    assert.equal(judgePurchases({ ...base, statementCents: 59_487_080, receivedCents: 59_487_000 }).agrees, true);
   });
 
-  test("a shortfall with an invoice on every weekday is said differently, and more on file than was bought is a double count", () => {
-    assert.match(judgePurchases({ ...base, missingDays: [], statementCents: 50_000_000, invoicesCents: 40_000_000 }).says, /for every weekday/);
-    const over = judgePurchases({ ...base, statementCents: 50_000_000, invoicesCents: 60_000_000 });
+  test("a shortfall with a receipt on every weekday is said differently, and more received than bought is a double receipt", () => {
+    assert.match(judgePurchases({ ...base, statementCents: 50_000_000, receivedCents: 40_000_000 }).says, /for every weekday/);
+    const over = judgePurchases({ ...base, statementCents: 50_000_000, receivedCents: 60_000_000 });
     assert.equal(over.agrees, false);
-    assert.match(over.says, /counted twice/);
+    assert.match(over.says, /received twice/);
   });
 });

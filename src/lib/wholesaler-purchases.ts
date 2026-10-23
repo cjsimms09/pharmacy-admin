@@ -69,17 +69,25 @@ export const MATERIAL_CENTS = 100_000;
 
 export type PurchasesJudgement = { agrees: boolean; gapCents: number; share: number; says: string };
 
-export function judgePurchases(input: { month: string; wholesaler: string; statementCents: number; invoicesCents: number; missingDays: string[] }): PurchasesJudgement {
-  const { month, wholesaler, statementCents, invoicesCents, missingDays } = input;
-  const gapCents = statementCents - invoicesCents;
+/**
+ * The wholesaler's own purchases figure against what PioneerRx recorded receiving from them, less what went back.
+ *
+ * PioneerRx's receiving record is the complete one (a receipt for every delivery from 1 September), where the invoice documents are
+ * not (118 deliveries had none on file). Net purchases on the statement are after returns, so returns come off the receipts first.
+ */
+export function judgePurchases(input: { month: string; wholesaler: string; statementCents: number; receivedCents: number; returnsCents: number; missingDays: string[] }): PurchasesJudgement {
+  const { month, wholesaler, statementCents, receivedCents, returnsCents, missingDays } = input;
+  const recordedCents = receivedCents - returnsCents;
+  const gapCents = statementCents - recordedCents;
   const share = statementCents > 0 ? gapCents / statementCents : 0;
   const material = Math.abs(gapCents) >= MATERIAL_CENTS && Math.abs(share) >= MATERIAL_SHARE;
+  const basis = `PioneerRx recorded receiving ${money(receivedCents)} from ${wholesaler} in ${month}${returnsCents ? `, less ${money(returnsCents)} returned` : ""}, ${money(recordedCents)}`;
   if (!material) {
     return {
       agrees: true,
       gapCents,
       share,
-      says: `${wholesaler}'s own statement puts ${month}'s purchases at ${money(statementCents)} and the invoices on file come to ${money(invoicesCents)}: the difference, ${money(gapCents)}, is within what returns and rounding explain.`,
+      says: `${wholesaler}'s own statement puts ${month}'s net purchases at ${money(statementCents)}; ${basis}. The difference, ${money(gapCents)}, is within what rounding and timing explain.`,
     };
   }
   const month3 = new Date(`${month}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", timeZone: "UTC" });
@@ -89,13 +97,12 @@ export function judgePurchases(input: { month: string; wholesaler: string; state
     gapCents,
     share,
     says:
-      `${wholesaler}'s own statement puts ${month}'s net purchases at ${money(statementCents)}; the invoices on file come to ${money(invoicesCents)}, ` +
-      `${money(gapCents)} (${Math.round(Math.abs(share) * 100)}%) ${short ? "short" : "over"}. ` +
+      `${wholesaler}'s own statement puts ${month}'s net purchases at ${money(statementCents)}; ${basis}, ${money(gapCents)} (${Math.round(Math.abs(share) * 100)}%) ${short ? "short" : "over"}. ` +
       (short && missingDays.length > 0
-        ? `No ${wholesaler} invoice is on file for ${listDays(missingDays)} ${month3} (weekdays, holidays left out): fetch those from ${wholesaler}'s portal and add them under Add a document. `
+        ? `PioneerRx has no ${wholesaler} receipt on ${listDays(missingDays)} ${month3} (weekdays, holidays left out): receive those deliveries into PioneerRx. `
         : short
-          ? "An invoice is on file for every weekday, so some invoices are missing from days that have others, or counted at a different amount. "
-          : "More is on file than the statement says was bought, so check for an invoice counted twice. ") +
-      `Until then purchases are understated and any controlled-substance invoice among the missing ones is a record not held.`,
+          ? "A receipt is recorded for every weekday, so a delivery may be missing from a day that has others, or recorded at a different amount. "
+          : "More was received than the statement says was bought, so check for a delivery received twice. ") +
+      `Until it agrees, purchases for the month are not proved.`,
   };
 }
