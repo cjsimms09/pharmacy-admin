@@ -99,6 +99,9 @@ export type OwedLine = {
   /** Deliveries he has closed one at a time, on their receipt. */
   settledOne: number;
   settledOneCents: number;
+  /** Deliveries with no invoice after the grace days, closed on their PioneerRx receipt without anybody pressing anything. */
+  settledAuto: number;
+  settledAutoCents: number;
   /** True where he has said not to wait: counted, listed, never chased. */
   receiptIsTheInvoice: boolean;
   says: string;
@@ -122,7 +125,26 @@ const day = (iso: string | null): string => {
  * Cooperative (IPC)" — and keying on the name as well is how the last matching bug hid. The supplier
  * name is used for one thing only: deciding whose filing history a delivery is judged against.
  */
-export function invoicesOwed(purchases: PurchaseRow[], filed: FiledRow[], suppliers: SupplierRow[], watchingSince?: string | null): OwedLine[] {
+/**
+ * How long a delivery waits for its invoice before the PioneerRx receipt stands in for it.
+ *
+ * The owner, 23 October 2026: "only use pioneer when invoice isnt available.. its default backup." The invoice is the record where there
+ * is one; PioneerRx's receipt for the delivery is the record where there is not, and nobody is sent to fetch what the receipt already
+ * says. A fresh delivery still gets the days an invoice usually takes (IPC's come a day or two behind the goods), so it stays "waiting".
+ */
+export const RECEIPT_GRACE_DAYS = 7;
+
+const addDays = (iso: string, n: number): string => new Date(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+export function invoicesOwed(
+  purchases: PurchaseRow[],
+  filed: FiledRow[],
+  suppliers: SupplierRow[],
+  watchingSince?: string | null,
+  /** Today, to settle old deliveries on their receipt. Omitted, nothing settles by itself. */
+  opts: { today?: string; graceDays?: number } = {},
+): OwedLine[] {
+  const settleBefore = opts.today ? addDays(opts.today, -(opts.graceDays ?? RECEIPT_GRACE_DAYS)) : null;
   const have = new Set(filed.map((f) => norm(f.invoiceNumber)).filter(Boolean));
   const byName = new Map(suppliers.map((s) => [fold(s.name), s]));
   const byId = new Map(suppliers.map((s) => [s.id, s]));
@@ -195,6 +217,8 @@ export function invoicesOwed(purchases: PurchaseRow[], filed: FiledRow[], suppli
         matchedByAmount: 0,
         settledOne: 0,
         settledOneCents: 0,
+        settledAuto: 0,
+        settledAutoCents: 0,
         neverFiled: !since.has(key),
         filingSince,
         receiptIsTheInvoice: reg?.invoiceFromPioneer ?? false,
@@ -236,6 +260,16 @@ export function invoicesOwed(purchases: PurchaseRow[], filed: FiledRow[], suppli
         lines.set(key, line);
         continue;
       }
+      /*
+       * No invoice, and older than the grace: the receipt is the record. The invoice still wins if it ever arrives (it is matched on its
+       * number above, wherever it is dated), so nothing here is thrown away, only no longer asked for.
+       */
+      if (settleBefore && p.invoiceDate && p.invoiceDate.slice(0, 10) <= settleBefore) {
+        line.settledAuto++;
+        line.settledAutoCents += p.totalCents ?? 0;
+        lines.set(key, line);
+        continue;
+      }
       const watched = filingSince !== null && (p.invoiceDate ?? "") >= filingSince;
       if (watched) {
         line.waiting++;
@@ -262,7 +296,11 @@ export function invoicesOwed(purchases: PurchaseRow[], filed: FiledRow[], suppli
             : l.before > 0
               ? `${l.before} of ${l.received} deliveries predate ${day(l.filingSince)}, when their invoices started arriving here — ${money(l.beforeCents)}, recoverable from their portal. Everything since has an invoice on file.`
               : `${l.received} deliveries, ${money(l.receivedCents)}, and an invoice on file for every one.`;
-    l.says += closed;
+    const auto =
+      l.settledAuto > 0
+        ? ` ${l.settledAuto} deliver${l.settledAuto === 1 ? "y" : "ies"} (${money(l.settledAutoCents)}) had no invoice after ${RECEIPT_GRACE_DAYS} days and stand on the PioneerRx receipt; an invoice that arrives later still replaces it.`
+        : "";
+    l.says += closed + auto;
   }
 
   /*

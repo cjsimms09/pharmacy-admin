@@ -3831,6 +3831,7 @@ export async function invoicesStillOwed(): Promise<OwedLine[]> {
     filed.map((f) => ({ supplier: f.supplier, supplierId: idOf(f.supplier), invoiceNumber: f.invoiceNumber, invoiceDate: f.invoiceDate, totalCents: f.totalCents })),
     suppliers.map((s) => ({ id: s.id, name: s.name, invoiceFromPioneer: s.invoiceFromPioneer })),
     watchingSince,
+    { today: todayIso() },
   );
 }
 

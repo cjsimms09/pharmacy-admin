@@ -321,3 +321,56 @@ describe("a delivery closed on its receipt, this time only", () => {
     assert.doesNotMatch(l[0].says, /You have said their receipt is the invoice/);
   });
 });
+
+/*
+ * The owner, 23 October 2026: "only use pioneer when invoice isnt available.. its default backup." The invoice is the record where there is
+ * one; a delivery with no invoice after a week stands on its PioneerRx receipt, and nobody is sent to fetch it. Every figure is invented.
+ */
+describe("a delivery with no invoice settles on its receipt after a week", () => {
+  const reg: SupplierRow[] = [{ id: "s1", name: "Wholesaler", invoiceFromPioneer: false }];
+  const today = "2026-10-23";
+
+  test("an old delivery with no invoice is closed on its receipt, counted, and no longer chased", () => {
+    const [l] = invoicesOwed([buy("Wholesaler", "100", 50_000, "2026-10-01")], [filed("Wholesaler", "999", "2026-09-20", 1)], reg, "2026-09-15", { today });
+    assert.equal(l.settledAuto, 1);
+    assert.equal(l.settledAutoCents, 50_000);
+    assert.equal(l.waiting, 0);
+    assert.equal(l.before, 0);
+    assert.deepEqual(stillToChase([l]), { suppliers: 0, invoices: 0, cents: 0 });
+    assert.match(l.says, /1 delivery \(\$500\.00\) had no invoice after 7 days and stand on the PioneerRx receipt; an invoice that arrives later still replaces it/);
+  });
+
+  test("a delivery inside the week is still waiting, because its invoice may be on its way", () => {
+    const [l] = invoicesOwed([buy("Wholesaler", "101", 20_000, "2026-10-20")], [filed("Wholesaler", "999", "2026-09-20", 1)], reg, "2026-09-15", { today });
+    assert.equal(l.settledAuto, 0);
+    assert.equal(l.waiting, 1);
+    assert.equal(stillToChase([l]).invoices, 1);
+  });
+
+  test("the seventh day settles and the eighth waits not at all: the edge is the grace, inclusive", () => {
+    const old = invoicesOwed([buy("Wholesaler", "102", 1_000, "2026-10-16")], [filed("Wholesaler", "999", "2026-09-20", 1)], reg, null, { today })[0];
+    const fresh = invoicesOwed([buy("Wholesaler", "103", 1_000, "2026-10-17")], [filed("Wholesaler", "999", "2026-09-20", 1)], reg, null, { today })[0];
+    assert.equal(old.settledAuto, 1);
+    assert.equal(fresh.settledAuto, 0);
+  });
+
+  test("a delivery that has its invoice is never settled on the receipt, however old", () => {
+    const [l] = invoicesOwed([buy("Wholesaler", "104", 9_000, "2026-09-25")], [filed("Wholesaler", "104", "2026-09-26", 9_000)], reg, null, { today });
+    assert.equal(l.settledAuto, 0);
+    assert.equal(l.waiting, 0);
+    assert.match(l.says, /an invoice on file for every one/);
+  });
+
+  test("deliveries from before invoices were being caught settle the same way, instead of being a backlog to fetch", () => {
+    const [l] = invoicesOwed([buy("Wholesaler", "105", 70_000, "2026-09-02")], [filed("Wholesaler", "999", "2026-09-15", 1)], reg, "2026-09-15", { today });
+    assert.equal(l.settledAuto, 1);
+    assert.equal(l.before, 0);
+    assert.equal(fromBeforeWeWatched([l]).invoices, 0);
+  });
+
+  test("without today nothing settles by itself, so the old behaviour holds where the date is not given", () => {
+    const [l] = invoicesOwed([buy("Wholesaler", "106", 5_000, "2026-10-01")], [filed("Wholesaler", "999", "2026-09-20", 1)], reg, "2026-09-15");
+    assert.equal(l.settledAuto, 0);
+    assert.equal(l.waiting, 1);
+  });
+});
