@@ -1,0 +1,17 @@
+-- One delivery whose PioneerRx receipt is the invoice, without settling the supplier for ever.
+--
+-- The owner: "parmed needs to use receipt as invoice this time but not going forward".
+--
+-- The supplier switch added in 0104 answers a standing decision — Xymogen never emails an invoice,
+-- so its receipt is the record and always will be. This is the other kind of answer, and there was
+-- no way to give it: one delivery he is content to close on the receipt, from a supplier he still
+-- expects invoices from tomorrow.
+--
+-- Without it the only ways to clear a single stubborn delivery were to settle the whole supplier —
+-- which silences every future delivery of theirs, including the ones he does want chased — or to
+-- leave it on the list for ever. A list that always carries something nobody intends to act on is a
+-- list that stops being read, and that is how six handled training replies became the whole of his
+-- inbox.
+--
+-- Per delivery, so it says exactly what he said: this one, not the next one.
+ALTER TABLE pioneer_purchases ADD COLUMN receipt_settles integer DEFAULT 0 NOT NULL;

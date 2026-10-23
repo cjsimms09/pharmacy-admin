@@ -1,0 +1,146 @@
+# pharmacy-admin
+
+## The gate. Nothing reaches the owner without passing it.
+
+He audited the working agreement on 12 September 2026 and his verdict was that the principles were
+right and **not procedurally unavoidable**: *"The remaining work is making them procedurally
+unavoidable so the agent carries the completeness load instead of you."* So they live here, in the
+file every session loads, rather than in a document a session might not open.
+
+**1. No finding is reported until it is written in three lines.** In this order, and the middle one
+is the gate:
+
+```
+OBSERVATION: exactly what the system shows, with numbers
+SHOULD BE:   what ought to be true, and why — from pharmacy practice, accounting, or how he runs
+             the business. NOT from the data that produced the observation.
+DIFFERENCE:  only if they differ. If they do not, this is not a finding.
+```
+
+**If the SHOULD BE line cannot be written from domain knowledge, there is no finding — there is one
+precise question, and it goes to him as a question.** This rule exists because a finding that the
+delivery driver "works for nothing on a cash basis" was reported twice, and both times it
+contradicted accounting already understood. He caught it, which is the failure.
+
+**2. Pre-flight, on anything a person might act on.** Confirm it was run, in one line, in the
+report. Any answer of "not checked" is said out loud rather than skipped.
+
+1. Physical act named? 2. Time dimension — this month, next three, next eleven? 3. What a pharmacist
+knows that the tables do not? 4. Whose money, which basis, which period, already counted elsewhere?
+5. Units verified — pack size, strength, days supply? 6. "Same drug" disambiguated *for this
+purpose*? 7. Worst case ranked — patient harm > board > PBM relationship > money? 8. **Could the
+check pass, or fail, for the wrong reason — what does it read, and is that where the thing its
+sentence names is recorded (rule 7)?** 9. When does he need to know, and is that when it appears?
+10. Registers updated? 11. **What else reads this figure** — the costliest faults have been two
+correct things meeting. 12. **What did I not check, and have I said so?**
+
+**3. Proactive scan, every session, unprompted.** Scan the open findings register and the four
+channels for a dollar that can fall between them; look at the newest import, remits and expenses for
+anomalies; re-run the three-line test on every open finding; ask *what would he be most angry about
+if it were wrong and I had not caught it*; and report at least one concrete observation **or one
+area confirmed clean**. On the pharmacy computer, also run
+`npx tsx --tsconfig tsconfig.script.json scripts/wrong-alarms.ts`: every "This is wrong" he has
+pressed on the morning check is a report that the site told him something untrue, and it stays open
+until a session has found the cause, fixed the check and recorded what it did with that script's
+`answer <id> <text>`. A cloud session cannot read the database and leaves it to the pharmacy
+session. If the script says there is no `check_marks` table, the migration that adds it has not been
+applied to that database: the press is not deployed there yet, or the launcher started the site
+after its migration failed.
+
+**4. Nothing ships without the means to correct it.** On the same screen: the source of every
+number, a one-press "this is wrong / this is settled / override", an override that survives the next
+import, and an explicit state for anything incomplete — *not yet arrived*, *never measured*,
+*awaiting your decision*. A tool is not the calculation; the calculation is the easy half.
+
+**5. Four states, never one word.** Captured · expected-not-yet · never-measured · measured-and-none
+· not-captured. "Missing" is not a state and must never be reported as one.
+
+**6. A sentence he will act on gets read by somebody who did not write it.** Every dataset here is
+re-proved nightly against its source; no sentence on any screen or register is ever re-read by
+anybody but its author. The three that earned this clause — *"608 of 45,906 drugs priced"* (the
+denominator was the supplier catalogue), *"412 are not priced at all"* (every one of the 412 has a
+cost), and a register heading an edit consumed, orphaning four tracked items — all had correct
+arithmetic and passing tests; none could have failed one. Four more of the same class turned up on
+the same day after the clause was written, which is why this says *the three that earned it* and not
+a count of a day: the day kept moving. **Ask what the number
+would make him do, not whether it is right.** Where another session exists it reads the words before
+they ship. Usually none does, and then a fresh subagent reads them: it is given the change itself —
+not the commit message, not the author's reasoning — and told to find the sentence that is false or
+would make him act wrongly. What it hands back is a lead, not a finding: it is checked against the
+code, or against the live rows read-only where only they can settle it, before anyone acts on it,
+because some of it is wrong. Only where that was not done does the author read the words cold, as
+him. That is the weaker form, and a figure shipped without a second reader says so in the same
+breath.
+
+**Record it with a `Read-By:` trailer**, same shape as `Co-Authored-By:`. It is **trustworthy only in
+the negative**: a commit without one is reliable evidence that **nobody recorded a reading** — and
+becomes evidence that nobody read only once the trailer is habitual, which it is not yet, so an
+absent trailer this month mostly means the habit has not formed. Saying more than that early invites
+the reading that the control is failing when it is merely new, and that is how a control gets
+abandoned in week three. A commit *with* one is weak evidence that somebody did read — it can be typed without
+reading and proves nothing about whether the sentence is true. So it is an instrument for finding
+unread work, never for certifying read work, and it must never be described as the second. It cannot
+cover the commonest case either — a review that happens after the push and changes nothing leaves no
+commit to carry it; that one goes in `docs/OPEN-ITEMS.md` as a line, or it is not recorded at all.
+
+**7. A check says what it reads, and reads what its sentence names.** For every alarm, banner,
+badge or "found / should be" line added or changed, answer pre-flight item 8 in the commit message
+(and in the finding's row in `docs/OPEN-ITEMS.md`, where there is one) — the report's one line says
+only that it was answered — in two parts: what the code reads, and where the thing its sentence
+names is recorded, which is the document, setting or bank line itself and not a table made from it.
+Two places means the check reads a stand-in: it is right until the day the two differ, and nothing
+in its arithmetic or its tests can show that day coming. Read the place the sentence names, not the
+stand-in, before the sentence is written; then either the check reads it, or the sentence says what
+it does read. If the thing is recorded nowhere, record it first. Five wrong alarms on 6 October
+were this, each reaching him on a screen. Four read a stand-in: the age of the newest mail for the
+time of the last sweep; the one latest date a duty was done for whether each quarter was covered;
+the invoice lines a reader managed to parse for the lines on the invoice; a receipt's key for its
+deposit. The fifth had nothing to read: a link guessed from words in a check's name, because no
+check recorded the page its finding is dealt with on. Three corollaries. A check that could not
+run says so, with the reason: never silence, and never a pass. A time that moves when something
+fails — the last try, not the last success — is not a clock for whether it worked. And a claim about
+what else reads a figure, that nothing outside one file calls a function, or what an earlier commit
+said, is read back from the code or the output, never carried from memory or from a summary.
+
+Full reasoning and the failures that earned each clause: `docs/CONSTITUTION.md`. The questions in
+long form and what they found: `docs/FOUNDATIONS.md`. The registers, generated from the data by
+`scripts/registers.ts` so they cannot rot: `docs/registers/`. Open findings with money and owner:
+`docs/OPEN-ITEMS.md`.
+
+---
+
+The admin desk of one independent pharmacy in Kansas. The owner runs the business on it. Two
+Claude sessions build it, on two accounts, and they cannot see each other's conversations:
+
+- the **pharmacy session** works on `feature/compliance`, the branch the site runs from;
+- the **cloud session** works on `claude/repo-audit-catalog-claims-*` branches and opens a pull
+  request against `feature/compliance` for each piece of work.
+
+**Only a session running on the pharmacy computer can see real data.** A cloud session's network
+reaches GitHub and a few package registries and nothing else — no tunnel, no address, no hosted
+copy of this site is reachable from one, and that was established by measurement after a tunnel had
+already been built and opened. So any question that needs the real database, the real screens or
+the real files belongs to the machine session, and the cloud session must hand it over through
+`docs/HANDOFF.md` rather than asking the owner to ferry files. Start Claude on that computer by
+double-clicking **Work on this with Claude.cmd**.
+
+**At the start of every session, read `docs/HANDOFF.md`, top section "Open items", and the open
+pull request from the other session.** That is the whole handshake. Anything either side wants
+the other to see goes in one of those two places, never only in a conversation.
+
+Rules that hold on both sides:
+
+- **Code only. Never data.** No PioneerRx reports, invoices, remittances, statements, contracts,
+  credentials or database files in git. A feed's *shape* goes in `fixtures/` with every
+  identifier changed (`fixtures/README.md`). No patient information anywhere.
+- **Nothing is inferred where a document could say it**, and every reader that decides money is
+  checked by arithmetic before anything is stored. Every figure has one meaning, one unit and a
+  list of what it must never be used for: `docs/reference/data-dictionary.md`. The reasoning is
+  in `docs/reference/buying-logic.md`, `data-audit.md` and `profit-engine.md`; the site's design
+  rules and page inventory are in `docs/reference/design-audit.md`; what is read from a contract,
+  why, and where it goes is `docs/reference/contract-reading.md`.
+- Migrations are additive and numbered; the second session to merge renumbers its own.
+- Files the other session has changed on an open branch are listed in `docs/HANDOFF.md`; say so
+  on the pull request before editing one.
+- `npm run check` (typecheck, tests, build) before pushing. Tests that touch the database need a
+  migrated one: `npm run db:migrate` first.

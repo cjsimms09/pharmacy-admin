@@ -1,0 +1,1 @@
+CREATE INDEX `nadac_ndc_idx` ON `nadac_prices` (`ndc11`,`effective_on`);
