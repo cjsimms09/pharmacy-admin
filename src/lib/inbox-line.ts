@@ -35,6 +35,8 @@ export type InboxRow = {
   routedAs: string | null;
   routeResult: string | null;
   scanned?: boolean | null;
+  /** The sweep's own answer to whether this reached the books: true, false (refused) or null (recorded before the column existed). */
+  imported?: boolean | null;
 };
 
 export type ArrivalSource = "mailbox" | "sftp" | "dropped";
@@ -153,6 +155,9 @@ export type LineStory = {
 const HELD =
   /^Held, nothing stored|does not balance|could not be loaded|nothing could be loaded|nothing was (filed|recorded|stored)|but nothing was filed|no row on it could be read|but no rule says/i;
 
+/** Kinds whose arrivals are passed over by design, so "not imported" is their normal state and not a refusal. */
+export const NOT_READ_ON_PURPOSE = new Set(["report_summary", "empty_report"]);
+
 /**
  * What happened to this arrival, and how it should look.
  *
@@ -201,6 +206,27 @@ export function storyOf(row: InboxRow): LineStory {
         why: "A dashboard picture the site reads only with the model, which runs when you press the button and not on its own. The monthly rebate statement carries the same ratio without it, so nothing waits on this.",
         tone: "muted",
         invitesRerouting: false,
+      };
+    }
+    /*
+     * What the loader decided, before what it happened to say.
+     *
+     * `imported` is the sweep's own answer, kept for exactly this, and this function never read it: it matched English. So a
+     * refusal in words the list did not have showed as a success. On 23 October 2026 the USave rebate breakdown ($12,354.06) was
+     * refused with "The figures on this report do not agree with the tier table printed on it", which matches nothing below, and the
+     * line sat among the handled ones with no control on it ("I have no way to have system reread rebate statement"). The wording
+     * test stays for rows written before the column existed (null).
+     *
+     * Not every false is a refusal: a totals sheet and a "No Data" report are deliberately not read into anything.
+     */
+    if (row.imported === false && !NOT_READ_ON_PURPOSE.has(row.routedAs ?? "")) {
+      return {
+        outcome: "held",
+        headline: `${kind}, held — nothing was stored`,
+        changed: null,
+        why: result,
+        tone: "crit",
+        invitesRerouting: true,
       };
     }
     if (result && HELD.test(result)) {

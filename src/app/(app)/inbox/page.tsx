@@ -6,6 +6,7 @@ import { db, schema } from "@/db";
 import { requireManager } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { settledDocuments } from "@/lib/inbox-settled";
+import { heldCount } from "@/lib/held-reread";
 import { whenLocal } from "@/lib/dates";
 import { hasMailPassword } from "@/lib/mailbox";
 import { allSuppliers, addressesOf, type Supplier } from "@/lib/suppliers-registry";
@@ -16,7 +17,7 @@ import { senderRules, describeRule, recogniseStored } from "@/lib/intake-recogni
 import type { Recognition } from "@/lib/intake-recognise";
 import { sourceOf, storyOf, summarise } from "@/lib/inbox-line";
 import { leftBehind, willWriteShort, isRemovable } from "@/lib/inbox-undo";
-import { reRouteInboxItem, undoInboxItem, fileInboxItem, deleteInboxItem, sweepNow, rereadItem, sortInboxItem, attributeInboxItem, teachInboxItem, forgetIntakeRule, resortAll } from "./actions";
+import { reRouteInboxItem, undoInboxItem, fileInboxItem, deleteInboxItem, sweepNow, rereadItem, rereadHeldAll, sortInboxItem, attributeInboxItem, teachInboxItem, forgetIntakeRule, resortAll } from "./actions";
 
 
 /**
@@ -69,6 +70,8 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
 
   /* What has since taken responsibility for each arrival, read once for the page. */
   const settled = await settledDocuments();
+  /* Refused reports a press would read again, for the button at the top. */
+  const heldN = await heldCount();
 
   /*
    * What the site makes of one line, worked out only where somebody asked about that line.
@@ -143,6 +146,11 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         actions={
           <>
             <Link href="/settings/email" className="btn">Email settings</Link>
+            {heldN > 0 && (
+              <form action={rereadHeldAll}>
+                <button className="btn btn-primary">Read {heldN} refused report{heldN === 1 ? "" : "s"} again</button>
+              </form>
+            )}
             {configured && <form action={sweepNow.bind(null, "inbox")}><button className="btn btn-primary">Check for new mail now</button></form>}
             {configured && needsYou.length > 0 && (
               <form action={resortAll}>
@@ -298,6 +306,12 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                       <span className="text-xs text-ink-3">—</span>
                     ) : (
                       <div className="flex flex-col gap-1">
+                        {/* A report a reader refused is read again with one visible press; it used to be inside the fold below. */}
+                        {storyOf(i).outcome === "held" && i.documentId && (
+                          <form action={rereadItem.bind(null, i.id)}>
+                            <button className="btn btn-sm btn-primary w-full">Read it again</button>
+                          </form>
+                        )}
                         {i.documentId && (
                           <form action={attributeInboxItem} className="flex flex-wrap items-center gap-1">
                             <input type="hidden" name="itemId" value={i.id} />

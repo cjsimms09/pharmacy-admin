@@ -103,7 +103,7 @@ function senderAllowed(from: string, allowed: string[]): boolean {
  * Pulled out of the sweep loop so that the cheap envelope pass and the full parse ask the same
  * question in the same words. Two spellings of "have we seen this" is how one of them drifts.
  */
-async function alreadyOnFile(messageId: string): Promise<boolean> {
+export async function alreadyOnFile(messageId: string): Promise<boolean> {
   const row = await db.query.inboxItems.findFirst({
     where: or(
       eq(schema.inboxItems.messageId, messageId),

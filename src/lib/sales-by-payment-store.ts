@@ -146,7 +146,8 @@ export async function rereadHeldSalesReports(user: { userName: string }): Promis
       const r = await fileSalesByPayment({ text: (await readFile(doc.storageKey)).toString("utf8"), documentId: doc.id }, user);
       if (r.stored) {
         stored++;
-        await db.update(schema.inboxItems).set({ routeResult: r.says }).where(eq(schema.inboxItems.id, i.id));
+        /* imported too: it said false when the day was refused, and a row that says stored while its flag says refused is two answers. */
+        await db.update(schema.inboxItems).set({ routeResult: r.says, imported: true }).where(eq(schema.inboxItems.id, i.id));
       }
     } catch {
       /* Still unreadable: it keeps the reason it already had, which is the honest state. */

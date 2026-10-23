@@ -154,29 +154,18 @@ export async function sweepNow(from: "inbox" | "settings" = "inbox") {
  */
 export async function deleteInboxItem(id: string) {
   const user = await requireManager();
-  const item = await db.query.inboxItems.findFirst({ where: eq(schema.inboxItems.id, id) });
-  if (!item) redirect("/inbox");
-
   /*
-   * Nothing was ever stored, so there is nothing to keep.
-   *
-   * A rejected or ignored item has no document behind it — the attachment was never accepted. The
-   * row is the whole of it, and removing the row loses nothing but the line.
+   * Kept, not deleted: the row is the site's only memory that the email was handled, and with it gone the next sweep took the email
+   * again as a new arrival (lib/inbox-dismiss.ts). The line leaves the list of what needs him and stays under "Show them".
    */
-  await db.delete(schema.inboxItems).where(eq(schema.inboxItems.id, id));
-  await audit({
-    action: "inbox.clear",
-    userId: user.id,
-    userName: user.name,
-    entity: "inbox_item",
-    entityId: id,
-    details: `${item.fileName ?? item.subject}${item.documentId ? " — the stored document was kept" : ""}`,
-  });
+  const { dismissInboxItem } = await import("@/lib/inbox-dismiss");
+  const r = await dismissInboxItem(id, { id: user.id, name: user.name });
+  if (!r.found) redirect("/inbox");
   revalidatePath("/inbox");
   redirect("/inbox?ok=" + encodeURIComponent(
-    item.documentId
-      ? "Taken off this list. What was stored is untouched — it is still in the document vault and still filed wherever it was filed."
-      : "Taken off this list. Nothing was stored for it, so nothing was lost.",
+    r.hadDocument
+      ? "Taken off this list, and it will not come back. What was stored is untouched: it is still in the document vault and still filed wherever it was filed."
+      : "Taken off this list, and it will not come back. Nothing was stored for it, so nothing was lost.",
   ));
 }
 
@@ -587,5 +576,25 @@ export async function resortAll() {
     r.looked === 0
       ? "Nothing was waiting to be sorted."
       : `${r.filed} of ${r.looked} sorted themselves.${r.stillStuck ? ` ${r.stillStuck} still need you — they are at the top.` : ""}`;
+  redirect(`/inbox?ok=${encodeURIComponent(said)}`);
+}
+
+/**
+ * Read every refused report again, now.
+ *
+ * A reader that refused a report on one day is often fixed the next, and the refused line stayed refused until somebody found the
+ * small "Read again" button inside a fold on that one line ("I have no way to have system reread rebate statement"). This is one
+ * press for all of them, at the top of the page. It is the same read the site does by itself once after every update, and it covers
+ * the same reports: the ones whose filing is keyed on the document, so reading twice cannot book twice (lib/held-reread.ts).
+ */
+export async function rereadHeldAll() {
+  const user = await requireManager();
+  const { rereadHeldNow } = await import("@/lib/held-reread");
+  const r = await rereadHeldNow({ userId: user.id, userName: user.name });
+  revalidatePath("/inbox");
+  const said =
+    r.looked === 0
+      ? "No refused report was waiting to be read again."
+      : `${r.looked} refused report${r.looked === 1 ? "" : "s"} read again: ${r.booked} now filed, ${r.stillHeld} still refused${r.errors ? `, ${r.errors} could not be opened` : ""}. ${r.said.slice(0, 3).join(" ")}`;
   redirect(`/inbox?ok=${encodeURIComponent(said)}`);
 }
