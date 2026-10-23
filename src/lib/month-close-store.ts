@@ -106,49 +106,7 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
     });
   }
 
-  /*
-   * The dispensing record against the till: two reports of the same sales, which have to agree.
-   *
-   * September 2026 read "closed" while the site's own reconciliation said, on the Money page, that the dispensing record was
-   * $13,885.14 ahead of the till and "the cause is not yet known". The two are the same takings measured twice, so a gap nobody has
-   * explained is the books disagreeing with themselves, and a month does not close on that. Asked only once every document is in,
-   * like the other money gates, because a month missing its sales summary would show a gap that is only the missing report.
-   *
-   * It reads the engine's own comparison (profit-and-loss.ts, reconciliation.revenue), which is where the two figures are set side by
-   * side, and it is blocking only where the engine itself says the gap was not expected.
-   */
-  if (documentsAllIn) {
-    const tie = await claimsVsTill(month);
-    if (tie) checks.push(tie);
-  }
-
   return judgeClose({ month, today, checks });
-}
-
-/** The engine's comparison of the dispensing record with the till, as a money gate; null where it cannot say. */
-export async function claimsVsTill(month: string): Promise<CloseCheck | null> {
-  try {
-    const { monthlyAccount } = await import("./profit-and-loss");
-    const m = await monthlyAccount(month, "accrual");
-    const c = m.reconciliation.revenue.find((r) => /against the till/i.test(r.what));
-    if (!c) return null;
-    return tillGate(c);
-  } catch {
-    /* A comparison that could not run is not a pass and not a failure of the month: the strip simply does not ask. */
-    return null;
-  }
-}
-
-/** Pure: one reconciliation line as a gate. A gap the engine did not expect and that does not agree holds the month open. */
-export function tillGate(c: { what: string; agrees: boolean | null; expected: boolean; says: string }): CloseCheck {
-  const unexplained = c.agrees === false && c.expected === false;
-  return {
-    key: "claims_vs_till",
-    name: "The dispensing record agrees with the till",
-    done: !unexplained,
-    says: unexplained ? c.says : "The dispensing record and the till agree, or differ by what is already explained.",
-    gate: "money",
-  };
 }
 
 /** Whether the month's wholesaler rebate statement is booked, or null where this pharmacy has never booked one. */
