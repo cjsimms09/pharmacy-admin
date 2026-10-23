@@ -9,6 +9,7 @@ import { INCIDENT_TYPES } from "@/db/schema";
 import { INCIDENT_TYPE_LABEL } from "@/lib/labels";
 import { PrintFrame, SignatureLine, Check, Cell } from "@/components/print";
 import { audit } from "@/lib/audit";
+import { fitRcaCap } from "@/lib/cqi-print";
 
 export const metadata = { title: "C-650" };
 
@@ -31,6 +32,7 @@ export default async function IncidentPrintPage({ params }: { params: Promise<{ 
   while (rows.length < 6) rows.push({ personId: "", reviewedOn: null, reviewedByPersonId: null });
   const picName = name(people.find((p) => p.isPic)?.id ?? null);
   const boardTypes = INCIDENT_TYPES.filter((t) => t !== "other");
+  const fit = fitRcaCap(inc.rootCauseAnalysis, inc.correctiveActionPlan);
   const labelC650: Record<string, string> = { ...INCIDENT_TYPE_LABEL, serious_harm: "Dispensed drug resulted in (or has potential to result in) serious harm to patient" };
 
   return (
@@ -95,14 +97,24 @@ export default async function IncidentPrintPage({ params }: { params: Promise<{ 
       <table className="mb-4 w-full border-collapse"><tbody><tr><Cell label="Prescription number" className="w-1/2">{rx}</Cell><Cell label="Date incident report created">{fmt(inc.reportCreatedOn)}</Cell></tr></tbody></table>
       <div className="text-sm font-bold">ROOT CAUSE ANALYSIS (RCA)</div>
       <p className="mb-1 text-[11px]">Examine all issues and processes that led to the incident. Attach additional pages, if necessary.</p>
-      <div className="print-prose mb-4 min-h-[2.6in] whitespace-pre-wrap border border-black px-2 py-1 text-[11px]">{s.pso_member === "yes" && !inc.rootCauseAnalysis ? "Not required — active PSO member." : inc.rootCauseAnalysis}</div>
+      <div className={`print-prose mb-3 min-h-[2.2in] whitespace-pre-wrap border border-black px-2 py-1 ${fit.cls}`}>{s.pso_member === "yes" && !inc.rootCauseAnalysis ? "Not required — active PSO member." : fit.attach ? "See attached sheet (RCA)." : inc.rootCauseAnalysis}</div>
       <div className="text-sm font-bold">CORRECTIVE ACTION PLAN (CAP)</div>
       <p className="mb-1 text-[11px]">List measures to be taken to ensure incident doesn’t recur. Attach additional pages, if necessary.</p>
-      <div className="print-prose mb-4 min-h-[2.6in] whitespace-pre-wrap border border-black px-2 py-1 text-[11px]">{s.pso_member === "yes" && !inc.correctiveActionPlan ? "Not required — active PSO member." : inc.correctiveActionPlan}</div>
+      <div className={`print-prose mb-3 min-h-[2.2in] whitespace-pre-wrap border border-black px-2 py-1 ${fit.cls}`}>{s.pso_member === "yes" && !inc.correctiveActionPlan ? "Not required — active PSO member." : fit.attach ? "See attached sheet (CAP)." : inc.correctiveActionPlan}</div>
       <div className="text-sm font-bold">PIC CERTIFICATION</div>
       <p className="text-[11px] italic">The information contained in this form is true, correct, and complete to the best of my knowledge.</p>
       <div className="grid grid-cols-3 gap-6 text-[11px]"><div></div><div className="pt-6">{picName}</div><div className="pt-6">{fmt(inc.reviewCompletedOn)}</div></div>
       <SignatureLine dateLabel="DATE REVIEW COMPLETED" />
+      {fit.attach && (
+        <>
+          <div className="break-before-page pt-6" />
+          <div className="print-heading mb-1 text-sm font-bold">ATTACHED SHEET: Form C-650, prescription number {rx}</div>
+          <div className="text-sm font-bold">ROOT CAUSE ANALYSIS (RCA)</div>
+          <div className="mb-4 whitespace-pre-wrap border border-black px-2 py-1 text-[11px]">{inc.rootCauseAnalysis}</div>
+          <div className="text-sm font-bold">CORRECTIVE ACTION PLAN (CAP)</div>
+          <div className="mb-4 whitespace-pre-wrap border border-black px-2 py-1 text-[11px]">{inc.correctiveActionPlan}</div>
+        </>
+      )}
     </PrintFrame>
   );
 }
