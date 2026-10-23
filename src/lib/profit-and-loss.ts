@@ -42,6 +42,7 @@
 import { reconcileCogs, reconcileRevenue, type Check as ReconCheck } from "./reconcile";
 import { cashCostOfGoods, countedTwiceInCash } from "./cash-cogs";
 import { standingLines } from "./standing-math";
+import { purchasesMade } from "./purchases-made";
 import { todayIso } from "./dates";
 import { rebateOnDispensed } from "./rebate-on-dispensed";
 import { formatCents } from "./money";
@@ -857,7 +858,7 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
   const reconciliation = {
     cogs: reconcileCogs({
       dispensed: { cents: i.dispensedCostCents, from: "the acquisition cost on each dispensing" },
-      purchases: { cents: i.purchasesCents, from: "the wholesaler invoices dated in the month" },
+      purchases: { cents: i.purchasesCents, from: "the wholesaler invoices dated in the month, and PioneerRx's receiving record for any delivery with no invoice on file" },
       openingStock: { cents: i.openingStockCents ?? null, from: "the dispensing shelf at the last inventory count before the month began" },
       closingStock: { cents: i.closingStockCents ?? null, from: "the dispensing shelf at the last inventory count of the month" },
     }),
@@ -1329,7 +1330,22 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
 
   /* What the wholesalers billed in the month, for the stock comparison only — never as accrual cost of goods. */
   const monthLines = lines.filter((l) => l.invoiceDate?.startsWith(month));
-  const purchasesCents = monthLines.length ? monthLines.reduce((n, l) => n + l.extendedCents, 0) : null;
+  /*
+   * Purchases the month made: the invoices on file, and PioneerRx's own receiving record for every delivery with no invoice.
+   *
+   * The owner, 23 October 2026: "lets just use receipts from pioneer for invoices.. that should always be fall back." Counting
+   * invoices alone read September as $148,076.26 more dispensed than bought, when in fact the invoices for 1 to 8 and 14
+   * September (and 118 deliveries in all, $218,963.37) were never captured; PioneerRx has a receipt for every one. A delivery is
+   * matched to its invoice by number, so one purchase is never counted as both (purchases-made.ts, tested). The cash account already falls
+   * back to these receipts (`cashCostOfGoods`, with its own guard against counting twice); this is the same fallback for the stock comparison.
+   */
+  const purchasesCents = purchasesMade({
+    month,
+    invoiceLinesCents: monthLines.reduce((n, l) => n + l.extendedCents, 0),
+    haveInvoiceLines: monthLines.length > 0,
+    invoiceNumbers: invoices.map((v) => v.invoiceNumber),
+    receipts: shared.pioneerPurchases,
+  }).cents;
 
   /*
    * What actually left the bank for goods this month: the invoices marked paid in it.

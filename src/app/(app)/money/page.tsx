@@ -391,8 +391,8 @@ export default async function MoneyPage({ searchParams }: { searchParams: Promis
           {accrual.stockMovementCents !== null && accrual.stockMovementCents !== 0 && (
             <p className="mt-1 text-ink-3">
               {accrual.stockMovementCents > 0
-                ? `The invoices on file come to ${formatCents(accrual.stockMovementCents)} more than was dispensed, so the shelf grew by that much — unless an invoice is on file twice. Not profit.`
-                : `${formatCents(-accrual.stockMovementCents)} more was dispensed than the invoices on file come to. That is the shelf running down only if every invoice for the period is on file; one not yet entered looks exactly the same. Not profit either way.`}
+                ? `The month's purchases (invoices, and PioneerRx's receiving record for a delivery with no invoice) come to ${formatCents(accrual.stockMovementCents)} more than was dispensed, so the shelf grew by that much — unless a purchase is counted twice. Not profit.`
+                : `${formatCents(-accrual.stockMovementCents)} more was dispensed than the month's purchases come to. That is the shelf running down only if every invoice for the period is on file; one not yet entered looks exactly the same. Not profit either way.`}
             </p>
           )}
           {onBank && onBank.unconfirmedReceipts.length > 0 && (

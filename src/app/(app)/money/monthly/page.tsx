@@ -186,11 +186,11 @@ export default async function MonthlyPLPage({
         <Notice kind="ok">
           <b>
             {pl.stockMovementCents > 0
-              ? `The invoices on file come to ${formatCents(pl.stockMovementCents)} more than was dispensed.`
-              : `${formatCents(Math.abs(pl.stockMovementCents))} more was dispensed than the invoices on file come to.`}
+              ? `The month's purchases (invoices, and PioneerRx's receiving record for a delivery with no invoice) come to ${formatCents(pl.stockMovementCents)} more than was dispensed.`
+              : `${formatCents(Math.abs(pl.stockMovementCents))} more was dispensed than the month's purchases come to.`}
           </b>{" "}
           {pl.stockMovementCents > 0
-            ? "The shelf grew by that much — unless an invoice is on file twice."
+            ? "The shelf grew by that much — unless a purchase is counted twice."
             : "That is the shelf running down only if every invoice for the month is on file; one not yet entered looks exactly the same."}{" "}
           Not profit either way, and not in the figures above.
         </Notice>

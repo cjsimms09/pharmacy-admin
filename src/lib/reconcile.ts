@@ -94,10 +94,10 @@ export function reconcileCogs(s: CogsSources): { checks: Check[]; impliedCogsCen
       stockMovementCents === null
         ? "One of the two is not held for this month, so nothing can be said."
         : stockMovementCents > TOLERANCE_CENTS
-          ? `The invoices on file come to ${money(stockMovementCents)} more than was dispensed, so the shelf grew by that much — unless an invoice is on file twice. Not an error: it is cash converted into stock, and it belongs on the balance sheet rather than in the profit.`
+          ? `The month's purchases (invoices, and PioneerRx's receiving record for a delivery with no invoice) come to ${money(stockMovementCents)} more than was dispensed, so the shelf grew by that much — unless a purchase is counted twice. Not an error: it is cash converted into stock, and it belongs on the balance sheet rather than in the profit.`
           : stockMovementCents < -TOLERANCE_CENTS
-            ? `${money(stockMovementCents)} more was dispensed than the invoices on file come to, so the month ran the shelf down by that much and turned stock back into cash — unless invoices for the month are still to be entered, which looks exactly the same here.`
-            : "The invoices on file come to almost exactly what was dispensed.",
+            ? `${money(stockMovementCents)} more was dispensed than the month's purchases come to, so the month ran the shelf down by that much and turned stock back into cash — unless a delivery has not been received into PioneerRx yet, which looks exactly the same here.`
+            : "The month's purchases (invoices, and PioneerRx's receiving record for a delivery with no invoice) come to almost exactly what was dispensed.",
   });
 
   /*
