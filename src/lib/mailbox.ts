@@ -1529,7 +1529,8 @@ export async function importRecognised(
         { documentId: filed?.documentId ?? null, supplierId: filed?.supplierId ?? null },
         { name: ctx.userName ?? "Automatic check" },
       );
-      routeResult = r.message;
+      /* The same words every other loader uses for a refusal, so the Inbox shows it as one: this said only "the figures do not agree" and showed as handled. */
+      routeResult = r.stored ? r.message : `Held, nothing stored: ${r.message}`;
       imported = r.stored;
     } else if (cls.kind === "mck_returns") {
       /* Money coming back, settled like an invoice and stored beside them, negative. */

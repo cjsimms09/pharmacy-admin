@@ -155,8 +155,8 @@ export type LineStory = {
 const HELD =
   /^Held, nothing stored|does not balance|could not be loaded|nothing could be loaded|nothing was (filed|recorded|stored)|but nothing was filed|no row on it could be read|but no rule says/i;
 
-/** Kinds whose arrivals are passed over by design, so "not imported" is their normal state and not a refusal. */
-export const NOT_READ_ON_PURPOSE = new Set(["report_summary", "empty_report"]);
+/** Loaders that set `imported` to whether the report was stored, so false is a refusal whatever words it used. */
+export const FLAG_MEANS_STORED = new Set(["rebate_report", "sales_by_payment", "accrual_sales"]);
 
 /**
  * What happened to this arrival, and how it should look.
@@ -217,9 +217,10 @@ export function storyOf(row: InboxRow): LineStory {
      * line sat among the handled ones with no control on it ("I have no way to have system reread rebate statement"). The wording
      * test stays for rows written before the column existed (null).
      *
-     * Not every false is a refusal: a totals sheet and a "No Data" report are deliberately not read into anything.
+     * Only for the loaders where the flag means "stored". For others it means "this run changed something" (a statement read a second
+     * time posts nothing new and says false), and trusting it there showed three correct rows as refusals.
      */
-    if (row.imported === false && !NOT_READ_ON_PURPOSE.has(row.routedAs ?? "")) {
+    if (row.imported === false && FLAG_MEANS_STORED.has(row.routedAs ?? "")) {
       return {
         outcome: "held",
         headline: `${kind}, held — nothing was stored`,

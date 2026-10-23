@@ -23,9 +23,17 @@ describe("what the sweep recorded decides whether a report was refused", () => {
     assert.equal(storyOf(row({ imported: true, routeResult: "Filed 11 tiers against Mckesson." })).outcome, "loaded");
   });
 
-  test("a totals sheet and a No Data report are not read on purpose, so false is their normal state", () => {
-    assert.notEqual(storyOf(row({ imported: false, routedAs: "report_summary", routeResult: "A totals sheet. The detail it summarises is read separately." })).outcome, "held");
-    assert.notEqual(storyOf(row({ imported: false, routedAs: "empty_report", routeResult: "The daily claims report arrived carrying \"No Data\" and nothing else." })).outcome, "held");
+  test("for a loader whose flag means \"changed something this run\", false is not a refusal", () => {
+    /* A statement read a second time posts nothing new, so these say false and were read perfectly. Three correct rows nearly turned red. */
+    for (const kind of ["ipd_statement", "accesshealth_payment", "report_summary", "empty_report", "veridikal_report"]) {
+      assert.notEqual(storyOf(row({ imported: false, routedAs: kind, routeResult: "Read again: filed; nothing new to post." })).outcome, "held", kind);
+    }
+  });
+
+  test("for the loaders where the flag means stored, false is a refusal", () => {
+    for (const kind of ["rebate_report", "sales_by_payment", "accrual_sales"]) {
+      assert.equal(storyOf(row({ imported: false, routedAs: kind })).outcome, "held", kind);
+    }
   });
 
   test("a row recorded before the column existed still falls back to the wording", () => {
