@@ -59,13 +59,21 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
   if (purchases) checks.push(purchases);
 
   /*
+   * The daily reports the till and the cards are proved against, for every day of the month (lib/daily-feeds.ts). Only a day that is
+   * missing is listed, so a month with every day on file adds nothing to the strip.
+   */
+  const feeds = await dailyFeedChecks(month);
+  checks.push(...feeds);
+  const documentsAllIn = list.outstanding === 0 && (!rebate || rebate.done) && (!purchases || purchases.done) && feeds.length === 0;
+
+  /*
    * The money gates are only asked once the documents are all in.
    *
    * Otherwise they answer about half a month and answer confidently: with no statement on file there
    * are no unplaced lines, so "every line placed" would pass, and a month missing its only proof of
    * cash would show one green tick short of closed.
    */
-  if (list.outstanding === 0 && (!rebate || rebate.done) && (!purchases || purchases.done)) {
+  if (documentsAllIn) {
     const from = `${month}-01`;
     const to = endOf(month);
     const c = (db as unknown as { $client: { execute: (s: string, a?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> } }).$client;
@@ -109,7 +117,7 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
    * It reads the engine's own comparison (profit-and-loss.ts, reconciliation.revenue), which is where the two figures are set side by
    * side, and it is blocking only where the engine itself says the gap was not expected.
    */
-  if (list.outstanding === 0 && (!rebate || rebate.done) && (!purchases || purchases.done)) {
+  if (documentsAllIn) {
     const tie = await claimsVsTill(month);
     if (tie) checks.push(tie);
   }
@@ -204,5 +212,27 @@ export async function purchasesCheck(month: string): Promise<CloseCheck | null> 
   } catch {
     /* A comparison that could not run is not a pass and not a failure of the month: the strip simply does not ask. */
     return null;
+  }
+}
+
+/** The daily payment-type reports and card batches for the month; only the ones with a day missing, and none before the month has ended. */
+export async function dailyFeedChecks(month: string): Promise<CloseCheck[]> {
+  try {
+    const { daysWithoutPaymentReport, cardDaysWithoutBatch, judgeDailyFeeds } = await import("./daily-feeds");
+    const from = `${month}-01`;
+    const to = endOf(month);
+    const rows = (await db.select({ periodFrom: schema.salesByPayment.periodFrom, periodTo: schema.salesByPayment.periodTo, cardNetCents: schema.salesByPayment.cardNetCents }).from(schema.salesByPayment)).filter(
+      (r) => r.periodTo >= from && r.periodFrom <= to,
+    );
+    const batches = await db.select({ on: schema.cashReceipts.receivedOn }).from(schema.cashReceipts).where(like(schema.cashReceipts.sourceKey, "card-batch|%"));
+    const gaps = judgeDailyFeeds({
+      month,
+      payment: daysWithoutPaymentReport(month, rows),
+      cards: cardDaysWithoutBatch(rows, batches.map((b) => b.on).filter((d): d is string => !!d), month),
+    });
+    return gaps.map((g) => ({ key: g.key, name: g.name, done: false, says: g.says, gate: "document" as const }));
+  } catch {
+    /* A comparison that could not run is not a pass and not a failure of the month: the strip simply does not ask. */
+    return [];
   }
 }
