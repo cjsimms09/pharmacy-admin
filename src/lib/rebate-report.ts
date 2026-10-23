@@ -65,6 +65,8 @@ export type Statement = {
   gprRebateCents: number | null;
   genericRebateCents: number | null;
   totalPaidCents: number | null;
+  /** A quarterly rebate on the pharmacy's net sales, printed only in a quarter's last month ("Qtrly 10bps Net Sales Rebate"). Null when the month has none. */
+  quarterlyNetSalesRebateCents: number | null;
   /** The compliance rate actually achieved, after McKesson's exclusions. Selects the band. */
   scrubbedGcrPercent: number | null;
   gprPercent: number | null;
@@ -119,6 +121,22 @@ function figure(lines: string[], label: RegExp): string | null {
   return null;
 }
 
+/**
+ * Every quarterly rebate line on the statement, summed: "Qtrly 10bps Net Sales Rebate$1,704.70", or the older "Quarterly 10% Rebate$0.00"
+ * and "Quarterly RTL2 12% Rebate$0.00". They print as nought in most months and carry money in a quarter's last, and the first one that did
+ * (September 2026) was a component of the total paid that nothing here added. Null when the statement prints none.
+ */
+function quarterlyRebates(lines: string[]): number | null {
+  let sum: number | null = null;
+  for (const l of lines) {
+    const m = /^(?:Qtrly|Quarterly)\b.*\bRebate\$?([\d,.]+)$/i.exec(l);
+    if (!m) continue;
+    const c = cents(m[1]);
+    if (c !== null) sum = (sum ?? 0) + c;
+  }
+  return sum;
+}
+
 export function parseRebateReport(text: string): RebateReport {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const problems: string[] = [];
@@ -140,7 +158,7 @@ export function parseRebateReport(text: string): RebateReport {
     periodFrom: period ? monthDayYear(period[1]) : null,
     periodTo: period ? monthDayYear(period[2]) : null,
     paidOn: monthDayYear(figure(lines, /^Paid:\s*(.+)$/) ?? ""),
-    netPurchasedCents: money(/^Net Purchased\$?([\d,.]+)$/),
+    netPurchasedCents: money(/^Net Purchase[sd]\$?([\d,.]+)$/),
     totalFeesCents: money(/^Total Fees \/ Reimbursement\$?([\d,.]+)$/),
     brandPurchasedCents: money(/^Brand Purchases\$?([\d,.]+)$/),
     brandFactorPercent: percent(/^Brand Factor([\d.]+)%$/),
@@ -152,6 +170,7 @@ export function parseRebateReport(text: string): RebateReport {
     gprRebateCents: money(/^GPR Generic Rebate\$?([\d,.]+)$/),
     genericRebateCents: money(/^Generic Rebate\$?([\d,.]+)$/),
     totalPaidCents: money(/^Total Paid\$?([\d,.]+)$/),
+    quarterlyNetSalesRebateCents: quarterlyRebates(lines),
     scrubbedGcrPercent: percent(/Scrubbed GCR:\s*([\d.]+)%/),
     gprPercent: percent(/^GPR:\s*([\d.]+)%/),
   };
@@ -177,6 +196,14 @@ export function parseRebateReport(text: string): RebateReport {
 
   const checks: Check[] = [];
   const near = (a: number, b: number, tol = 2) => Math.abs(a - b) <= tol;
+  /*
+   * For a rate applied to a purchase figure: two cents, or a tenth of a percent of the answer if that is more.
+   *
+   * September 2026's statement printed $31,226.90 at 29% as $9,056.40 (the arithmetic gives $9,055.80) and $172,404.89 at 0.75% as
+   * $1,292.96 ($1,293.04). The wholesaler computes on unrounded figures, so the printed purchases and the printed rebate differ by
+   * cents. A rate misread by a hundredth of a point is still caught: that moves the answer by 0.03%, and a whole point moves it by 3%.
+   */
+  const nearRate = (a: number, b: number) => near(a, b, Math.max(2, Math.round(Math.abs(a) * 0.001)));
 
   // 1. The band the achieved rate falls in must be the rate the statement says it paid.
   const band = statement.scrubbedGcrPercent === null ? null : bandFor(gcr, statement.scrubbedGcrPercent);
@@ -194,7 +221,7 @@ export function parseRebateReport(text: string): RebateReport {
   // 2. That rate on the OneStop purchases must be the generic rebate printed.
   if (statement.oneStopPurchasedCents !== null && statement.gcrRatePercent !== null && statement.gcrRebateCents !== null) {
     const expected = Math.round((statement.oneStopPurchasedCents * statement.gcrRatePercent) / 100);
-    const ok = near(expected, statement.gcrRebateCents);
+    const ok = nearRate(expected, statement.gcrRebateCents);
     checks.push({
       what: "The generic rebate against the purchases it was paid on",
       ok,
@@ -205,7 +232,7 @@ export function parseRebateReport(text: string): RebateReport {
   // 3. The brand factor on brand purchases must be the brand rebate printed.
   if (statement.brandPurchasedCents !== null && statement.brandFactorPercent !== null && statement.brandRebateCents !== null) {
     const expected = Math.round((statement.brandPurchasedCents * statement.brandFactorPercent) / 100);
-    const ok = near(expected, statement.brandRebateCents);
+    const ok = nearRate(expected, statement.brandRebateCents);
     checks.push({
       what: "The brand rebate against brand purchases",
       ok,
@@ -235,7 +262,7 @@ export function parseRebateReport(text: string): RebateReport {
    */
   if (statement.oneStopPurchasedCents !== null && statement.gprRatePercent !== null && statement.gprRebateCents !== null) {
     const expected = Math.round((statement.oneStopPurchasedCents * statement.gprRatePercent) / 100);
-    const ok = near(expected, statement.gprRebateCents);
+    const ok = nearRate(expected, statement.gprRebateCents);
     checks.push({
       what: "The purchase-ratio rebate against the same OneStop purchases",
       ok,
@@ -264,14 +291,15 @@ export function parseRebateReport(text: string): RebateReport {
    */
   if (statement.genericRebateCents !== null && statement.brandRebateCents !== null && statement.totalPaidCents !== null) {
     const fees = statement.totalFeesCents ?? 0;
-    const expected = statement.genericRebateCents + statement.brandRebateCents + fees;
+    const quarterly = statement.quarterlyNetSalesRebateCents ?? 0;
+    const expected = statement.genericRebateCents + statement.brandRebateCents + fees + quarterly;
     const ok = near(expected, statement.totalPaidCents);
     checks.push({
       what: "Everything added up against what was paid",
       ok,
       detail:
         `${dollars(statement.genericRebateCents)} generic plus ${dollars(statement.brandRebateCents)} brand` +
-        `${fees ? ` plus ${dollars(fees)} in fees reimbursed` : ""} is ${dollars(expected)}; the statement paid ${dollars(statement.totalPaidCents)}.`,
+        `${fees ? ` plus ${dollars(fees)} in fees reimbursed` : ""}${quarterly ? ` plus ${dollars(quarterly)} quarterly net-sales rebate` : ""} is ${dollars(expected)}; the statement paid ${dollars(statement.totalPaidCents)}.`,
     });
   }
 

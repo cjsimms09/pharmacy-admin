@@ -209,3 +209,66 @@ describe("the purchase-ratio ladder", () => {
   });
 });
 
+/*
+ * A quarter's last month. The September 2026 statement carried a line nobody had met, "Qtrly 10bps Net Sales Rebate", worth
+ * more than the brand rebate; the total paid was short of the sum the reader knew by exactly that line, so the report was
+ * refused and no tier was stored. The wholesaler also printed purchases-times-rate a few cents off the rebate it paid
+ * ($31,226.90 at 29% is $9,055.80 and the statement said $9,056.40). Every figure here is invented, on the same layout.
+ */
+const LADDER = REPORT.split("\n").slice(REPORT.split("\n").findIndex((l) => l.startsWith("0-74.99%")));
+const QUARTER_END = [
+  "USave Rebate Breakdown",
+  " Pharmacy:TEST PHARMACY",
+  " Location ID:11111",
+  " Primary Account #:222222",
+  " Start:Sep 01 2026End:Sep 30 2026",
+  " Paid:Oct 20 2026",
+  "Net Purchases$100,000.00",
+  "HealthMart Fee Rebate$300.00",
+  "Total Fees / Reimbursement$300.00",
+  "Qtrly 10bps Net Sales Rebate$1,000.00",
+  "Brand Purchases$40,000.00",
+  "Brand Factor0.75%",
+  "Brand Rebate$300.04",
+  "OneStop Purchases$10,000.00",
+  "GCR Generic Rebate %29.00%",
+  "GCR Generic Rebate$2,900.50",
+  "GPR Generic Rebate %0.00%",
+  "GPR Generic Rebate$0.00",
+  "Generic Rebate$2,900.50",
+  "Total Paid$4,500.54",
+  "GPR: 65.00%Scrubbed GCR: 21.78%",
+  ...LADDER,
+].join("\n");
+
+describe("a statement for a quarter's last month", () => {
+  test("a quarterly net-sales rebate is a component of the total paid, and the statement is trusted", () => {
+    const r = parseRebateReport(QUARTER_END);
+    assert.equal(r.statement.quarterlyNetSalesRebateCents, 100_000);
+    assert.equal(r.statement.netPurchasedCents, 10_000_000, "the label is 'Net Purchases' this month");
+    assert.equal(r.trustworthy, true, r.problems.join(" "));
+    assert.match(r.checks.find((c) => /added up against what was paid/.test(c.what))!.detail, /plus \$1,000\.00 quarterly net-sales rebate/);
+  });
+
+  test("a few cents of rounding between purchases-times-rate and the rebate paid is not a disagreement", () => {
+    const r = parseRebateReport(QUARTER_END);
+    assert.equal(r.checks.filter((c) => !c.ok).length, 0);
+  });
+
+  test("a rate misread by a whole point is still caught", () => {
+    const r = parseRebateReport(QUARTER_END.replace("GCR Generic Rebate %29.00%", "GCR Generic Rebate %28.00%"));
+    assert.equal(r.trustworthy, false);
+  });
+
+  test("a total that is short of every component the report names is still refused", () => {
+    const r = parseRebateReport(QUARTER_END.replace("Total Paid$4,500.54", "Total Paid$4,000.54"));
+    assert.equal(r.trustworthy, false);
+  });
+
+  test("the older zero quarterly lines add nothing, and a month with none is read as before", () => {
+    const withZeros = REPORT.replace("Quarterly 10% Rebate$0.00", "Quarterly 10% Rebate$0.00");
+    assert.equal(parseRebateReport(withZeros).statement.quarterlyNetSalesRebateCents, 0);
+    assert.equal(parseRebateReport(withZeros).trustworthy, true);
+    assert.equal(parseRebateReport(REPORT.replace(/Quarterly[^\n]*\n/g, "")).statement.quarterlyNetSalesRebateCents, null);
+  });
+});
