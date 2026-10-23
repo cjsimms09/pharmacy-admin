@@ -1,5 +1,6 @@
 import "server-only";
-import { db } from "@/db";
+import { db, schema } from "@/db";
+import { like } from "drizzle-orm";
 import { judgeClose, endOf, type CloseCheck, type MonthClose } from "./month-close";
 
 /**
@@ -36,13 +37,26 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
   }));
 
   /*
+   * The wholesaler's rebate statement, which reduces the month's cost of goods and arrives in the next month.
+   *
+   * September 2026 read "closed" with its $12,354.06 McKesson rebate booked nowhere: nothing in the list above asks for it, because
+   * the owner does not fetch it (it is emailed, around the 20th) and a month that was closed without it was closed on an estimate.
+   * Asked only of a pharmacy whose books have held a rebate statement before, so it is not demanded of one that has none.
+   *
+   * It reads where a booked rebate is recorded: the receipt and the bill the statement writes, keyed on the statement's own period
+   * (rebate-report-store.ts), and not the Inbox line that says a report arrived.
+   */
+  const rebate = await rebateCheck(month);
+  if (rebate) checks.push(rebate);
+
+  /*
    * The money gates are only asked once the documents are all in.
    *
    * Otherwise they answer about half a month and answer confidently: with no statement on file there
    * are no unplaced lines, so "every line placed" would pass, and a month missing its only proof of
    * cash would show one green tick short of closed.
    */
-  if (list.outstanding === 0) {
+  if (list.outstanding === 0 && (!rebate || rebate.done)) {
     const from = `${month}-01`;
     const to = endOf(month);
     const c = (db as unknown as { $client: { execute: (s: string, a?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> } }).$client;
@@ -76,4 +90,30 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
   }
 
   return judgeClose({ month, today, checks });
+}
+
+/** Whether the month's wholesaler rebate statement is booked, or null where this pharmacy has never booked one. */
+export async function rebateCheck(month: string): Promise<CloseCheck | null> {
+  const from = `${month}-01`;
+  const to = endOf(month);
+  const receipts = await db.select({ key: schema.cashReceipts.sourceKey, out: schema.cashReceipts.outOfBooks }).from(schema.cashReceipts).where(like(schema.cashReceipts.sourceKey, "REBATE|%"));
+  const bills = await db.select({ description: schema.expenses.description }).from(schema.expenses).where(like(schema.expenses.description, "%rebate, %"));
+  const everBooked = receipts.some((r) => !r.out) || bills.length > 0;
+  if (!everBooked) return null;
+
+  const booked =
+    receipts.some((r) => !r.out && (r.key ?? "").endsWith(`|${from}|${to}`)) || bills.some((b) => (b.description ?? "").endsWith(`rebate, ${from} to ${to}`));
+  if (booked) return { key: "wholesaler_rebate", name: "The wholesaler's rebate statement", done: true, says: `The wholesaler's rebate for ${month} is booked from its own statement.`, gate: "document" };
+
+  const held = (await db.select({ imported: schema.inboxItems.imported, routedAs: schema.inboxItems.routedAs }).from(schema.inboxItems)).filter((r) => r.routedAs === "rebate_report" && r.imported === false);
+  return {
+    key: "wholesaler_rebate",
+    name: "The wholesaler's rebate statement",
+    done: false,
+    says:
+      held.length > 0
+        ? `A rebate statement has arrived and was refused, so it is not booked: see the Inbox. Until it is, ${month} carries the ladder's estimate of the rebate.`
+        : `The wholesaler's rebate statement for ${month} has not arrived. It usually comes around the 20th of the next month and books itself; until then ${month} carries the ladder's estimate of the rebate.`,
+    gate: "document",
+  };
 }
