@@ -50,13 +50,22 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
   if (rebate) checks.push(rebate);
 
   /*
+   * Every wholesaler invoice for the month, proved against the wholesaler's own figure on the same statement.
+   *
+   * Asked only once that statement has been read, because it is the outside figure; before then there is nothing to compare with.
+   * See wholesaler-purchases.ts for what it found in September 2026 ($142,392.56 of McKesson invoices never captured).
+   */
+  const purchases = await purchasesCheck(month);
+  if (purchases) checks.push(purchases);
+
+  /*
    * The money gates are only asked once the documents are all in.
    *
    * Otherwise they answer about half a month and answer confidently: with no statement on file there
    * are no unplaced lines, so "every line placed" would pass, and a month missing its only proof of
    * cash would show one green tick short of closed.
    */
-  if (list.outstanding === 0 && (!rebate || rebate.done)) {
+  if (list.outstanding === 0 && (!rebate || rebate.done) && (!purchases || purchases.done)) {
     const from = `${month}-01`;
     const to = endOf(month);
     const c = (db as unknown as { $client: { execute: (s: string, a?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> } }).$client;
@@ -100,7 +109,7 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
    * It reads the engine's own comparison (profit-and-loss.ts, reconciliation.revenue), which is where the two figures are set side by
    * side, and it is blocking only where the engine itself says the gap was not expected.
    */
-  if (list.outstanding === 0 && (!rebate || rebate.done)) {
+  if (list.outstanding === 0 && (!rebate || rebate.done) && (!purchases || purchases.done)) {
     const tie = await claimsVsTill(month);
     if (tie) checks.push(tie);
   }
@@ -158,4 +167,42 @@ export async function rebateCheck(month: string): Promise<CloseCheck | null> {
         : `The wholesaler's rebate statement for ${month} has not arrived. It usually comes around the 20th of the next month and books itself; until then ${month} carries the ladder's estimate of the rebate.`,
     gate: "document",
   };
+}
+
+/** The wholesaler's own purchases figure for the month against the invoices on file; null before its statement has been read. */
+export async function purchasesCheck(month: string): Promise<CloseCheck | null> {
+  try {
+    const { readFile } = await import("./files");
+    const { pdfText } = await import("./pdf-text");
+    const { looksLikeRebateReport, parseRebateReport } = await import("./rebate-report");
+    const { weekdaysWithoutInvoices, judgePurchases } = await import("./wholesaler-purchases");
+
+    const docs = await db.query.documents.findMany({ columns: { id: true, storageKey: true, title: true, fileName: true } });
+    let statementCents: number | null = null;
+    for (const d of docs.filter((x) => /rebate/i.test(x.title ?? "") || /rebate/i.test(x.fileName ?? ""))) {
+      let text = "";
+      try {
+        text = pdfText(await readFile(d.storageKey));
+      } catch {
+        continue;
+      }
+      if (!looksLikeRebateReport(text)) continue;
+      const r = parseRebateReport(text);
+      if (r.trustworthy && (r.statement.periodFrom ?? "").startsWith(month) && r.statement.netPurchasedCents !== null) statementCents = r.statement.netPurchasedCents;
+    }
+    if (statementCents === null) return null;
+
+    const from = `${month}-01`;
+    const to = endOf(month);
+    const invoices = (await db.query.supplierInvoices.findMany({ columns: { supplier: true, invoiceDate: true, totalCents: true } })).filter(
+      (i) => /mckesson/i.test(i.supplier ?? "") && (i.invoiceDate ?? "") >= from && (i.invoiceDate ?? "") <= to,
+    );
+    const invoicesCents = invoices.reduce((n, i) => n + (i.totalCents ?? 0), 0);
+    const missingDays = weekdaysWithoutInvoices(month, invoices.map((i) => i.invoiceDate as string));
+    const j = judgePurchases({ month, wholesaler: "McKesson", statementCents, invoicesCents, missingDays });
+    return { key: "wholesaler_purchases", name: "McKesson's invoices for the whole month", done: j.agrees, says: j.says, gate: "document" };
+  } catch {
+    /* A comparison that could not run is not a pass and not a failure of the month: the strip simply does not ask. */
+    return null;
+  }
 }
