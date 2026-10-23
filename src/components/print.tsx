@@ -71,20 +71,7 @@ export async function PrintFrame({
           )}
         </header>
       ) : (
-      <header className="print-block mb-3 flex items-stretch border border-black">
-        <div className="flex w-1/5 items-center justify-center border-r border-black px-2 text-center font-serif text-2xl font-bold">Kansas</div>
-        <div className="flex-1 px-2 py-1 text-center text-[11px] leading-tight">
-          <div className="text-sm font-bold">STATE BOARD OF PHARMACY</div>
-          800 SW Jackson, Suite 1414<br />
-          Topeka, Kansas 66612-1244<br />
-          www.pharmacy.ks.gov (785) 296-4056<br />
-          pharmacy@ks.gov Fax (785) 296-8420
-        </div>
-        <div className="flex w-[30%] flex-col items-center justify-center border-l border-black bg-rose-200 px-2 text-center print:bg-rose-200">
-          <div className="text-sm font-bold">{formTitle}</div>
-          <div className="text-sm">{formNumber}</div>
-        </div>
-      </header>
+      <BoardMasthead formTitle={formTitle} formNumber={formNumber} />
       )}
       {children}
       <footer className="mt-6 flex justify-between text-[10px] text-neutral-700">
@@ -92,6 +79,26 @@ export async function PrintFrame({
         <span>{revised ? `Revised ${revised}` : ""}</span>
       </footer>
     </div>
+  );
+}
+
+/** The Board's own masthead, which every one of its forms opens with. Sync, so a page-count check can render it without the site. */
+export function BoardMasthead({ formTitle, formNumber }: { formTitle: string; formNumber: string }) {
+  return (
+        <header className="print-block mb-3 flex items-stretch border border-black">
+          <div className="flex w-1/5 items-center justify-center border-r border-black px-2 text-center font-serif text-2xl font-bold">Kansas</div>
+          <div className="flex-1 px-2 py-1 text-center text-[11px] leading-tight">
+            <div className="text-sm font-bold">STATE BOARD OF PHARMACY</div>
+            800 SW Jackson, Suite 1414<br />
+            Topeka, Kansas 66612-1244<br />
+            www.pharmacy.ks.gov (785) 296-4056<br />
+            pharmacy@ks.gov Fax (785) 296-8420
+          </div>
+          <div className="flex w-[30%] flex-col items-center justify-center border-l border-black bg-rose-200 px-2 text-center print:bg-rose-200">
+            <div className="text-sm font-bold">{formTitle}</div>
+            <div className="text-sm">{formNumber}</div>
+          </div>
+        </header>
   );
 }
 
