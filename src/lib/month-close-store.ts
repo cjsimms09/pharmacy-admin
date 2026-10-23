@@ -215,21 +215,22 @@ export async function purchasesCheck(month: string): Promise<CloseCheck | null> 
   }
 }
 
-/** The daily payment-type reports and card batches for the month; only the ones with a day missing, and none before the month has ended. */
+/**
+ * The daily payment-type report for the month; only if a day is missing, and none before the month has ended.
+ *
+ * Not the card batch: those reached the site only because staff forwarded eight of them by hand on 15 September, the owner has said no
+ * more forwarding rules, and the bank statement proves the card deposits (every line placed). Demanding one for every day would leave
+ * every month waiting on something nobody is going to send.
+ */
 export async function dailyFeedChecks(month: string): Promise<CloseCheck[]> {
   try {
-    const { daysWithoutPaymentReport, cardDaysWithoutBatch, judgeDailyFeeds } = await import("./daily-feeds");
+    const { daysWithoutPaymentReport, judgeDailyFeeds } = await import("./daily-feeds");
     const from = `${month}-01`;
     const to = endOf(month);
     const rows = (await db.select({ periodFrom: schema.salesByPayment.periodFrom, periodTo: schema.salesByPayment.periodTo, cardNetCents: schema.salesByPayment.cardNetCents }).from(schema.salesByPayment)).filter(
       (r) => r.periodTo >= from && r.periodFrom <= to,
     );
-    const batches = await db.select({ on: schema.cashReceipts.receivedOn }).from(schema.cashReceipts).where(like(schema.cashReceipts.sourceKey, "card-batch|%"));
-    const gaps = judgeDailyFeeds({
-      month,
-      payment: daysWithoutPaymentReport(month, rows),
-      cards: cardDaysWithoutBatch(rows, batches.map((b) => b.on).filter((d): d is string => !!d), month),
-    });
+    const gaps = judgeDailyFeeds({ month, payment: daysWithoutPaymentReport(month, rows) });
     return gaps.map((g) => ({ key: g.key, name: g.name, done: false, says: g.says, gate: "document" as const }));
   } catch {
     /* A comparison that could not run is not a pass and not a failure of the month: the strip simply does not ask. */

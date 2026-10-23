@@ -1,10 +1,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { daysWithoutPaymentReport, cardDaysWithoutBatch, sellingWeekdays, eachDay, judgeDailyFeeds, sayDays } from "../src/lib/daily-feeds";
+import { daysWithoutPaymentReport, sellingWeekdays, eachDay, judgeDailyFeeds, sayDays } from "../src/lib/daily-feeds";
 
 /*
- * September 2026: the payment-type report was on file for 16 days and absent for nine weekdays, the card batch absent for 14, and the
- * month-close strip read closed. Every amount and day below is invented to the same shape.
+ * September 2026: the payment-type report was on file for 16 days and absent for nine weekdays, and the month-close strip read closed.
+ * The card batch is deliberately not asked for: it arrives only when forwarded by hand, and the bank statement proves the card deposits. Every amount and day below is invented to the same shape.
  */
 describe("the days a month is open to sell", () => {
   test("weekdays, less the holidays a wholesaler keeps", () => {
@@ -33,27 +33,16 @@ describe("weekdays no payment-type report covers", () => {
   });
 });
 
-describe("card days with no batch", () => {
-  const r = (d: string, card: number) => ({ periodFrom: d, periodTo: d, cardNetCents: card });
-  test("only a day the till took cards on, and only a day with no batch", () => {
-    const reports = [r("2026-09-15", 360_000), r("2026-09-16", 0), r("2026-09-17", 559_991)];
-    assert.deepEqual(cardDaysWithoutBatch(reports, ["2026-09-17"], "2026-09"), ["2026-09-15"]);
-  });
-  test("a report that spans days is not judged for a batch, because one batch cannot be matched to it", () => {
-    assert.deepEqual(cardDaysWithoutBatch([{ periodFrom: "2026-09-01", periodTo: "2026-09-14", cardNetCents: 1_000_000 }], [], "2026-09"), []);
-  });
-});
-
 describe("what it says", () => {
   test("it names the days and the report to pull, once for the range", () => {
-    const g = judgeDailyFeeds({ month: "2026-09", payment: ["2026-09-01", "2026-09-02", "2026-09-14"], cards: [] });
+    const g = judgeDailyFeeds({ month: "2026-09", payment: ["2026-09-01", "2026-09-02", "2026-09-14"] });
     assert.equal(g.length, 1);
     assert.match(g[0].says, /No payment-type report is on file for 1, 2 and 14 Sep/);
     assert.match(g[0].says, /System Sales Totals By Payment Type for 2026-09-01 to 2026-09-14/);
     assert.match(g[0].says, /one report can cover the whole range/);
   });
   test("a month with every day on file adds nothing", () => {
-    assert.deepEqual(judgeDailyFeeds({ month: "2026-09", payment: [], cards: [] }), []);
+    assert.deepEqual(judgeDailyFeeds({ month: "2026-09", payment: [] }), []);
   });
   test("days read aloud with their month", () => {
     assert.equal(sayDays("2026-09", ["2026-09-15"]), "15 Sep");

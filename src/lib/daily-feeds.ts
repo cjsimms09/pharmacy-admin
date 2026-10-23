@@ -3,11 +3,11 @@ import { wholesalerHolidays, listDays } from "./wholesaler-purchases";
 /**
  * Whether each day of a month has the daily reports the books are proved against.
  *
- * Two daily reports prove the till and the cards: PioneerRx's payment-type report (what each day took, by how it was paid) and the
- * processor's card batch (what the cards will deposit). In September 2026 the payment-type report was on file for 16 days and absent
- * for nine weekdays (1, 2, 3, 4, 8, 9, 10, 11, 14), the card batch was on file for 8 and absent for 14, and nothing said so: the
- * month-close strip read "closed". Revenue and cards for those days were unproved, and the claims-against-till comparison could not
- * be made for the first half of the month.
+ * PioneerRx's payment-type report (what each day took, by how it was paid) proves the till. In September 2026 it was on file for 16 days
+ * and absent for nine weekdays (1, 2, 3, 4, 8, 9, 10, 11, 14), and nothing said so: the month-close strip read "closed". Revenue for
+ * those days was unproved, and the claims-against-till comparison could not be made for the first half of the month.
+ *
+ * The card batch is deliberately not asked for. It arrives only when somebody forwards it, and the bank statement proves the card deposits.
  *
  * Pure. A report that covers a range (PioneerRx can be asked for 1 to 14 September in one report) covers every day in it.
  */
@@ -43,25 +43,16 @@ export function daysWithoutPaymentReport(month: string, reports: { periodFrom: s
   return sellingWeekdays(month).filter((d) => !covered.has(d));
 }
 
-/** Days the till says cards were taken and no card batch is on file for. */
-export function cardDaysWithoutBatch(reports: { periodFrom: string; periodTo: string; cardNetCents: number }[], batchDays: Iterable<string>, month: string): string[] {
-  const have = new Set(batchDays);
-  return reports
-    .filter((r) => r.periodFrom === r.periodTo && r.periodFrom.startsWith(month) && r.cardNetCents > 0 && !have.has(r.periodFrom))
-    .map((r) => r.periodFrom)
-    .sort();
-}
-
 /** "9 weekdays, 1 to 4 and 8 to 11 and 14", written plainly: the days as a list. */
 export function sayDays(month: string, days: string[]): string {
   const name = new Date(`${month}-01T00:00:00Z`).toLocaleString("en-US", { month: "short", timeZone: "UTC" });
   return `${listDays(days)} ${name}`;
 }
 
-export type FeedGap = { key: "payment_type_daily" | "card_batches"; name: string; days: string[]; says: string };
+export type FeedGap = { key: "payment_type_daily"; name: string; days: string[]; says: string };
 
-export function judgeDailyFeeds(input: { month: string; payment: string[]; cards: string[] }): FeedGap[] {
-  const { month, payment, cards } = input;
+export function judgeDailyFeeds(input: { month: string; payment: string[] }): FeedGap[] {
+  const { month, payment } = input;
   const out: FeedGap[] = [];
   if (payment.length > 0) {
     const first = payment[0];
@@ -73,14 +64,6 @@ export function judgeDailyFeeds(input: { month: string; payment: string[]; cards
       says:
         `No payment-type report is on file for ${sayDays(month, payment)}, so what the till took on those days is unproved. ` +
         `In PioneerRx run System Sales Totals By Payment Type for ${first} to ${last} and send it to the mailbox: one report can cover the whole range.`,
-    });
-  }
-  if (cards.length > 0) {
-    out.push({
-      key: "card_batches",
-      name: "The card batch for every day cards were taken",
-      days: cards,
-      says: `The till took cards on ${sayDays(month, cards)} and no card batch report is on file for ${cards.length === 1 ? "it" : "them"}, so those card takings cannot be checked against what the processor deposits.`,
     });
   }
   return out;
