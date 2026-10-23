@@ -72,3 +72,35 @@ describe("a refusal stops being reported the moment it is fixed", () => {
     assert.equal(refusalsWorthReporting([msg({})], []).length, 1);
   });
 });
+
+/*
+ * A buying group's newsletter, a .docx, sat on Today as "1 message arrived and was turned away" at the level that means act now.
+ * Nothing that feeds the books arrives as a Word or PowerPoint file. Every value is invented.
+ */
+describe("a newsletter is not a feed that failed", () => {
+  const notice = (reason: string) => msg({ fromAddress: "news@buyinggroup.example", subject: "New Deal Update", reason, status: "ignored" });
+
+  test("a message whose only declined file is a Word or PowerPoint document is not reported", () => {
+    assert.equal(wasDeclined(notice("Nothing on this message was a type this reads: Official Communication.docx (not a type this reads).")), false);
+    assert.equal(wasDeclined(notice("Nothing on this message was a type this reads: Deck.pptx (not a type this reads); Notes.doc (not a type this reads).")), false);
+  });
+
+  test("a spreadsheet, a PDF or an unknown type that was declined still is", () => {
+    assert.equal(wasDeclined(notice("Nothing on this message was a type this reads: Report.xlsx (not a type this reads).")), true);
+    assert.equal(wasDeclined(notice("Nothing on this message was a type this reads: Invoice.pdf (not a type this reads).")), true);
+  });
+
+  test("a notice that arrives with a real report that was declined is still reported", () => {
+    assert.equal(wasDeclined(notice("Nothing on this message was a type this reads: Update.docx (not a type this reads); Statement.csv (not a type this reads).")), true);
+  });
+
+  test("a file refused for its size, or refused at the door, is reported whatever it is", () => {
+    assert.equal(wasDeclined(notice("Attachment too large: Update.docx (too large).")), true);
+    assert.equal(wasDeclined(msg({ status: "rejected", reason: "Update.docx (not a type this reads)" })), true);
+  });
+
+  test("so the alert does not raise for it", () => {
+    const m = notice("Nothing on this message was a type this reads: Official Communication.docx (not a type this reads).");
+    assert.deepEqual(refusalsWorthReporting([m], []), []);
+  });
+});

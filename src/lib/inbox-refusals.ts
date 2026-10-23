@@ -43,10 +43,26 @@ export type SweptMessage = {
  */
 export const MIN_SUBJECT_MATCH = 12;
 
+/**
+ * Documents people send to be read, not to be filed: Word and PowerPoint. No report, invoice or statement this pharmacy depends on
+ * comes as one, so a message whose only declined files are these is a newsletter or a notice. On 23 October 2026 a buying group's
+ * "New Deal Update" .docx sat on Today as "1 message arrived and was turned away", at the level that means act now, and the owner
+ * had to say it was wrong.
+ */
+const NOT_A_FEED = new Set(["doc", "docx", "ppt", "pptx", "rtf", "odt", "odp"]);
+
+/** The extensions of the files a "not a type this reads" reason names: "(name.docx (not a type this reads)". */
+export function declinedExtensions(reason: string | null | undefined): string[] {
+  return [...String(reason ?? "").matchAll(/\.([A-Za-z0-9]{2,5})\s*\(/g)].map((m) => m[1].toLowerCase());
+}
+
 /** Whether something was actually offered and declined, rather than nothing having been attached. */
 export function wasDeclined(m: SweptMessage): boolean {
   if (m.status === "rejected") return true;
-  return /type this reads|too large|refused/i.test(m.reason ?? "");
+  if (!/type this reads|too large|refused/i.test(m.reason ?? "")) return false;
+  const named = declinedExtensions(m.reason);
+  if (named.length > 0 && named.every((e) => NOT_A_FEED.has(e)) && !/too large|refused/i.test(m.reason ?? "")) return false;
+  return true;
 }
 
 export function refusalsWorthReporting(turnedAway: SweptMessage[], stored: SweptMessage[]): SweptMessage[] {
