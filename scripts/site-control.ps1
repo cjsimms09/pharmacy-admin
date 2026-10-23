@@ -11,6 +11,7 @@
 #   -DryRun          say what would be done and do none of it
 param(
   [ValidateSet("Update", "Start")] [string]$Action = "Update",
+  [switch]$OnlyIfNewer,
   [switch]$DryRun
 )
 
@@ -99,6 +100,21 @@ if ($Action -eq "Start") {
 }
 
 # ── Update ───────────────────────────────────────────────────────────
+if ($OnlyIfNewer) {
+  # What is built is recorded in .next\source-stamp as "<commit>:<lockfile time>"; what is waiting is what GitHub holds.
+  $branch = (git rev-parse --abbrev-ref HEAD).Trim()
+  git fetch origin $branch 2>$null
+  $head = (git rev-parse HEAD).Trim()
+  $remoteHead = (git rev-parse "origin/$branch").Trim()
+  $stampFile = Join-Path $root ".next\source-stamp"
+  $built = if (Test-Path $stampFile) { ((Get-Content $stampFile -Raw) -split ":")[0].Trim() } else { "" }
+  if ($head -eq $remoteHead -and $built -eq $head) {
+    Say "Nothing new is waiting: the site is already running $($head.Substring(0, 8))."
+    exit 0
+  }
+  Say "Something new is waiting. Updating."
+}
+
 Say "Your data is never touched by an update: it lives in the data folder, which is not part of the code."
 
 # The request the launcher looks for when the site stops. It is also how the site's own "Install and restart" button asks.
