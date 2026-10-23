@@ -50,14 +50,16 @@ const base: C650Data = {
   rca: null,
   cap: null,
 };
-const text = (n: number) => sentence.repeat(Math.ceil(n / sentence.length)).slice(0, n);
+/** A text of this many printed lines, each short enough never to wrap, so the count does not depend on the type size. */
+const lines = (n: number) => Array.from({ length: n }, (_, i) => `${i + 1}. The label was read at the counter and the bag was handed over without a second check.`).join("\n");
 
 const cases: { label: string; d: C650Data; pages: number }[] = [
   { label: "empty form", d: { ...base, people: base.people.map(() => ({ name: "", license: "", reviewedOn: "", reviewedBy: "" })) }, pages: 2 },
-  { label: "short RCA and CAP", d: { ...base, rca: text(600), cap: text(600) }, pages: 2 },
-  { label: "largest at normal type (2,800)", d: { ...base, rca: text(1400), cap: text(1400) }, pages: 2 },
-  { label: "largest at small type (4,400)", d: { ...base, rca: text(2200), cap: text(2200) }, pages: 2 },
-  { label: "too long for the boxes (5,000)", d: { ...base, rca: text(2500), cap: text(2500) }, pages: 3 },
+  { label: "short RCA and CAP", d: { ...base, rca: lines(6), cap: lines(6) }, pages: 2 },
+  { label: "fills the boxes at the form's own size (19 lines each)", d: { ...base, rca: lines(19), cap: lines(19) }, pages: 2 },
+  { label: "needs the middle size (23 lines each)", d: { ...base, rca: lines(23), cap: lines(23) }, pages: 2 },
+  { label: "needs the smallest size (25 lines each)", d: { ...base, rca: lines(25), cap: lines(25) }, pages: 2 },
+  { label: "too long for the boxes (28 lines each)", d: { ...base, rca: lines(28), cap: lines(28) }, pages: 3 },
 ];
 
 async function main() {
