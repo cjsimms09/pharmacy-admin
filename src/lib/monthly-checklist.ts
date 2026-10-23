@@ -199,8 +199,11 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
   /* ── 3. The bank statement ─────────────────────────────────────── */
   const lines = await db.query.bankLines.findMany({
     where: and(gte(schema.bankLines.on, from), lte(schema.bankLines.on, to)),
-    columns: { amountCents: true },
+    columns: { amountCents: true, on: true },
   });
+  const { bankCoverage } = await import("./bank-coverage");
+  const { endOf } = await import("./month-close");
+  const covered = bankCoverage(month, lines.map((l) => l.on), endOf(month));
   items.push({
     key: "bank_statement",
     name: "Bank statement for the operating account",
@@ -218,7 +221,7 @@ export async function monthlyChecklist(month: string): Promise<MonthlyChecklist>
      */
     from: "Emprise — the scanned PDF, which is the only form it comes in",
     done: lines.length > 0,
-    says: lines.length > 0 ? `${lines.length} lines read` : "nothing is reconciled against the bank",
+    says: lines.length > 0 ? `${lines.length} lines read${covered ? `, ${covered.says}` : ""}` : "nothing is reconciled against the bank",
     cents: null,
   });
 

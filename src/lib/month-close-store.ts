@@ -75,6 +75,9 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
       c.execute('select placed_as as p, count(*) as n, sum(amount_cents) as cents from bank_lines where "on" >= ? and "on" <= ? group by placed_as', [from, to]),
     ]);
     const num = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
+    const { bankCoverage } = await import("./bank-coverage");
+    const onDates = await c.execute('select "on" as d from bank_lines where "on" >= ? and "on" <= ?', [from, to]);
+    const covered = bankCoverage(month, onDates.rows.map((r) => String(r.d)), to);
     let total = 0;
     let unplaced = 0;
     let unplacedCents = 0;
@@ -94,7 +97,7 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
         total === 0
           ? "No bank line is on file for the month, so there is nothing to tie to."
           : unplaced === 0
-            ? `All ${total} bank lines are accounted for.`
+            ? `All ${total} bank lines are accounted for${covered && !covered.coversMonth ? ` (${covered.says})` : ""}.`
             : `${unplaced} of ${total} bank lines are money nothing explains, $${(unplacedCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} between them.`,
       gate: "money",
     });
