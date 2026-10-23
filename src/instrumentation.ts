@@ -670,6 +670,18 @@ export async function register() {
     await whenIdle("pioneer", pioneerTick, { evenWhenBusy: true });
     await whenIdle("invoice-lines", invoiceLinesTick);
     /*
+     * Reports a reader refused, read again once per update, so a fix to a reader does not wait for somebody to press a button.
+     * Before the morning check, which judges what this mends. See lib/held-reread.ts.
+     */
+    await whenIdle("held-reread", async () => {
+      try {
+        const { rereadHeldAfterUpdate } = await import("./lib/held-reread");
+        await rereadHeldAfterUpdate();
+      } catch {
+        /* Its stored result says when it last ran; housework must never take the site down. */
+      }
+    });
+    /*
      * What each supplier's settled draws say about how it collects.
      *
      * `learnCadence` was being run and thrown away, so the site worked out afresh every time when a

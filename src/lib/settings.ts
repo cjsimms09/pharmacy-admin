@@ -428,6 +428,9 @@ export const SETTING_KEYS = [
   /** What the nightly pass could newly say about lines already read: see line-schedule-backfill.ts. */
   "line_schedules_backfill_result",
   "line_schedules_class_result",
+  /** The build refused reports were last read again for, and what came of it: see held-reread.ts. */
+  "held_reread_build",
+  "held_reread_result",
   "state_schedule_result",
   /**
    * The nightly re-read of invoices recorded as not adding up to their printed total.
