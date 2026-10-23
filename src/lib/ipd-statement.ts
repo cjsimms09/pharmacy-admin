@@ -43,6 +43,8 @@ export type IpdSettledInvoice = {
   invoiceCents: number;
   /** What this settlement put against it, which can be part of it. */
   paidCents: number;
+  /** A debit memo IPD charged, settled by the same credit as the invoices; not an invoice this site will hold. */
+  debitMemo?: boolean;
 };
 
 export type IpdSettlement = {
@@ -55,11 +57,17 @@ export type IpdSettlement = {
   creditMemo: { id: string; issuedOn: string; cents: number } | null;
   /** What the invoices come to: the money this settlement moved. */
   paidCents: number;
+  /** The whole credit memo as printed (negative). Larger than `creditMemo.cents` when the memo is applied in more than one part. */
+  memoTotalCents: number;
+  /** Which part of its memo this is, from 1; a memo applied once is part 1. */
+  part: number;
 };
 
 export type IpdStatement = {
   asOf: string | null;
   openInvoices: IpdOpenInvoice[];
+  /** Open invoices the page prints that could not be read: counted, so that "none open" is never said of a page that shows some. */
+  openUnread: number;
   settlements: IpdSettlement[];
   says: string;
 };
@@ -118,21 +126,27 @@ export function readIpdStatement(text: string): IpdRead {
     openInvoices.push({ invoiceNumber: m[1], invoiceDate, dueOn, originalCents, remainingCents });
   }
 
-  /* Then the settlements, each of which must hold together on its own. */
-  const settlements: IpdSettlement[] = [];
-  let current: IpdSettlement | null = null;
-  const finish = (net: number | null): string | null => {
-    if (!current) return null;
-    const credit = current.creditMemo?.cents ?? 0;
-    if (credit === 0) return `the ${current.checkDate} settlement names no credit memo, so what paid it is not on the statement`;
-    if (current.paidCents + credit !== 0) {
-      return `the ${current.checkDate} settlement pays ${money(current.paidCents)} against a credit of ${money(credit)}, which is not nought`;
-    }
-    if (net !== null && net !== 0) return `the ${current.checkDate} settlement prints a net of ${money(net)} rather than nought`;
-    settlements.push(current);
-    current = null;
-    return null;
+  /*
+   * Then the settlements, each of which must hold together on its own.
+   *
+   * A settlement is one credit memo applied against the rows it paid. The statement prints them in order (rows, then the
+   * credit, then a net of nought), and two things in it break that order, so the rows are collected first and shared out
+   * by arithmetic afterwards: a row that pays a debit memo carries a reference ending DM rather than a bare number, and a
+   * credit applied in two parts prints its second credit before the rows that credit paid, under one heading.
+   * Which rows belong to which credit is then whatever makes each credit's share equal the rows given to it, to the
+   * cent, in the order printed; where no split does, the statement is refused and says which block.
+   */
+  type Raw = {
+    reference: string;
+    checkDate: string;
+    items: IpdSettledInvoice[];
+    credits: { totalCents: number; line: string; id: string; issuedOn: string; appliedCents: number | null; prefix: string | null }[];
+    nets: number[];
   };
+  const groups: Raw[] = [];
+  let g: Raw | null = null;
+  let pending: { date: string | null; cents: number } | null = null;
+  let awaitingMemo = false;
 
   for (const raw of lines) {
     const line = raw.trim();
@@ -145,21 +159,38 @@ export function readIpdStatement(text: string): IpdRead {
      */
     const head = /^([A-Za-z][A-Za-z0-9.\/-]{0,20})\s*(\d{2}\/\d{2}\/\d{4})$/.exec(line);
     if (head && !/credits\s+used|amount\s+due|as\s+of|statement|check\s+date|inv\.\s*date|payment\s*ref/i.test(line)) {
-      const problem = finish(null);
-      if (problem) return { ok: false, why: `IPD statement: ${problem}.` };
+      if (pending) return { ok: false, why: `IPD statement: 1 invoice row has no number against it.` };
       const checkDate = iso(head[2]);
       if (!checkDate) return { ok: false, why: `IPD statement: a settlement's date could not be read: "${line.slice(0, 30)}".` };
-      current = { reference: head[1].trim(), checkDate, invoices: [], creditMemo: null, paidCents: 0 };
+      g = { reference: head[1].trim(), checkDate, items: [], credits: [], nets: [] };
+      groups.push(g);
+      awaitingMemo = false;
       continue;
     }
-    if (!current) continue;
+    if (!g) continue;
 
     const invoiceRow = /^(\d{2}\/\d{2}\/\d{4})I\s*(-?[\d,]+\.\d{2})$/.exec(line);
     if (invoiceRow) {
       const invoiceDate = iso(invoiceRow[1]);
       const invoiceCents = cents(invoiceRow[2]);
       if (!invoiceDate || invoiceCents === null) return { ok: false, why: `IPD statement: an invoice row could not be read: "${line.slice(0, 30)}".` };
-      current.invoices.push({ invoiceNumber: "", invoiceDate, invoiceCents, paidCents: 0 });
+      if (pending) return { ok: false, why: `IPD statement: 1 invoice row has no number against it.` };
+      pending = { date: invoiceDate, cents: invoiceCents };
+      continue;
+    }
+
+    /* The same row when the text layer put its date on a line of its own, below it. */
+    const undated = /^I\s*(-?[\d,]+\.\d{2})$/.exec(line);
+    if (undated && !pending) {
+      const c = cents(undated[1]);
+      if (c === null) return { ok: false, why: `IPD statement: an invoice row could not be read: "${line.slice(0, 30)}".` };
+      pending = { date: null, cents: c };
+      continue;
+    }
+    const bareDate = /^(\d{2}\/\d{2}\/\d{4})$/.exec(line);
+    if (bareDate && pending && pending.date === null) {
+      pending.date = iso(bareDate[1]);
+      if (!pending.date) return { ok: false, why: `IPD statement: an invoice row's date could not be read: "${line.slice(0, 30)}".` };
       continue;
     }
 
@@ -167,50 +198,111 @@ export function readIpdStatement(text: string): IpdRead {
     if (creditRow) {
       const c = cents(creditRow[2]);
       if (c === null) return { ok: false, why: `IPD statement: a credit row could not be read: "${line.slice(0, 30)}".` };
-      current.creditMemo = { id: "", issuedOn: "", cents: c };
+      g.credits.push({ totalCents: c, line: "", id: "", issuedOn: "", appliedCents: null, prefix: null });
+      awaitingMemo = true;
       continue;
     }
 
     /*
-     * The second half of a row, which the text layer prints as its own line: the number and what was put against it.
-     * A credit memo's id carries the day it issued, and that day — not the settlement's — is what banks the credit.
+     * The second half of a credit's row: the memo's number and what this settlement put against it. A credit memo's id
+     * carries the day it issued, and that day — not the settlement's — is what banks the credit. When a settlement pays a
+     * share of a credit the figure can come out of the text layer cut short ("-16,562."), and is then worked out below
+     * rather than read.
      */
-    const memoRow = /^(\d{4})(\d{8})CM\s*(-?[\d,]+\.\d{2})$/.exec(line);
-    if (memoRow && current.creditMemo) {
-      const c = cents(memoRow[3]);
+    const memoRow = /^(\d{4})(\d{8})CM\s*(-?[\d,]+\.(?:\d{2})?)$/.exec(line);
+    if (memoRow && awaitingMemo) {
+      const credit = g.credits[g.credits.length - 1];
       const issuedOn = `${memoRow[2].slice(0, 4)}-${memoRow[2].slice(4, 6)}-${memoRow[2].slice(6, 8)}`;
-      if (c === null || c !== current.creditMemo.cents) {
-        return { ok: false, why: `IPD statement: the ${current.checkDate} credit memo prints ${line.slice(0, 30)}, which is not the credit above it.` };
-      }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(issuedOn) || !iso(`${Number(issuedOn.slice(5, 7))}/${Number(issuedOn.slice(8, 10))}/${issuedOn.slice(0, 4)}`)) {
         return { ok: false, why: `IPD statement: a credit memo's id carries no date this site can read.` };
       }
-      current.creditMemo = { id: memoRow[1] + memoRow[2], issuedOn, cents: c };
+      credit.id = memoRow[1] + memoRow[2];
+      credit.issuedOn = issuedOn;
+      credit.line = line.slice(0, 30);
+      if (/\.\d{2}$/.test(memoRow[3])) credit.appliedCents = cents(memoRow[3]);
+      else credit.prefix = memoRow[3].replace(/^-/, "");
+      awaitingMemo = false;
       continue;
     }
 
-    const payRow = /^(\d{3,12})\s+(-?[\d,]+\.\d{2})$/.exec(line);
+    /* The second half of an invoice row: its number, or a debit memo's reference, and what was put against it. */
+    const payRow = /^(\d{3,12}(?:DM)?)\s+(-?[\d,]+\.\d{2})$/.exec(line);
     if (payRow) {
       const paid = cents(payRow[2]);
-      const open = current.invoices.find((v) => v.invoiceNumber === "");
-      if (paid === null || !open) return { ok: false, why: `IPD statement: a payment row has no invoice above it: "${line.slice(0, 30)}".` };
-      if (Math.abs(paid) > Math.abs(open.invoiceCents)) {
-        return { ok: false, why: `IPD statement: ${money(paid)} is put against an invoice of ${money(open.invoiceCents)}, which is more than it is for.` };
+      if (paid === null || !pending || !pending.date) return { ok: false, why: `IPD statement: a payment row has no invoice above it: "${line.slice(0, 30)}".` };
+      if (Math.abs(paid) > Math.abs(pending.cents)) {
+        return { ok: false, why: `IPD statement: ${money(paid)} is put against an invoice of ${money(pending.cents)}, which is more than it is for.` };
       }
-      open.invoiceNumber = payRow[1];
-      open.paidCents = paid;
-      current.paidCents += paid;
+      g.items.push({ invoiceNumber: payRow[1], invoiceDate: pending.date, invoiceCents: pending.cents, paidCents: paid, debitMemo: payRow[1].endsWith("DM") });
+      pending = null;
       continue;
     }
 
     const netRow = /^(-?[\d,]+\.\d{2})$/.exec(line);
-    if (netRow) {
-      const problem = finish(cents(netRow[1]));
-      if (problem) return { ok: false, why: `IPD statement: ${problem}.` };
+    if (netRow) g.nets.push(cents(netRow[1]) ?? 0);
+  }
+  if (pending) return { ok: false, why: `IPD statement: 1 invoice row has no number against it.` };
+
+  const settlements: IpdSettlement[] = [];
+  for (const grp of groups) {
+    if (grp.credits.length === 0) return { ok: false, why: `IPD statement: the ${grp.checkDate} settlement names no credit memo, so what paid it is not on the statement.` };
+    if (grp.credits.some((c) => c.id === "")) return { ok: false, why: `IPD statement: a credit in the ${grp.checkDate} settlement has no memo number under it.` };
+    const bad = grp.nets.find((n) => n !== 0);
+    if (bad !== undefined) return { ok: false, why: `IPD statement: the ${grp.checkDate} settlement prints a net of ${money(bad)} rather than nought.` };
+
+    /* What each credit put against the rows: printed where the text has it, otherwise the memo's total less its other parts. */
+    for (const c of grp.credits) {
+      if (c.appliedCents !== null) continue;
+      const others = grp.credits.filter((o) => o !== c && o.id === c.id);
+      if (others.some((o) => o.appliedCents === null)) return { ok: false, why: `IPD statement: two parts of credit memo ${c.id} print no amount, so neither can be worked out.` };
+      const worked = c.totalCents - others.reduce((n, o) => n + (o.appliedCents ?? 0), 0);
+      if (c.prefix !== null && !money(worked).replace(/^-?\$/, "").startsWith(c.prefix)) {
+        return { ok: false, why: `IPD statement: credit memo ${c.id} prints ${c.prefix} where its total less its other part is ${money(worked)}.` };
+      }
+      c.appliedCents = worked;
+    }
+    for (const c of grp.credits) {
+      const parts = grp.credits.filter((o) => o.id === c.id);
+      if (parts.length === 1 && c.appliedCents !== c.totalCents) {
+        return { ok: false, why: `IPD statement: the ${grp.checkDate} credit memo prints ${c.line}, which is not the credit above it.` };
+      }
+      if (parts.reduce((n, o) => n + (o.appliedCents ?? 0), 0) !== c.totalCents) {
+        return { ok: false, why: `IPD statement: the parts of credit memo ${c.id} do not come to the credit printed above it.` };
+      }
+    }
+
+    /* Then the rows, in the order printed, shared out so that each credit's share is exactly what its rows come to. */
+    let at = 0;
+    const partOf = new Map<string, number>();
+    for (const c of grp.credits) {
+      const applied = c.appliedCents ?? 0;
+      const taken: IpdSettledInvoice[] = [];
+      let sum = 0;
+      while (at < grp.items.length && sum + applied < 0) {
+        taken.push(grp.items[at]);
+        sum += grp.items[at].paidCents;
+        at++;
+      }
+      if (sum + applied !== 0) {
+        return { ok: false, why: `IPD statement: the ${grp.checkDate} settlement pays ${money(sum)} against a credit of ${money(applied)}, which is not nought.` };
+      }
+      const part = (partOf.get(c.id) ?? 0) + 1;
+      partOf.set(c.id, part);
+      settlements.push({
+        reference: grp.reference,
+        checkDate: grp.checkDate,
+        invoices: taken,
+        creditMemo: { id: c.id, issuedOn: c.issuedOn, cents: applied },
+        memoTotalCents: c.totalCents,
+        part,
+        paidCents: sum,
+      });
+    }
+    if (at < grp.items.length) {
+      const n = grp.items.length - at;
+      return { ok: false, why: `IPD statement: ${n} row${n === 1 ? "" : "s"} in the ${grp.checkDate} settlement ${n === 1 ? "is" : "are"} paid by no credit.` };
     }
   }
-  const problem = finish(null);
-  if (problem) return { ok: false, why: `IPD statement: ${problem}.` };
 
   /*
    * A statement with no settlements is a statement, not a failure: a month paid entirely by ACH applies no credit and
@@ -221,13 +313,19 @@ export function readIpdStatement(text: string): IpdRead {
     return { ok: false, why: "IPD statement: it prints a credits section and no settlement could be read from it." };
   }
   if (settlements.length === 0 && openInvoices.length === 0) return { ok: false, why: "IPD statement: neither a settlement nor an open invoice could be read from it." };
-  const unnamed = settlements.flatMap((s) => s.invoices).filter((v) => v.invoiceNumber === "");
-  if (unnamed.length) return { ok: false, why: `IPD statement: ${unnamed.length} invoice row${unnamed.length === 1 ? " has" : "s have"} no number against them.` };
 
   const openCents = openInvoices.reduce((n, v) => n + v.remainingCents, 0);
+  /*
+   * Open invoices the page prints but whose due date and balance the text layer dropped (October 2026 printed two as a reference, one date
+   * and the original amount). They are counted rather than left out, because "0 invoices still open" would be false.
+   */
+  const printedOpen = lines.filter((l) => /^\d{3,12}\d{2}\/\d{2}\/\d{4}.*Invoice\s+-?[\d,]+\.\d{2}/.test(l.trim())).length;
+  const openUnread = Math.max(0, printedOpen - openInvoices.length);
   const says =
     `IPD statement${asOf ? ` as of ${asOf}` : ""}: ${settlements.length} settlement${settlements.length === 1 ? "" : "s"} ` +
     `(${settlements.map((s) => `${money(s.paidCents)} on ${s.checkDate}`).join(", ")}), each netting to nought against its credit memo; ` +
-    `${openInvoices.length} invoice${openInvoices.length === 1 ? "" : "s"} still open, ${money(openCents)}.`;
-  return { ok: true, statement: { asOf, openInvoices, settlements, says } };
+    (openUnread > 0
+      ? `${openInvoices.length} invoice${openInvoices.length === 1 ? "" : "s"} still open that could be read, ${money(openCents)}, and ${openUnread} more printed without a due date or balance, so what is still owed is not taken from this page.`
+      : `${openInvoices.length} invoice${openInvoices.length === 1 ? "" : "s"} still open, ${money(openCents)}.`);
+  return { ok: true, statement: { asOf, openInvoices, openUnread, settlements, says } };
 }

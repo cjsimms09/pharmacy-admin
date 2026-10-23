@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, gte, like, lte } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { audit } from "./audit";
 import { readIpdStatement } from "./ipd-statement";
@@ -91,7 +91,7 @@ export async function fileIpdStatement(
         creditMemo: settlement.creditMemo?.id ?? null,
         source: "ipd_statement",
         basis: "document",
-        sourceKey: `ipd_statement|${settlement.reference}|${settlement.checkDate}|${settlement.creditMemo?.id ?? ""}`,
+        sourceKey: `ipd_statement|${settlement.reference}|${settlement.checkDate}|${settlement.creditMemo?.id ?? ""}${settlement.part > 1 ? `|part${settlement.part}` : ""}`,
         documentId: input.documentId,
         notes:
           `From IPD's statement${input.fileName ? ` (${input.fileName})` : ""}: ${settlement.invoices.length} invoice${settlement.invoices.length === 1 ? "" : "s"} ` +
@@ -113,16 +113,28 @@ export async function fileIpdStatement(
      * A receipt already on file for that day with a different amount is named rather than added to: two credits of
      * different sizes on one day is a question, not a sum (session 1's rule).
      */
-    const memo = settlement.creditMemo;
+    /*
+     * A memo applied in two parts is one credit, banked once at the whole of it: the first part banks it and the rest do not.
+     * The shares of it that each settlement put against invoices are the supplier payments above.
+     */
+    const whole = settlement.creditMemo ? { ...settlement.creditMemo, cents: settlement.memoTotalCents } : null;
+    const memo = settlement.part === 1 ? whole : null;
     if (memo) {
-      const onThatDay = await db.query.cashReceipts.findFirst({
-        where: and(like(schema.cashReceipts.sourceKey, `rxrescue-memo|${memo.issuedOn}|%`), eq(schema.cashReceipts.outOfBooks, false)),
-        columns: { amountCents: true, sourceKey: true },
+      /*
+       * Within a week either side, not only the same day. The RxRescue report and IPD's own memo are one credit, and when they
+       * agree they share a day and an amount, so the key above matches. In October 2026 they did not: each IPD memo was larger
+       * than the report's credit by $547.20, and one was issued two days before the report's. A same-day check let that second
+       * copy through, which would have banked one credit twice.
+       */
+      const day = (n: number) => new Date(Date.parse(`${memo.issuedOn}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+      const near = await db.query.cashReceipts.findFirst({
+        where: and(like(schema.cashReceipts.sourceKey, `rxrescue-memo|%`), gte(schema.cashReceipts.receivedOn, day(-7)), lte(schema.cashReceipts.receivedOn, day(7)), eq(schema.cashReceipts.outOfBooks, false)),
+        columns: { amountCents: true, sourceKey: true, receivedOn: true },
       });
       const key = rxRescueMemoKey(memo.issuedOn, memo.cents);
-      if (onThatDay && onThatDay.sourceKey !== key) {
+      if (near && near.sourceKey !== key) {
         said.push(
-          `A credit of ${money(onThatDay.amountCents)} is already banked for ${memo.issuedOn} and this memo is ${money(Math.abs(memo.cents))}. Nothing was banked: one of the two is not what it says.`,
+          `A credit of ${money(near.amountCents)} is already banked for ${near.receivedOn} and this memo, dated ${memo.issuedOn}, is ${money(Math.abs(memo.cents))}. Nothing was banked: they may be the one credit, and banking both would count it twice.`,
         );
       } else {
         const receipt = await addCashReceipt({
