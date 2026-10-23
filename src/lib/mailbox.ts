@@ -1111,6 +1111,17 @@ ${parsed.html ? String(parsed.html).replace(/<[^>]+>/g, " ") : ""}`;
   } finally {
     await client?.logout().catch(() => {});
   }
+  /*
+   * Lines that still say an invoice is held for confirmation after it has settled, put right on every sweep rather than only on the
+   * nightly pass. An invoice is held on arrival until its lines are read, which settles it within minutes, and that line was
+   * then left telling him to confirm something nobody was waiting on until the next day (an IPC invoice of 21 October 2026).
+   */
+  try {
+    const { refreshHeldInboxLines } = await import("./inbox-held-refresh");
+    await refreshHeldInboxLines();
+  } catch {
+    /* The nightly pass does it again; a sweep must not fail over a wording. */
+  }
   const summary = `${result.stored} stored, ${result.rejected} rejected, ${result.ignored} ignored${result.errors.length ? `, ${result.errors.length} error(s)` : ""}`;
   await setSetting("mail_last_sweep", new Date().toISOString());
   await setSetting("mail_last_result", result.errors.length ? `${summary} — ${result.errors[0]}` : summary);
