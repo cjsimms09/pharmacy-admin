@@ -60,7 +60,8 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   const [s, configured, items, people, suppliers, rules] = await Promise.all([
     getSettings(),
     hasMailPassword(),
-    db.select().from(schema.inboxItems).orderBy(desc(schema.inboxItems.receivedAt)).limit(200),
+    /* The latest 200 are what needs looking at; asking to see the handled ones as well is asking for the whole history. */
+    db.select().from(schema.inboxItems).orderBy(desc(schema.inboxItems.receivedAt)).limit(showDoneParam === "yes" ? 5000 : 200),
     db.query.people.findMany({ where: eq(schema.people.active, true), orderBy: (p, { asc }) => [asc(p.lastName)] }),
     allSuppliers(true),
     senderRules(),
@@ -185,7 +186,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
               Nothing needs you. All {items.length} arrival{items.length === 1 ? " has" : "s have"} been sorted and
               filed.{" "}
               {!showDone && (
-                <Link href="/inbox?done=1" className="text-accent underline">
+                <Link href="/inbox?showDone=yes" className="text-accent underline">
                   Show them anyway
                 </Link>
               )}
