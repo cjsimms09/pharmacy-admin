@@ -16,6 +16,10 @@ before(async () => {
   cleanup = await useScratchDb();
   ({ db, schema } = await import("../src/db"));
   ({ rebateCheck, monthClose } = await import("../src/lib/month-close-store"));
+  /* The suite's template database is shared with tests that do not copy it, so other files' rows can already be in this one. */
+  await db.delete(schema.inboxItems);
+  await db.delete(schema.cashReceipts);
+  await db.delete(schema.expenses);
 });
 after(() => cleanup());
 

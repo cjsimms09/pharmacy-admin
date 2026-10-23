@@ -42,6 +42,7 @@ describe("once per build, on a scratch database", () => {
     ({ db, schema } = await import("../src/db"));
     ({ rereadHeldAfterUpdate } = await import("../src/lib/held-reread"));
     ({ getSettings } = await import("../src/lib/settings"));
+    await db.delete(schema.inboxItems);
   });
   after(() => cleanup());
 

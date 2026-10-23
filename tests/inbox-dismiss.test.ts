@@ -19,6 +19,8 @@ before(async () => {
   ({ dismissInboxItem } = await import("../src/lib/inbox-dismiss"));
   ({ alreadyOnFile } = await import("../src/lib/mailbox"));
   ({ storyOf } = await import("../src/lib/inbox-line"));
+  /* The suite's template database is shared with tests that do not copy it, so other files' rows can already be in this one. */
+  await db.delete(schema.inboxItems);
 });
 after(() => cleanup());
 
