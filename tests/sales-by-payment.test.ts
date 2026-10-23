@@ -271,3 +271,35 @@ describe("a prescription sold without billing a plan", () => {
     assert.match(r.ok ? "" : r.why, /does not place/);
   });
 });
+
+/*
+ * A Saturday that took prescriptions and nothing over the counter: no Retail Sales section, so no "Retail Sales Totals:"
+ * row, and a grand total that is the prescriptions alone. Line for line the shape of 17 October 2026, refused as "the Retail
+ * Sales Totals: row is missing" though it added up.
+ */
+const NO_RETAIL = REPORT.split("\r\n")
+  .filter((l) => !/^Retail Sales/.test(l) && !/^OTC,/.test(l))
+  .map((l) => (l.startsWith("Totals:,") ? "Totals:,1.23,20.00,350.77,15.00,0.00,0.00,-25.00,0.00,0.00,1322.00,0.00,0.0000" : l))
+  .join("\r\n");
+
+describe("a day with prescriptions and no retail sales", () => {
+  test("a missing Retail section is a section with nothing in it, because the grand total still adds up", () => {
+    const r = readSalesByPayment(NO_RETAIL);
+    assert.ok(r.ok, r.ok ? "" : r.why);
+    assert.equal(r.report.retailCents, 0);
+    assert.equal(r.report.totalCents, 132_200);
+    assert.equal(r.report.nothingSold, false);
+  });
+
+  test("a page cut off before its Retail section is still refused, because the grand total still holds those sales", () => {
+    const cutOff = NO_RETAIL.replace("\r\nTotals:,1.23,20.00,350.77,15.00,0.00,0.00,-25.00,0.00,0.00,1322.00,0.00,0.0000", "\r\nTotals:,11.23,20.00,448.27,15.00,0.00,0.00,-25.00,0.00,0.00,1422.00,7.50,7.5000");
+    const r = readSalesByPayment(cutOff);
+    assert.equal(r.ok, false);
+    assert.match(r.ok ? "" : r.why, /"Totals:"/);
+  });
+
+  test("a missing Rx section is not let through while the page's total still holds prescriptions", () => {
+    const noRx = REPORT.split("\r\n").filter((l) => !/^Rx /.test(l) && !/^Medicare Part D/.test(l) && !/^Standard Third Party/.test(l)).join("\r\n");
+    assert.equal(readSalesByPayment(noRx).ok, false);
+  });
+});

@@ -245,6 +245,18 @@ export function readSalesByPayment(text: string): SalesByPaymentRead {
     });
     if (Math.abs(sum((p) => p.totalCents) - toCents(s.total)) > 1) problems.push(`"${label}" Totals is ${money(toCents(s.total))} but its rows come to ${money(sum((p) => p.totalCents))}`);
   };
+  /*
+   * A section with no rows prints neither its rows nor its totals row, on a day that sold something else.
+   *
+   * Saturday 17 October 2026 took prescriptions and nothing over the counter, so the page had no Retail Sales section, and
+   * the reader refused it for a missing "Retail Sales Totals:" row. The closed-day rule above covers only a page that is
+   * nil throughout. This covers the rest the same way: a section that printed no row is nil, and the printed grand total
+   * still has to equal the sections that are there (checked below), so a page cut off before a section of real sales still
+   * fails on its grand total and cannot become a quiet zero.
+   */
+  for (const [label, name] of [["Retail Sales Totals:", "retail"], ["Rx Sales Totals:", "rx"], ["Sales Adjustments Totals:", "adjust"]] as const) {
+    if (!stated.has(label) && inSection(name).length === 0) stated.set(label, { payments: COLUMNS.map(() => 0), total: 0, tax: 0 });
+  }
   checkTotals("Retail Sales Totals:", inSection("retail"));
   checkTotals("Rx Sales Totals:", inSection("rx"));
   checkTotals("Sales Adjustments Totals:", inSection("adjust"));
