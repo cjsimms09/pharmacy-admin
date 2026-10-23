@@ -1,4 +1,4 @@
-' Starts the launcher without a visible console window (used by "Install autostart.cmd").
+' Starts the launcher without a visible console window (used by "Set up this computer.cmd" and "Start Pharmacy Admin.cmd").
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 root = fso.GetParentFolderName(fso.GetParentFolderName(WScript.ScriptFullName))

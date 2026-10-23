@@ -14,7 +14,7 @@
  *
  *   node scripts/reopen-session.mjs "Pharmacy 1" <session-id>
  *
- * Started by double-clicking "Reopen Pharmacy 1.cmd" or "Reopen Pharmacy 2.cmd".
+ * Started by double-clicking "Reopen Pharmacy 1.cmd".
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";

@@ -89,7 +89,7 @@ given it is the pharmacy's own data on the pharmacy's own server.
 
 ## Once access is granted
 
-Run **Find the PioneerRx tables.cmd** in the Pharmacy Admin folder with the server name they give:
+Run `scripts/pioneer-discover.ps1` in the Pharmacy Admin folder (the .cmd file that used to start it was removed on 23 October 2026) with the server name they give:
 
     powershell -ExecutionPolicy Bypass -File scripts\pioneer-discover.ps1 -Server DOWNSTAIRS\INSTANCE
 

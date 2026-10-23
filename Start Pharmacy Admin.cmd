@@ -1,10 +1,10 @@
 @echo off
 title Pharmacy Admin
 cd /d "%~dp0"
-echo Starting Pharmacy Admin. Keep this window open while you use the app.
-echo The browser will open automatically at http://localhost:3000
 echo.
-node scripts\launch.mjs
+echo  Opening Pharmacy Admin. If it is not running, this starts it in the background.
 echo.
-echo Pharmacy Admin has stopped. You can close this window.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\site-control.ps1" -Action Start
+echo.
+echo  You can close this window. The site keeps running without it.
 pause

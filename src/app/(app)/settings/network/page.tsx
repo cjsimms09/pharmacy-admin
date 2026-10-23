@@ -225,9 +225,9 @@ export default async function NetworkPage({ searchParams }: { searchParams: Prom
             </p>
             <ol className="ml-5 list-decimal space-y-1 text-sm text-ink-2">
               <li>Open the <b>pharmacy-admin</b> folder (This PC → C: → Users → your name → pharmacy-admin).</li>
-              <li>Find the file named <b>Allow on network</b>.</li>
+              <li>Find the file named <b>Set up this computer</b>.</li>
               <li><b>Right-click</b> it and choose <b>Run as administrator</b>. Click Yes if Windows asks.</li>
-              <li>A black window opens, says “Done”, and waits — press any key to close it.</li>
+              <li>A black window opens with a short list. Type <b>2</b>. It says “Done”; press any key, then type <b>5</b> to close it.</li>
             </ol>
             <p className="mt-2 text-sm text-ink-2">Now try the address from step 1 again on the other computer.</p>
           </section>

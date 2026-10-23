@@ -19,19 +19,19 @@ That's the last command you need. Everything else happens in the app.
 
 Open the `pharmacy-admin` folder (This PC → C: → Users → your name → pharmacy-admin) and double-click **Start Pharmacy Admin**. The first start takes a few minutes (it installs and builds), then the browser opens by itself. The first screen asks you to create the owner login.
 
-Keep the black window open while you use the app. Closing it stops the app.
+The app runs in the background, so the black window can be closed. If the site is already running, this file just opens it. Run it only once at a time: a second copy of the launcher fights the first for port 3000.
 
-**Optional — always on:** double-click **Install autostart** once, and the app starts hidden every time you sign in to Windows. Then just open http://localhost:3000 whenever you need it.
+**Optional — always on:** double-click **Set up this computer** once and type **1**, and the app starts hidden every time you sign in to Windows. Then just open http://localhost:3000 whenever you need it.
 
 The launcher creates the secrets file (`.env`) automatically on first run. **Back it up** together with the `data` folder (Settings → Backups explains).
 
 ## Other computers in the pharmacy
 
-Settings → Network shows the address to type on another computer on the same network (something like `http://192.168.1.20:3000`). The first time, right-click **Allow on network** in the app folder and choose "Run as administrator" so Windows lets the connection through. Traffic stays inside the pharmacy's network.
+Settings → Network shows the address to type on another computer on the same network (something like `http://192.168.1.20:3000`). The first time, right-click **Set up this computer** in the app folder, choose "Run as administrator" and type **2** so Windows lets the connection through. Traffic stays inside the pharmacy's network.
 
 ## Updating
 
-Settings → Updates → **Check for updates** → **Install and restart**. The app pulls the new version from GitHub, rebuilds, and restarts itself in one to three minutes.
+Settings → Updates → **Check for updates** → **Install and restart**. The app pulls the new version from GitHub, rebuilds, and restarts itself in one to three minutes. If the site is stuck or the button is not there, double-click **Update the site** in the app folder: it installs the newest version and restarts the site, which is down for about 10 to 25 minutes. Click it once only.
 
 ## Where the data lives
 

@@ -10,7 +10,7 @@
  *      PowerShell here. The deny rules in `.claude/settings.json` stay in force and win: no force
  *      push, no reading of the data folder through the file tool.
  *   2. Commits made on this machine that had not reached GitHub. Those are erased by the next
- *      "Update Pharmacy Admin.cmd", which resets hard to what GitHub holds. `scripts/deploy.mjs`
+ *      reset or an update that takes only what GitHub holds. `scripts/deploy.mjs`
  *      pushes, then has the launcher install the result.
  *   3. A Claude session that lives in one console window and dies with it. It is registered to
  *      start at sign-in, minimised, continuing its last conversation, with Remote Control on, so
@@ -19,7 +19,7 @@
  * The session running right now cannot read a permissions file written after it started, so it is
  * restarted at the end — `--continue` keeps the conversation — and the phone picks it up again.
  *
- * Run by double-clicking "Let Claude run the site.cmd". Safe to run again; every step is a
+ * Run from "Set up this computer.cmd" (choice 3). Safe to run again; every step is a
  * statement of how things should be, not a change that stacks.
  */
 import { spawn, spawnSync } from "node:child_process";
@@ -96,9 +96,9 @@ function registerClaudeAtSignIn() {
  * anything else on disk is somebody's work in progress and deploy.mjs will name it and stop.
  */
 function commitThisSetup() {
-  const mine = ["Let Claude run the site.cmd", "Work on this with Claude.cmd", "scripts/let-claude-work.mjs", "scripts/claude-here.mjs"];
+  const mine = ["Set up this computer.cmd", "Work on this with Claude.cmd", "scripts/let-claude-work.mjs", "scripts/claude-here.mjs"];
   // No shell: two of these file names carry spaces, and with a shell Node hands the arguments over
-  // unquoted, so "Let Claude run the site.cmd" would arrive as five files git has never heard of.
+  // unquoted, so "Set up this computer.cmd" would arrive as five files git has never heard of.
   const status = spawnSync("git", ["status", "--porcelain", "--", ...mine], { encoding: "utf8" }).stdout.trim();
   if (!status) return;
   step("Committing this setup (Claude was not allowed to)…");
@@ -110,7 +110,7 @@ function commitThisSetup() {
     "machine only, so Claude can push, build and restart here without a hand at",
     "the keyboard; the session registered to start at sign-in with --continue",
     "and Remote Control, so a reboot does not lose it; and the commits sitting",
-    "here pushed and installed, before an Update Pharmacy Admin.cmd could reset",
+    "here pushed and installed, before an update could reset",
     "them away.",
     "",
     "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>",

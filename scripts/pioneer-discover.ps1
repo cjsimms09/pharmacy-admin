@@ -9,7 +9,7 @@
   opened, nothing is written, no lock is taken, and the connection is read-only. The file it
   produces is safe to send on, because it contains no values of any kind.
 
-  Just double-click "Find the PioneerRx tables.cmd". Or from PowerShell, in the app folder:
+  Run it from PowerShell, in the app folder (the .cmd file that used to start it was removed on 23 October 2026):
       powershell -ExecutionPolicy Bypass -File scripts\pioneer-discover.ps1
 #>
 [CmdletBinding()]

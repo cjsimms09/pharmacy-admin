@@ -15,9 +15,8 @@
  * It will not deploy with uncommitted changes on disk. The launcher runs `git checkout -- .` before
  * it builds, which does not leave edits out of the build — it deletes them from the working tree.
  *
- * It will not trigger the launcher until the push has succeeded. "Update Pharmacy Admin.cmd" resets
- * the working copy hard to what GitHub holds, so a commit that is only on this machine is one that
- * the next person to run that file erases, along with the fix in it.
+ * It will not trigger the launcher until the push has succeeded. An update runs `git checkout -- .` and then fast-forwards
+ * to what GitHub holds, so a commit that is only on this machine is one a reset can lose, along with the fix in it.
  *
  * ── How it knows the app is back ──
  *
@@ -185,7 +184,7 @@ async function main() {
   try {
     git(["push", "origin", BRANCH]);
   } catch (e) {
-    fail(`${e.message}\nNothing was deployed: a commit that is not on GitHub is one "Update Pharmacy Admin.cmd" would erase.`);
+    fail(`${e.message}\nNothing was deployed: a commit that is not on GitHub is one an update could lose.`);
   }
   const remote = git(["rev-parse", "--short", `origin/${BRANCH}`]);
   if (remote !== head) fail(`After the push origin/${BRANCH} is ${remote}, not ${head}. Not touching the site until they agree.`);
@@ -212,7 +211,7 @@ async function main() {
       fail(
         `Windows would not let this session stop the app (pid ${holder}), so it is still running the old build (${buildBefore ?? "none"}). ` +
           `${head} is on GitHub and the update request is on file: the launcher installs it the moment the app stops. ` +
-          `Double-click "Stop the old site.cmd" in the pharmacy-admin folder; the site is down for the rebuild, usually 10 to 25 minutes.`,
+          `Double-click "Update the site.cmd" in the pharmacy-admin folder; the site is down for the rebuild, usually 10 to 25 minutes.`,
       );
     }
   } else if (launchers.length > 0) {

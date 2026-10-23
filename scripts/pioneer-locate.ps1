@@ -15,7 +15,7 @@
   Passwords are removed before anything is written. Nothing is connected to and nothing is
   changed; this only reads configuration on this computer.
 
-  Double-click "Find where PioneerRx lives.cmd".
+  Run it from PowerShell, in the app folder (the .cmd file that used to start it was removed on 23 October 2026).
 #>
 [CmdletBinding()]
 param([string]$Out = "pioneer-location.json")
