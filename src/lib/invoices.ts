@@ -2565,6 +2565,9 @@ export async function markInvoicesPaidTogether(
   };
 }
 
+/** Whether a stored document reads as an invoice (true), as something else (false), or has no text to read (null). */
+const adoptVerdicts = new Map<string, boolean | null>();
+
 /**
  * Documents that are supplier invoices but were never filed as one.
  *
@@ -2632,14 +2635,27 @@ export async function adoptableDocuments(): Promise<
      * out at all is a scan, and a scan whose name or title says invoice is still offered, because
      * that is a real invoice with no text layer and there is nothing else to go on.
      */
+    /*
+     * Settled once per stored file, not once per page load.
+     *
+     * The file behind a stored document never changes, so what it reads as does not either. Parsing every candidate PDF on every visit
+     * took the Invoices page about nine seconds, and the candidates are mostly daily wholesaler reports that only ever accumulate, so it
+     * was getting slower each day. Only the verdict is kept, never the text.
+     */
+    const verdictKey = `${d.id}|${d.storageKey}|${d.fileName}|${d.title}`;
+    let readsAsInvoice = adoptVerdicts.get(verdictKey);
     let words = "";
-    try {
-      words = pdfText(await readStoredFile(d.storageKey));
-    } catch {
-      words = "";
+    if (readsAsInvoice === undefined) {
+      try {
+        words = pdfText(await readStoredFile(d.storageKey));
+      } catch {
+        words = "";
+      }
+      readsAsInvoice = words.trim().length > 40 ? classifySupplierDocument(words, d.fileName, d.title).kind === "invoice" : null;
+      adoptVerdicts.set(verdictKey, readsAsInvoice);
     }
-    if (words.trim().length > 40) {
-      if (classifySupplierDocument(words, d.fileName, d.title).kind !== "invoice") continue;
+    if (readsAsInvoice !== null) {
+      if (!readsAsInvoice) continue;
     } else if (!/invoice|\binv\b|packing (list|slip)/i.test(`${d.title} ${d.fileName}`)) {
       // A scan that does not even claim to be an invoice is not offered as one.
       continue;
@@ -3581,6 +3597,12 @@ const NOT_AN_INVOICE: Record<string, { belongsIn: Misfiled["belongsIn"]; word: s
  * which is true of *moving* it and false of *showing* it. So it never appeared anywhere, and the
  * only evidence it existed was a row in the table with no date, no amount and no lines.
  */
+/**
+ * What each stored invoice file reads as, settled once per file. The file behind a stored document never changes, so parsing every filed
+ * invoice on every visit to the Invoices page only made it slower with each invoice added. Only the verdict is kept, never the text.
+ */
+const misfiledVerdicts = new Map<string, Misfiled | null>();
+
 export async function misfiledInVault(): Promise<Misfiled[]> {
   const docs = await db.query.documents.findMany();
   const out: Misfiled[] = [];
@@ -3590,6 +3612,12 @@ export async function misfiledInVault(): Promise<Misfiled[]> {
     if (!/\.pdf$/i.test(d.fileName) && d.mimeType !== "application/pdf") continue;
     // Somebody has already looked at this one and said it is an invoice. Their word settles it.
     if ((d.notes ?? "").includes(CONFIRMED_INVOICE)) continue;
+    const verdictKey = `${d.id}|${d.storageKey}|${d.category}|${d.fileName}|${d.title}`;
+    if (misfiledVerdicts.has(verdictKey)) {
+      const kept = misfiledVerdicts.get(verdictKey);
+      if (kept) out.push(kept);
+      continue;
+    }
     let words = "";
     let readable = true;
     try {
@@ -3603,7 +3631,7 @@ export async function misfiledInVault(): Promise<Misfiled[]> {
        * else — nothing here can tell, and nothing here should pretend to. It is listed so somebody
        * who can open it says which, and it is never moved automatically.
        */
-      out.push({
+      const unreadable: Misfiled = {
         id: d.id,
         title: d.title || d.fileName,
         fileName: d.fileName,
@@ -3612,7 +3640,10 @@ export async function misfiledInVault(): Promise<Misfiled[]> {
         kind: "unreadable",
         why: "No text could be read from it, so nothing on it can be checked. If it is a scanned invoice it belongs here; open it and say.",
         belongsIn: null,
-      });
+      };
+      // A file that would not open may open next time; only a file that opened and held no text is settled.
+      if (readable) misfiledVerdicts.set(verdictKey, unreadable);
+      out.push(unreadable);
       continue;
     }
     const c = classifySupplierDocument(words, d.fileName, d.title);
@@ -3622,9 +3653,12 @@ export async function misfiledInVault(): Promise<Misfiled[]> {
      * not skipped even though it may stay in the folder: it is the group that let a statement
      * survive every sweep, and being shown is the whole point of it.
      */
-    if (c.kind === "invoice" || c.kind === "credit_memo") continue;
+    if (c.kind === "invoice" || c.kind === "credit_memo") {
+      misfiledVerdicts.set(verdictKey, null);
+      continue;
+    }
     const where = NOT_AN_INVOICE[c.kind];
-    out.push({
+    const found: Misfiled = {
       id: d.id,
       title: d.title || d.fileName,
       fileName: d.fileName,
@@ -3635,7 +3669,9 @@ export async function misfiledInVault(): Promise<Misfiled[]> {
         ? c.why
         : "Its words do not make it an invoice: no item lines with NDCs and prices on them, and nothing that reads as a statement, a credit memo or a purchase report either. It is in the invoice folder on nobody's authority.",
       belongsIn: where?.belongsIn ?? null,
-    });
+    };
+    misfiledVerdicts.set(verdictKey, found);
+    out.push(found);
   }
   return out;
 }

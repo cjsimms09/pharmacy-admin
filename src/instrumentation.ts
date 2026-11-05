@@ -670,6 +670,19 @@ export async function register() {
     await whenIdle("pioneer", pioneerTick, { evenWhenBusy: true });
     await whenIdle("invoice-lines", invoiceLinesTick);
     /*
+     * The Invoices page reads every stored PDF once to judge what it is, and remembers the answer (lib/invoices.ts). Done here, in a gap, after
+     * each restart, so the first visit does not pay about ten seconds for it. Housework: a failure only means the page does it itself.
+     */
+    await whenIdle("invoice-page-warm", async () => {
+      try {
+        const { adoptableDocuments, misfiledInVault } = await import("./lib/invoices");
+        await adoptableDocuments();
+        await misfiledInVault();
+      } catch {
+        /* The page does the same work itself on its first visit. */
+      }
+    });
+    /*
      * Reports a reader refused, read again once per update, so a fix to a reader does not wait for somebody to press a button.
      * Before the morning check, which judges what this mends. See lib/held-reread.ts.
      */
