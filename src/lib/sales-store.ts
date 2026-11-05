@@ -42,7 +42,13 @@ export async function fileSystemSales(
       replaced: false,
       problems: parsed.problems.length
         ? parsed.problems
-        : ["The report covers no single calendar month, so there is nothing to file it against."],
+        : [
+            parsed.period
+              ? `This report covers ${parsed.period.from} to ${parsed.period.to}, which is not one calendar month, so there is nothing to file it against. ` +
+                `A rolling 30 days starts a day late in a 31-day month. In PioneerRx, run it once for the whole month (the 1st to the 1st of the next month) ` +
+                `and email it here, and set the schedule to the previous month so it comes right every time.`
+              : "The report covers no single calendar month, so there is nothing to file it against.",
+          ],
     };
   }
 

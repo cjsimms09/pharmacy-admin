@@ -688,8 +688,10 @@ export async function register() {
      */
     await whenIdle("held-reread", async () => {
       try {
-        const { rereadHeldAfterUpdate } = await import("./lib/held-reread");
+        const { rereadHeldAfterUpdate, resortRecognisedAfterUpdate } = await import("./lib/held-reread");
         await rereadHeldAfterUpdate();
+        /* And arrivals marked "not recognised" that the rules now know, for the report types that store nothing. */
+        await resortRecognisedAfterUpdate();
       } catch {
         /* Its stored result says when it last ran; housework must never take the site down. */
       }

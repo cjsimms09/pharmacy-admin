@@ -148,9 +148,13 @@ export function readIpdStatement(text: string): IpdRead {
   let pending: { date: string | null; cents: number } | null = null;
   let awaitingMemo = false;
 
+  /* The line before this one, so a date printed on a line of its own above its row can be told from one printed below it. */
+  let before = "";
   for (const raw of lines) {
     const line = raw.trim();
     if (line === "") continue;
+    const above = before;
+    before = line;
 
     /*
      * A settlement's head: its reference and the day IPD applied it, with no space in the reference. The statement's own
@@ -184,7 +188,13 @@ export function readIpdStatement(text: string): IpdRead {
     if (undated && !pending) {
       const c = cents(undated[1]);
       if (c === null) return { ok: false, why: `IPD statement: an invoice row could not be read: "${line.slice(0, 30)}".` };
-      pending = { date: null, cents: c };
+      /*
+       * Its date is either below it (the first statements) or on the very line above it: IPD's statement of 5 November 2026 printed
+       * "10/03/2026" and then "I 547.20", and the debit memo's row under them was refused as having no invoice above it. Only the line
+       * directly above counts, so a date printed for something else further up is never borrowed.
+       */
+      const dateAbove = /^(\d{2}\/\d{2}\/\d{4})$/.exec(above);
+      pending = { date: dateAbove ? iso(dateAbove[1]) : null, cents: c };
       continue;
     }
     const bareDate = /^(\d{2}\/\d{2}\/\d{4})$/.exec(line);

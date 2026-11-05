@@ -1539,6 +1539,10 @@ export async function importRecognised(
       const r = await fileReturnCredits(read.credits, "Mckesson", filed?.documentId ?? null);
       routeResult = r.says;
       imported = r.written + r.updated > 0;
+    } else if (cls.kind === "retail_gross_profit") {
+      /* Kept, and read only to say what it holds and whether its rows add up to its own total. Nothing is posted: see retail-gross-profit.ts. */
+      const { readRetailGrossProfit } = await import("./retail-gross-profit");
+      routeResult = readRetailGrossProfit(buf.toString("utf8")).says;
     } else if (cls.kind === "report_summary") {
       /* Recognised on purpose and read on purpose: the detail beside it carries the same money. */
       routeResult = "A totals sheet. The detail it summarises is read separately, so nothing was taken from this.";

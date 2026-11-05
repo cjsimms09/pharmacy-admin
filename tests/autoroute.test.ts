@@ -192,3 +192,11 @@ describe("the daily transaction report", () => {
     assert.equal(classify("Daily (9_5_2026)", buf).kind, "rx_transactions");
   });
 });
+
+describe("McKesson's one-figure gross sell price sheet", () => {
+  test("is a totals sheet, filed and not read, rather than an unrecognised report", () => {
+    const csv = Buffer.from("Purchase History Extended Invoice Gross Sell Price ($)\n123456.78\n");
+    const r = classify("total_amount_$_(gross).csv", csv);
+    assert.equal(r.kind, "report_summary");
+  });
+});

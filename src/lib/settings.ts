@@ -431,6 +431,8 @@ export const SETTING_KEYS = [
   /** The build refused reports were last read again for, and what came of it: see held-reread.ts. */
   "held_reread_build",
   "held_reread_result",
+  "resort_recognised_build",
+  "resort_recognised_result",
   "state_schedule_result",
   /**
    * The nightly re-read of invoices recorded as not adding up to their printed total.

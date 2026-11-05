@@ -141,3 +141,63 @@ export async function rereadHeldAfterUpdate(): Promise<{ build: string } & Rerea
   );
   return { build, ...r };
 }
+
+/**
+ * Arrivals marked "not recognised" are decided again after every update, for the report types that store nothing.
+ *
+ * The sweep decides once, when a message lands, so a report the site learns to recognise tomorrow stays red on the Inbox for ever. On
+ * 5 November 2026 five days of PioneerRx's Retail Items Gross Profit Report and a McKesson one-figure sheet sat as "not recognised"
+ * until the readers were taught them. Only types whose handling writes nothing to the books are done by themselves, so doing it twice
+ * is harmless; everything else, which could book money, waits for the Sort-again button.
+ */
+export const RESORT_KINDS = ["report_summary", "retail_gross_profit"] as const;
+
+export async function resortRecognisedNow(): Promise<{ looked: number; sorted: number }> {
+  const { eq } = await import("drizzle-orm");
+  const { readFile } = await import("./files");
+  const { classify } = await import("./autoroute");
+  const since = new Date(Date.now() - REREAD_WITHIN_DAYS * 86_400_000).toISOString();
+  const rows = (await db.query.inboxItems.findMany()).filter((i) => i.status === "stored" && i.routedAs === "unrecognised" && !!i.documentId && i.receivedAt >= since);
+  let sorted = 0;
+  for (const item of rows) {
+    try {
+      const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, item.documentId as string) });
+      if (!doc) continue;
+      const bytes = await readFile(doc.storageKey);
+      /* A small picture the mail program named itself is part of its message: passed over on purpose, kept on file, as the sweep now does. */
+      const { isEmbeddedPicture } = await import("./embedded-picture");
+      if (isEmbeddedPicture({ filename: item.fileName, contentType: doc.mimeType, contentId: null, size: bytes.length }, null)) {
+        const said = `A picture the sender's mail program put in the message, not a document. Passed over automatically on ${new Date().toISOString().slice(0, 10)}; it stays on file so it is not taken again.`;
+        await db.update(schema.inboxItems).set({ status: "ignored", routedAs: "not_for_filing", routeResult: said, reason: said, imported: null }).where(eq(schema.inboxItems.id, item.id));
+        sorted++;
+        continue;
+      }
+      const cls = classify(item.fileName ?? "", bytes);
+      if (!(RESORT_KINDS as readonly string[]).includes(cls.kind)) continue;
+      /*
+       * Not through the sweep's general router (mailbox.ts importRecognised), which can reach the model on a purchase report: these two kinds
+       * store nothing, so their line is written straight from the same pure readers the sweep uses, and this path cannot reach the model.
+       */
+      const routeResult =
+        cls.kind === "retail_gross_profit"
+          ? (await import("./retail-gross-profit")).readRetailGrossProfit(bytes.toString("utf8")).says
+          : "A totals sheet. The detail it summarises is read separately, so nothing was taken from this.";
+      await db.update(schema.inboxItems).set({ routedAs: cls.kind, routeResult }).where(eq(schema.inboxItems.id, item.id));
+      sorted++;
+    } catch {
+      /* One that cannot be opened stays where it is; the Sort-again button says why. */
+    }
+  }
+  return { looked: rows.length, sorted };
+}
+
+export async function resortRecognisedAfterUpdate(): Promise<{ build: string; looked: number; sorted: number } | null> {
+  const build = currentBuild();
+  if (!build) return null;
+  const s = await getSettings();
+  if (s.resort_recognised_build === build) return null;
+  const r = await resortRecognisedNow();
+  await setSetting("resort_recognised_build", build);
+  await setSetting("resort_recognised_result", `${new Date().toISOString()}: build ${build}: ${r.looked} unrecognised arrival${r.looked === 1 ? "" : "s"} looked at, ${r.sorted} now sorted`);
+  return { build, ...r };
+}

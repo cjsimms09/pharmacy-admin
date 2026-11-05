@@ -79,6 +79,7 @@ const KIND_WORDS: Record<string, string> = {
   ap_history: "McKesson AP transaction history",
   mck_returns: "McKesson returns and credits",
   report_summary: "A totals sheet",
+  retail_gross_profit: "Retail items gross profit",
   /* One card settlement batch: counter takings, banked as cash only. See card-batch.ts. */
   /* Bags, vials and labels: spending, not a drug purchase. See rx-systems-invoice.ts. */
   supplies_invoice: "Pharmacy supplies invoice",

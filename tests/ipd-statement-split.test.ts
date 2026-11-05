@@ -71,3 +71,22 @@ describe("a split that does not hold is refused, naming the block", () => {
     assert.match(r.ok ? "" : r.why, /payment row has no invoice above it/);
   });
 });
+
+/*
+ * IPD's statement of 5 November 2026 printed a debit memo's date on a line of its own, above its "I 500.00" row, instead of in front of it, and the
+ * reader refused the whole statement ("a payment row has no invoice above it"). The same statement with that one row laid out that way must read
+ * identically, and a date that belongs to nothing must still not be borrowed.
+ */
+describe("a row whose date is printed on the line above it", () => {
+  const split = mutate("11/03/2026I 500.00\n191120261103DM 500.00", "11/03/2026\nI 500.00\n191120261103DM 500.00");
+  test("reads the same as the one-line form", () => {
+    const a = readIpdStatement(text);
+    const b = readIpdStatement(split);
+    assert.ok(a.ok && b.ok, b.ok ? "" : b.why);
+    assert.deepEqual(b.statement.settlements.map((x) => [x.part, x.paidCents, x.invoices.length]), a.statement.settlements.map((x) => [x.part, x.paidCents, x.invoices.length]));
+  });
+  test("a row with no date above it, or below it, is still refused", () => {
+    const none = readIpdStatement(mutate("11/03/2026I 500.00\n191120261103DM 500.00", "Notes\nI 500.00\n191120261103DM 500.00"));
+    assert.equal(none.ok, false);
+  });
+});
