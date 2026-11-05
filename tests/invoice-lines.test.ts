@@ -525,3 +525,47 @@ describe("a digit run shorter than an NDC", () => {
     assert.equal(p.lines[0].extendedCents, 23999);
   });
 });
+
+/*
+ * IPD 1033584, 23 October 2026: the phentermine line prints no item number and no NDC, only the name beside the figures, and was
+ * neither read nor counted unreadable, so the invoice was $31.98 short of its printed total. Figures are the invoice's own; no patient data.
+ */
+describe("an IPD line with no code in front of its name is read", () => {
+  const text = [
+    "7613370165002030 1 0EACH 574.70  0  574.70",
+    "ADZENYS XR 12.5MG OD",
+    "CII Subtotal:$574.70",
+    "62559043130 2 0EACH 7.99  0 % 15.98",
+    "HYDROCO2.5% CREAM",
+    "%",
+    "PHENTERMINE HC15MG CA100C 2 0EACH 15.99  0  31.98",
+    "CIV",
+    "Non-CII Subtotal:$47.96",
+    "574.70",
+    "Subtotal",
+  ].join("\n");
+
+  test("the line is kept with no NDC, its name, quantity and money, and the half adds up", () => {
+    const r = parseInvoiceLines(text, null);
+    const p = r.lines.find((l) => /PHENTERMINE/.test(l.description ?? ""));
+    assert.ok(p);
+    assert.equal(p.ndc11, null);
+    assert.equal(p.quantity, 2);
+    assert.equal(p.unitCostCents, 1599);
+    assert.equal(p.extendedCents, 3198);
+    const half = r.sections.find((s) => !s.controlled);
+    assert.equal(half?.readCents, half?.printedCents);
+    assert.equal(r.unreadable.length, 0);
+  });
+
+  test("a line whose arithmetic fails is refused rather than guessed", () => {
+    const r = parseInvoiceLines("PHENTERMINE HC15MG CA100C 2 0EACH 15.99  0  35.00", null);
+    assert.equal(r.lines.length, 0);
+    assert.equal(r.unreadable.length, 1);
+  });
+
+  test("ordinary prose is not read as a line", () => {
+    const r = parseInvoiceLines("Thank you for your order.\nPage 2 of 2\nGLN: 0860009870703", null);
+    assert.equal(r.lines.length, 0);
+  });
+});

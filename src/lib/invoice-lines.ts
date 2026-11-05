@@ -350,6 +350,27 @@ const IPD_NAMED = new RegExp(
     String.raw`(?:\s+(${MONEY}))?\s*$`, // extension, where it printed at all
 );
 
+/**
+ * An IPD line that prints no item number and no NDC at all, only the name beside the figures.
+ *
+ *   PHENTERMINE HC15MG CA100C 2 0EACH 15.99  0  31.98
+ *
+ * IPD 1033584, 23 October 2026: the phentermine line ($31.98, a Schedule IV item) carried no digits in front of its name, and both
+ * IPD patterns above begin with a run of digits, so the line was not read AND not counted unreadable: the invoice came to $31.98 short
+ * of its printed total and the morning check named it. The line is read here with no NDC (nothing is invented for it), as an item
+ * number alone is. What keeps this honest is the same thing that keeps the named form honest: after the name must come a quantity, a
+ * back-order quantity run onto a unit of measure, a price and a discount, and the line's own arithmetic and the section subtotal
+ * both have to hold.
+ */
+const IPD_BARE = new RegExp(
+  String.raw`^([A-Za-z][^\r\n]{2,60}?)` + // the product name, with no digits before it
+    String.raw`\s+(\d+)` + // quantity shipped
+    String.raw`\s+(\d+)([A-Z]{2,6})` + // back-ordered quantity and the unit of measure
+    String.raw`\s+(${MONEY})` + // unit price
+    String.raw`\s+([\d.]+)\s*%?` + // discount
+    String.raw`(?:\s+(${MONEY}))?\s*$`, // extension, where it printed at all
+);
+
 /** "CII Subtotal:$3,022.32" and "Non-CII Subtotal:$233.38", which close each half of an IPD invoice. */
 /**
  * ParMed's own printed invoice, which prints every column with nothing between them.
@@ -688,6 +709,34 @@ export function parseInvoiceLines(
       for (const l of pending) l.controlled = controlled;
       sections.push({ controlled, printedCents, readCents: pending.reduce((n, l) => n + l.extendedCents, 0), lines: pending.length });
       pending = [];
+      continue;
+    }
+
+    const bare = IPD_NAMED.test(line) || IPD.test(line) ? null : IPD_BARE.exec(line);
+    if (bare) {
+      const quantity = Number(bare[2]);
+      const unitCostCents = money(bare[5]);
+      const extendedCents = bare[7] ? money(bare[7]) : quantity * unitCostCents;
+      if (!lineAddsUp(quantity, unitCostCents, extendedCents)) {
+        unreadable.push(line.slice(0, 200));
+        continue;
+      }
+      const bareLine: InvoiceLineRead = {
+        ndc11: null,
+        description: bare[1].trim().replace(/\s{2,}/g, " ").slice(0, 120),
+        itemNumber: null,
+        quantity,
+        unitOfMeasure: bare[4],
+        unitCostCents,
+        extendedCents,
+        awpCents: null,
+        itemClass: null,
+        rebated: null,
+        controlled: null,
+      };
+      format = "ipd";
+      out.push(bareLine);
+      pending.push(bareLine);
       continue;
     }
 
