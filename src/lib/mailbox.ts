@@ -1539,6 +1539,16 @@ export async function importRecognised(
       const r = await fileReturnCredits(read.credits, "Mckesson", filed?.documentId ?? null);
       routeResult = r.says;
       imported = r.written + r.updated > 0;
+    } else if (cls.kind === "bank_register") {
+      /* October's bank record, from the accounting software linked to the bank. Proved by its own running balance, then placed as a statement. */
+      const { placeBankRegisterDocument } = await import("@/app/(app)/money/bank");
+      if (filed?.documentId) {
+        const r = await placeBankRegisterDocument(filed.documentId, { id: ctx.userId ?? "mailbox-sweep", name: ctx.userName ?? "the mailbox" });
+        routeResult = r.ok ? r.said : `The accounting register was recognised and nothing was placed: ${r.why}`;
+        imported = r.ok;
+      } else {
+        routeResult = "The accounting register was recognised, but it could not be filed, so nothing was placed.";
+      }
     } else if (cls.kind === "retail_gross_profit") {
       /* Kept, and read only to say what it holds and whether its rows add up to its own total. Nothing is posted: see retail-gross-profit.ts. */
       const { readRetailGrossProfit } = await import("./retail-gross-profit");

@@ -52,6 +52,16 @@ export async function readBankStatement(fd: FormData) {
     await placeStatementLines(scannedLines(solved), { documentId, fileName: file.name, skipped: 0, user, back, notes: solved.notes });
   }
 
+  {
+    const { looksLikeBankRegister } = await import("@/lib/bank-register");
+    if (looksLikeBankRegister(buf.toString("utf8").slice(0, 2000))) {
+      const documentId = await keepStatement(file, "Bank statement (accounting register)", user.id);
+      if (!documentId) redirect(`${back}&error=${encodeURIComponent("The register could not be stored, so it was not read. Nothing was placed.")}`);
+      const r = await placeBankRegisterDocument(documentId, user);
+      if (!r.ok) redirect(`${back}&error=${encodeURIComponent(`${r.why} Nothing was placed.`)}`);
+      redirect(`${back}&ok=${encodeURIComponent(r.said.slice(0, 600))}`);
+    }
+  }
   const parsed = parseBankStatement(parseCsv(buf.toString("utf8")));
   if (parsed.lines.length === 0) redirect(`${back}&error=${encodeURIComponent(parsed.skipped[0]?.why ?? "Nothing in the file could be read as a bank line.")}`);
   const documentId = await keepStatement(file, `Bank statement ${parsed.lines[0].on} to ${parsed.lines[parsed.lines.length - 1].on}`, user.id);
@@ -556,6 +566,31 @@ export async function storeScannedStatement(
   /* The inbox row that carried the scan is counted now: the statement reached the books. */
   await db.update(schema.inboxItems).set({ imported: true }).where(eq(schema.inboxItems.documentId, documentId));
   return { ok: true, said: said ?? "" };
+}
+
+/**
+ * Places a stored copy of the accounting program's checking register as the month's bank statement.
+ *
+ * The owner, 6 November 2026, of the report that came by mail as "Oct Bank": "it is report from our accounting software which is linked to
+ * bank" and "its the same as bank statement. treat it as such." Read by bank-register.ts, proved by its own running balance (a register with
+ * a line missing places nothing), placed exactly as a bank statement's lines are, and its opening and closing balances recorded for the month.
+ * Callable from the mailbox sweep as from a script: it asks nobody and redirects nowhere.
+ */
+export async function placeBankRegisterDocument(
+  documentId: string,
+  user: { id: string; name: string },
+): Promise<{ ok: true; said: string; month: string } | { ok: false; why: string }> {
+  const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, documentId) });
+  if (!doc) return { ok: false, why: "That document is no longer on file." };
+  const { readBankRegister } = await import("@/lib/bank-register");
+  const read = readBankRegister((await readFile(doc.storageKey)).toString("utf8"));
+  if (!read.ok) return { ok: false, why: read.why };
+  const month = read.periodFrom.slice(0, 7);
+  await db.update(schema.documents).set({ category: "bank_statement", title: `Bank statement (accounting register), ${month}`, effectiveOn: read.periodTo }).where(eq(schema.documents.id, documentId));
+  const placed = await placeStatementLines(read.lines, { documentId, fileName: doc.fileName, skipped: 0, user, back: "/money", quiet: true });
+  await recordMonthBalances(month, read.openingCents, read.registerClosingCents);
+  await db.update(schema.inboxItems).set({ imported: true }).where(eq(schema.inboxItems.documentId, documentId));
+  return { ok: true, said: `${read.says}${placed ? " " + placed : ""}`, month };
 }
 
 /** The statement lines that fall in the period: how many were placed, and the ones that were not. */

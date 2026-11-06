@@ -7,6 +7,7 @@ import { readSheet, readSheets } from "./xlsx";
 import { looksLikeVeridikalReport } from "./veridikal-report";
 import { looksLikeIpdStatement } from "./ipd-statement";
 import { looksLikeParmedEftNotice } from "./parmed-eft-notice";
+import { looksLikeBankRegister } from "./bank-register";
 import { looksLikeRetailGrossProfit } from "./retail-gross-profit";
 import { looksLikeParmedStatement } from "./parmed-statement";
 import { looksLikeLoanReport } from "./loan-report";
@@ -44,7 +45,7 @@ import { ALLOWED_MIME, EXCEL_MIME } from "./files";
  * behaviour we already had and is never wrong, only unhelpful.
  */
 
-export type RouteKind = "ap_history" | "claims" | "rx_transactions" | "payer_payments" | "providerpay_account" | "mck_remit_summary" | "mck_remit_detail" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "retail_gross_profit" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "parmed_statement" | "parmed_eft_notice" | "loan_report" | "sales_by_payment" | "empty_report" | "unrecognised";
+export type RouteKind = "bank_register" | "ap_history" | "claims" | "rx_transactions" | "payer_payments" | "providerpay_account" | "mck_remit_summary" | "mck_remit_detail" | "accrual_sales" | "on_hand" | "rxrescue_credit" | "supplier_catalog" | "pioneer_catalog" | "rebate_report" | "purchase_drilldown" | "ap_transactions" | "mck_returns" | "report_summary" | "retail_gross_profit" | "return_policy" | "nadac" | "remittance_835" | "copay_remit" | "card_statement" | "accesshealth_payment" | "veridikal_report" | "ipd_statement" | "parmed_statement" | "parmed_eft_notice" | "loan_report" | "sales_by_payment" | "empty_report" | "unrecognised";
 
 export type Classification = {
   kind: RouteKind;
@@ -423,6 +424,14 @@ export function classify(fileName: string, buf: Buffer): Classification {
    * unrecognised either, and saying so put three lines on his inbox that needed a person and had
    * nothing wrong with them. Recognised, filed, and deliberately not read.
    */
+  /* The accounting program's checking register, which begins with the company, account and period rather than a header row. See bank-register.ts. */
+  if (looksLikeBankRegister(buf.subarray(0, 2000).toString("utf8"))) {
+    return {
+      kind: "bank_register",
+      why: "The accounting software's register of the checking account, linked to the bank: every entry with its date, payee, payment or deposit and running balance. Read as the month's bank statement.",
+      headers: [],
+    };
+  }
   /* PioneerRx's Retail Items Gross Profit Report, which begins with its own title rather than a header row. See retail-gross-profit.ts. */
   if (looksLikeRetailGrossProfit(buf.subarray(0, 400).toString("utf8"))) {
     return {
