@@ -443,3 +443,22 @@ describe("placing a supplier payment the site already holds", () => {
     assert.equal(placeLine({ ...line, amountCents: -150_825 }, ctx).kind, "unplaced");
   });
 });
+
+describe("two lines the owner named on 6 November 2026", () => {
+  test("Nimble Payment is prescription copay money, revenue, banked as a patient receipt and not read as a plan", () => {
+    const m = readBankDescriptor("Nimble Payment", 457_785);
+    assert.equal(m.kind, "copay_payments");
+    assert.equal(m.lands, "revenue");
+    assert.equal(m.category, "patient");
+  });
+  test("Nimble going out is not that rule", () => {
+    assert.notEqual(readBankDescriptor("Nimble Payment", -457_785).kind, "copay_payments");
+  });
+  test("\"Oct PSA\" is the wages funding, already counted by the payroll standing cost, as the bank's own wording for it is", () => {
+    for (const d of ["Oct PSA", "Sep PSA", "REF01234567 TO X1234PSA"]) {
+      const m = readBankDescriptor(d, -4_500_000);
+      assert.equal(m.kind, "wages_funding", d);
+      assert.match(String(m.alreadyCounted), /payroll standing cost/);
+    }
+  });
+});

@@ -433,8 +433,28 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
    * never place: it looks for a single open invoice of exactly $121,429.15, and there is no such
    * invoice and never will be.
    */
-  if (meaning.matchTo?.reference && ctx.settled) {
-    const ref = meaning.matchTo.reference;
+  /*
+   * The reference, where the line does not carry one: the ledger's own ACH totals, matched by exact amount.
+   *
+   * The accounting program's register, taken as October 2026's bank record on 6 November, writes a wholesaler's draw as "McKesson Debit"
+   * and leaves out the ACH number the bank prints, so five debits ($684,580.89) were unplaced for want of a reference although three of
+   * them equal a ledger ACH group to the cent (38, 32 and 41 invoices). A debit with no reference is tied to a ledger group only where
+   * exactly one group of this wholesaler comes to exactly the debit: two groups of one amount are two payments, and the line is left
+   * for a person. Nothing is written from the bank line either way; the ledger is the cash cost of goods.
+   */
+  let viaRef: string | null = meaning.matchTo?.reference ?? null;
+  if (!viaRef && ctx.settled && line.amountCents < 0 && meaning.lands === "cost_of_goods") {
+    const who = (meaning.counterparty ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const groups = new Map<string, number>();
+    for (const x of ctx.settled) {
+      if (!x.checkNumber || (x.supplier ?? "").toLowerCase().replace(/[^a-z0-9]/g, "") !== who) continue;
+      groups.set(x.checkNumber, (groups.get(x.checkNumber) ?? 0) + x.netCents);
+    }
+    const exact = [...groups.entries()].filter(([, cents]) => cents === -line.amountCents);
+    if (exact.length === 1) viaRef = exact[0][0];
+  }
+  if (viaRef && ctx.settled) {
+    const ref = viaRef;
     const covered = ctx.settled.filter((x) => x.checkNumber === ref);
     if (covered.length > 0) {
       const cents = covered.reduce((n, x) => n + x.netCents, 0);
@@ -648,6 +668,8 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
     /* Copay-programme money, banked under the same payer the programme's statements use, so a statement finds it banked. */
     if (meaning.kind === "copay_program") return { kind: "deposit", receiptKind: "third_party", payer: COPAY_PAYER, why: meaning.says };
     if (meaning.kind === "direct_payer") return { kind: "deposit", receiptKind: "third_party", payer: meaning.counterparty, why: meaning.says };
+    /* Prescription copay payments through Nimble: patients' share, banked as a patient receipt. */
+    if (meaning.kind === "copay_payments") return { kind: "deposit", receiptKind: "patient", payer: "Nimble (prescription copay payments)", why: meaning.says };
     if (meaning.kind === "other_receipt") {
       return { kind: "unplaced", why: `${meaning.says} Not banked from the statement until it is agreed what this money is and where it belongs.` };
     }

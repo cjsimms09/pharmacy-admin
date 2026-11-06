@@ -137,6 +137,21 @@ const RULES: Rule[] = [
     mayAlreadyBeCounted: "third-party revenue, wherever the copay programme's statement has been read",
     why: "Copay assistance money for claims already dispensed, paid through POC Network.",
   },
+  /*
+   * Nimble: prescription copay payments. The owner, 6 November 2026: "nimble is prescription copay payments". Six lines in October, $16,098.81,
+   * each read as a plan's money because a payer on the claims is called "Medicare Payment Plan" and the word "Payment" matched it.
+   * Patients' share of their prescriptions, paid to the pharmacy through Nimble rather than at the counter, so not in the till.
+   */
+  {
+    kind: "copay_payments",
+    counterparty: "Nimble",
+    test: /^NIMBLEPAYMENT/,
+    side: "in",
+    lands: "revenue",
+    category: "patient",
+    feed: null,
+    why: "Prescription copay payments, paid through Nimble.",
+  },
   /* ── Money out: the wholesalers ─────────────────────────────────── */
   {
     kind: "wholesaler_ach",
@@ -425,7 +440,8 @@ const RULES: Rule[] = [
      */
     kind: "wages_funding",
     counterparty: "the payroll account",
-    test: /^REF[A-Z0-9]{6,8}TO[X*]?\d{4}PSA$/,
+    /* The bank's wording, and the accounting register's for the same transfer ("Oct PSA"): the owner, 6 November 2026, "yes the 45k is employee cost". */
+    test: /^REF[A-Z0-9]{6,8}TO[X*]?\d{4}PSA$|^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)PSA$/,
     side: "out",
     lands: "transfer",
     category: null,

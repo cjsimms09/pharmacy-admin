@@ -361,3 +361,35 @@ describe("a wholesaler's ACH in the books' first fortnight", () => {
     assert.equal(late.kind === "settles_ach" ? late.agrees : true, false);
   });
 });
+
+describe("a wholesaler's debit that carries no ACH reference", () => {
+  const settled = (check: string, supplier: string, nets: number[]) => nets.map((netCents, i) => ({ supplier, invoiceNumber: `${check}-${i}`, checkNumber: check, netCents }));
+  const mkCtx = (rows: ReturnType<typeof settled>): MatchContext => ({ payers: [], suppliers: [{ id: "mck", name: "Mckesson" }], vendors: [], unpaidBills: [], unpaidInvoices: [], booksStartOn: "2026-09-01", settled: rows });
+  const line = (cents: number) => [{ on: "2026-10-11", description: "McKesson Debit", amountCents: -cents, key: "k1" }];
+
+  test("is tied to the one ledger group that comes to exactly that amount, and says which invoices", () => {
+    const ctx = mkCtx([...settled("CK-INVENTED-1", "Mckesson", [60_000, 40_000]), ...settled("CK-INVENTED-2", "Mckesson", [70_000, 5_000])]);
+    const p = placeLines(line(100_000), ctx)[0].placement;
+    assert.equal(p.kind, "settles_ach");
+    if (p.kind === "settles_ach") {
+      assert.equal(p.reference, "CK-INVENTED-1");
+      assert.equal(p.agrees, true);
+      assert.equal(p.invoices.length, 2);
+    }
+  });
+
+  test("with no ledger group of that amount it is left unplaced, as before", () => {
+    const ctx = mkCtx(settled("CK-INVENTED-1", "Mckesson", [60_000, 40_000]));
+    assert.notEqual(placeLines(line(99_999), ctx)[0].placement.kind, "settles_ach");
+  });
+
+  test("with two ledger groups of that amount it is not guessed: two payments of one amount are two payments", () => {
+    const ctx = mkCtx([...settled("CK-INVENTED-1", "Mckesson", [100_000]), ...settled("CK-INVENTED-2", "Mckesson", [50_000, 50_000])]);
+    assert.notEqual(placeLines(line(100_000), ctx)[0].placement.kind, "settles_ach");
+  });
+
+  test("another supplier's ledger group of that amount does not stand for a McKesson debit", () => {
+    const ctx = mkCtx(settled("CK-INVENTED-9", "Someone Else", [100_000]));
+    assert.notEqual(placeLines(line(100_000), ctx)[0].placement.kind, "settles_ach");
+  });
+});
