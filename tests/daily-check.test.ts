@@ -1206,7 +1206,10 @@ describe("the press on the card is wired to its two actions (read from the sourc
 
   test("the older page that lists the checks says all pass only when none fails, whatever has been set aside", () => {
     const old = fs.readFileSync("src/app/(app)/tools/check/page.tsx", "utf8");
-    assert.match(old, /const failing = r\.checks\.filter\(\(c\) => !c\.ok\);/);
+    /* A job waiting on a file is counted apart (todo), never as a pass: "All pass" needs both lists empty. */
+    assert.match(old, /const failing = r\.checks\.filter\(\(c\) => !c\.ok && !c\.task\);/);
+    assert.match(old, /const todo = r\.checks\.filter\(\(c\) => !c\.ok && c\.task\);/);
+    assert.match(old, /failing\.length === 0 && todo\.length > 0 \?/, "a to-do is said before the all-pass branch can be reached");
     assert.match(old, /failing\.length === 0 \? \(\s*<Notice kind="ok">/);
     assert.doesNotMatch(old, /r\.failing === 0/, "r.failing counts only the open ones, so a finding he set aside would read as a pass");
   });
@@ -1257,5 +1260,22 @@ describe("remittances advised after the bank record on file ends are not yet mea
     const a = check(beyond, BANKED).fingerprint;
     const b = check({ ...beyond, remittancesBeyondBank: 52, remittancesBeyondBankCents: 60_000_000, bankLinesThrough: "2026-10-02" }, BANKED).fingerprint;
     assert.equal(a, b);
+  });
+});
+
+describe("a check that is only waiting on a file is a job to do, not a problem", () => {
+  const beyond = { remittancesBeyondBank: 47, remittancesBeyondBankCents: 52_734_938, bankLinesThrough: "2026-09-30" };
+  test("it is marked as a task, and the summary says no problems and what to do, not 'all pass' and not 'failing'", () => {
+    const checks = runDailyCheck({ ...wellRun, ...beyond });
+    const c = checks.find((x) => x.what === BANKED)!;
+    assert.equal(c.task, true);
+    assert.equal(c.ok, false);
+    const said = summarise(checks);
+    assert.match(said, /^No problems found\. 1 thing to do/);
+    assert.doesNotMatch(said, /failing|All \d+ checks pass/);
+  });
+  test("one real finding is never a task, even beside a beyond-bank count", () => {
+    const c = check({ ...beyond, remittancesNotBanked: 1, remittancesNotBankedCents: 150_000, unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-09-10", amountCents: 150_000, tie: null, history: { state: "none" } }] }, BANKED);
+    assert.equal(c.task, false);
   });
 });

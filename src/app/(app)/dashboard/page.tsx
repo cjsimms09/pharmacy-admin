@@ -305,6 +305,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     href: string;
     action: string;
     kind: "crit" | "warn";
+    /** A job waiting on an input (a file not loaded yet), not a problem: said in its own block, never as something wrong. */
+    todo?: boolean;
     /** Only the morning check's lines: what each reads, and what he can press. */
     check?: { key: string; fingerprint: string | null; reads: string };
   }[] = [];
@@ -374,6 +376,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       href: c.href,
       action: c.action,
       kind: "warn",
+      todo: c.task === true,
       check: { key: c.key, fingerprint: c.fingerprint, reads: c.reads },
     });
   }
@@ -388,6 +391,49 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     });
   }
 
+
+  const rowOf = (a: (typeof attention)[number]) => (
+    <li key={a.check?.key ?? a.what} className="text-sm">
+      <span className="font-medium">{a.what}</span>
+      {a.detail && <span className="text-ink-2"> — {a.detail}</span>}{' '}
+      <Link href={a.href} className="underline">{a.action}</Link>
+      {a.check && (
+        <>
+          {/*
+            What the check looked at, said on the line, so that a stand-in can be seen by reading it: if the sentence above names a
+            thing and this names another, the check is measuring the wrong one (CLAUDE.md, rule 7).
+          */}
+          <p className="mt-0.5 text-xs font-normal text-ink-2">Reads: {a.check.reads}</p>
+          {/*
+            No press on a line that cannot be set aside (a check that could not run has not passed, and nothing may quieten it),
+            and none for somebody the action would refuse. Two buttons, because they mean different things: "wrong" says the site
+            told him something untrue, and is kept as a bug report until somebody has answered it; "settled" says it was true and
+            is dealt with. The note is a textarea so that Enter adds a line: in a one-line field Enter would press the first
+            button, and a note typed in a hurry would record "wrong".
+          */}
+          {canPress && a.check.fingerprint !== null && (
+            <form action={markCheckAction} className="mt-1 flex flex-wrap items-center gap-2">
+              <input type="hidden" name="back" value="/" />
+              <input type="hidden" name="key" value={a.check.key} />
+              <input type="hidden" name="fingerprint" value={a.check.fingerprint} />
+              <textarea
+                name="note"
+                rows={2}
+                maxLength={500}
+                placeholder="What was wrong, or what settled it (optional)"
+                aria-label="A note on this line, optional"
+                className="field min-w-0 flex-1 resize-none py-1 text-xs font-normal"
+              />
+              <button name="verdict" value="wrong" className="btn btn-sm">This is wrong</button>
+              <button name="verdict" value="settled" className="btn btn-sm">This is settled</button>
+            </form>
+          )}
+        </>
+      )}
+    </li>
+  );
+  const problems = attention.filter((a) => !a.todo);
+  const todos = attention.filter((a) => a.todo);
 
   return (
     <>
@@ -430,50 +476,20 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         One block, one line each, worst first. The reason each matters is still written — it has
         just stopped being the thing you read before you can see your own scoreboard.
       */}
-      {attention.length > 0 && (
-        <Notice kind={attention.some((a) => a.kind === 'crit') ? 'crit' : 'warn'}>
-          <b>{attention.length === 1 ? "One thing needs attention" : `${attention.length} things need attention`}</b>
+      {problems.length > 0 && (
+        <Notice kind={problems.some((a) => a.kind === 'crit') ? 'crit' : 'warn'}>
+          <b>{problems.length === 1 ? "One thing needs attention" : `${problems.length} things need attention`}</b>
           <ul className="mt-1 space-y-0.5">
-            {attention.map((a) => (
-              <li key={a.check?.key ?? a.what} className="text-sm">
-                <span className="font-medium">{a.what}</span>
-                {a.detail && <span className="text-ink-2"> — {a.detail}</span>}{' '}
-                <Link href={a.href} className="underline">{a.action}</Link>
-                {a.check && (
-                  <>
-                    {/*
-                      What the check looked at, said on the line, so that a stand-in can be seen by reading it: if the sentence above names a
-                      thing and this names another, the check is measuring the wrong one (CLAUDE.md, rule 7).
-                    */}
-                    <p className="mt-0.5 text-xs font-normal text-ink-2">Reads: {a.check.reads}</p>
-                    {/*
-                      No press on a line that cannot be set aside (a check that could not run has not passed, and nothing may quieten it),
-                      and none for somebody the action would refuse. Two buttons, because they mean different things: "wrong" says the site
-                      told him something untrue, and is kept as a bug report until somebody has answered it; "settled" says it was true and
-                      is dealt with. The note is a textarea so that Enter adds a line: in a one-line field Enter would press the first
-                      button, and a note typed in a hurry would record "wrong".
-                    */}
-                    {canPress && a.check.fingerprint !== null && (
-                      <form action={markCheckAction} className="mt-1 flex flex-wrap items-center gap-2">
-                        <input type="hidden" name="back" value="/" />
-                        <input type="hidden" name="key" value={a.check.key} />
-                        <input type="hidden" name="fingerprint" value={a.check.fingerprint} />
-                        <textarea
-                          name="note"
-                          rows={2}
-                          maxLength={500}
-                          placeholder="What was wrong, or what settled it (optional)"
-                          aria-label="A note on this line, optional"
-                          className="field min-w-0 flex-1 resize-none py-1 text-xs font-normal"
-                        />
-                        <button name="verdict" value="wrong" className="btn btn-sm">This is wrong</button>
-                        <button name="verdict" value="settled" className="btn btn-sm">This is settled</button>
-                      </form>
-                    )}
-                  </>
-                )}
-              </li>
-            ))}
+            {problems.map(rowOf)}
+          </ul>
+        </Notice>
+      )}
+      {todos.length > 0 && (
+        <Notice kind="ok">
+          <b>{todos.length === 1 ? "One thing to do" : `${todos.length} things to do`}</b>
+          <span className="font-normal"> — nothing is wrong; these are waiting for a file only you can supply.</span>
+          <ul className="mt-1 space-y-0.5">
+            {todos.map(rowOf)}
           </ul>
         </Notice>
       )}

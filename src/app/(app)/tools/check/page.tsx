@@ -23,7 +23,9 @@ export default async function CheckPage() {
   const [r, settings] = await Promise.all([dailyCheck(), getSettings()]);
   const last = settings.daily_check_result ?? null;
   const stamp = last?.match(/^(\S+Z): ([\s\S]*)$/) ?? null;
-  const failing = r.checks.filter((c) => !c.ok);
+  const failing = r.checks.filter((c) => !c.ok && !c.task);
+  /* Waiting on a file only he can supply: nothing is known to be wrong, and nothing was measured either, so it is neither a failure nor a pass. */
+  const todo = r.checks.filter((c) => !c.ok && c.task);
 
   return (
     <>
@@ -37,7 +39,11 @@ export default async function CheckPage() {
         "All pass" is said only when every check passes. A finding he has set aside is still failing, so the count here is of the failing
         checks, whatever has been said of them, and the ones set aside are named as that and not left out.
       */}
-      {failing.length === 0 ? (
+      {failing.length === 0 && todo.length > 0 ? (
+        <Notice kind="ok">
+          No problems found. {todo.length} thing{todo.length === 1 ? "" : "s"} to do before {todo.length === 1 ? "it" : "they"} can be checked: {todo.map((c) => c.action.toLowerCase()).join("; ")}.
+        </Notice>
+      ) : failing.length === 0 ? (
         <Notice kind="ok">
           All {r.checks.length} checks pass. Nothing below needs you.
         </Notice>

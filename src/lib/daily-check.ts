@@ -235,6 +235,12 @@ export type Check = {
    * not matter should be deleted rather than ranked low.
    */
   kind: "money" | "counting" | "feed";
+  /**
+   * True where the only thing found is that an input has not been loaded yet (a bank file, a statement), so nothing is known to be wrong
+   * and there is a job to do. Said as a to-do and never counted as a problem; still not a pass, because nothing was measured, and still
+   * on the card until the file is loaded. A check with a real finding in it is never a task.
+   */
+  task?: boolean;
 };
 
 /** What he can say of a finding the card shows: that the card was wrong, or that it was right and is dealt with. */
@@ -420,7 +426,7 @@ function bankedFingerprint(f: Facts): string {
 function beyondBankSaid(f: Facts): string {
   const n = f.remittancesBeyondBank;
   const through = f.bankLinesThrough ? `the newest bank line on the site is ${f.bankLinesThrough}` : "no bank line is on the site";
-  return `${n} remittance${n === 1 ? "" : "s"} with a payment number, ${money(f.remittancesBeyondBankCents)} between ${n === 1 ? "it" : "them"}, ${n === 1 ? "was" : "were"} advised too late for the bank record on file to show ${n === 1 ? "its" : "their"} deposit (${through}), so ${n === 1 ? "it is" : "they are"} not yet checked: nothing is known to be missing${horizon(f)}`;
+  return `${n} remittance${n === 1 ? "" : "s"} with a payment number, ${money(f.remittancesBeyondBankCents)}${n === 1 ? "" : " between them"}, ${n === 1 ? "was" : "were"} advised too late for the bank record on file to show ${n === 1 ? "its" : "their"} deposit (${through}), so ${n === 1 ? "it is" : "they are"} not yet checked: nothing is known to be missing${horizon(f)}`;
 }
 
 export function runDailyCheck(f: Facts): Check[] {
@@ -768,6 +774,7 @@ export function runDailyCheck(f: Facts): Check[] {
           ? null
           : `${money(f.remittancesNotBankedCents)} is advised as paid and no receipt carries its payment number. Two causes look the same here: the deposit has reached the bank and has not been tied to this payment number yet, or the payer has advised it and not yet paid it. A deposit of that amount on the bank statement, on or after the advice date, settles which — unless that deposit already stands for another remittance of the same amount, because two remittances of one amount are two deposits. ProviderPay's account history for the month shows each deposit by its payment number and each sweep to the bank; where it shows this remittance's deposit reaching a bank line, the remittance is banked and leaves this list, so one that is on it is one the history on file does not show, or does not yet reach. The Payments export, read, can tie a deposit too, but the site can refuse its receipt as the same money as a receipt it already holds of that amount within a week, so where one is already there the account history is what settles it. Each remittance named above says what stands for it and what the history can show.`,
     kind: "money",
+    task: f.remittancesNotBanked === 0 && f.remittancesBeyondBank > 0 && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
   });
 
   return checks;
@@ -780,8 +787,11 @@ export function runDailyCheck(f: Facts): Check[] {
  * sentence says how many are set aside, so the stored line is never a quieter version of the truth.
  */
 export function summarise(checks: Check[], setAsideKeys: Iterable<string> = []): string {
-  const bad = checks.filter((c) => !c.ok);
-  if (bad.length === 0) return `All ${checks.length} checks pass.`;
+  const waiting = checks.filter((c) => !c.ok && c.task === true);
+  const bad = checks.filter((c) => !c.ok && c.task !== true);
+  if (bad.length === 0 && waiting.length === 0) return `All ${checks.length} checks pass.`;
+  /* Only jobs waiting on a file: no problem is known, and not "all pass" either, because those were not measured. */
+  if (bad.length === 0) return `No problems found. ${waiting.length} thing${waiting.length === 1 ? "" : "s"} to do before ${waiting.length === 1 ? "it" : "they"} can be checked: ${waiting.map((c) => c.action.charAt(0).toLowerCase() + c.action.slice(1)).join("; ")}.`;
   const aside = new Set(setAsideKeys);
   const n = bad.filter((c) => aside.has(c.key)).length;
   // `what` is the rule, not the finding: said bare after "failing:" it reads as though the rule held.

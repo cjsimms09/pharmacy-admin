@@ -133,6 +133,12 @@ describe("the morning check, gathered", () => {
 
 const clear = async () => {
   for (const t of [schema.bankLineReceipts, schema.bankLines, schema.documents, schema.cashReceipts, schema.remittanceRegister]) await db.delete(t);
+  /*
+   * A bank record that reaches past every advice these tests use. Without one the check cannot say a remittance is unbanked at all, because
+   * the bank lines on file would stop before its deposit could appear (it is then not yet measured). A one-cent line two months later is
+   * the horizon and proves nothing: it matches no amount and no payment number.
+   */
+  await db.insert(schema.bankLines).values({ id: "line-horizon", key: "k-horizon", on: "2026-12-31", description: "Test horizon", amountCents: 1, placedAs: "unplaced", createdBy: "test" });
 };
 
 describe("remittances not banked, gathered", () => {
@@ -171,6 +177,32 @@ describe("remittances not banked, gathered", () => {
     assert.doesNotMatch(c.observed, /Invented Payer [BDE]/, "a remittance banked by a payment number or a remittance number is counted, not named");
     assert.doesNotMatch(c.observed, /no cash is owed/, "a remittance with no number is not said to be owed nothing");
     assert.doesNotMatch(JSON.stringify(result), /9990000\d/, "no payer payment number leaves the store");
+  });
+
+  /*
+   * 6 November 2026: the bank lines on file ended 30 September and the 47 remittances advised in October were all called "advised as paid and
+   * not banked". Where the bank record stops before an advice date plus the matcher's fortnight, nothing could show its deposit, so it is not
+   * unbanked: it is not yet checked, and loading the bank record is a job, not a problem.
+   */
+  test("a remittance advised after the bank record on file ends is not called unbanked: it is a job to do, and the page to do it on is named", async () => {
+    await clear();
+    await db.delete(schema.bankLines);
+    await db.insert(schema.bankLines).values({ id: "line-sep", key: "k-sep", on: "2026-09-25", description: "Test, an early line", amountCents: 1, placedAs: "unplaced", createdBy: "test" });
+    await remit(1, "Invented Payer A", "2026-09-20", 200_800, "EFT-99900001");
+    await remit(2, "Invented Payer B", "2026-09-05", 90_000, "EFT-99900002");
+    const { c } = await ask(BANKED);
+    assert.equal(c.ok, false, "nothing was measured, so never a pass");
+    assert.equal(c.task, false, "one remittance the bank record could show and does not is still a finding");
+    assert.match(c.observed, /1 of the 2 remittances with a payment number, advised since the books began, is advised as paid and not banked, \$900\.00/);
+    assert.match(c.observed, /Separately, 1 remittance with a payment number, \$2,008\.00, was advised too late/);
+    assert.match(c.observed, /the newest bank line on the site is 2026-09-25/);
+    assert.doesNotMatch(c.observed, /Invented Payer A/, "the one nobody could have seen is not named as unbanked");
+    await db.delete(schema.remittanceRegister);
+    await remit(1, "Invented Payer A", "2026-09-20", 200_800, "EFT-99900001");
+    const only = (await ask(BANKED)).c;
+    assert.equal(only.task, true);
+    assert.equal(only.href, "/money");
+    assert.doesNotMatch(only.observed, /not banked/);
   });
 
   test("a remittance whose receipt carries its payment number in its key is banked, and the check passes", async () => {
