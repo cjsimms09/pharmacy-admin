@@ -442,6 +442,7 @@ export const SETTING_KEYS = [
    */
   "invoice_short_reread_result",
   "invoice_undated_reread_result",
+  "folder_watch_result",
   /**
    * The morning check: when it last ran, and what it found (daily-check.ts).
    *

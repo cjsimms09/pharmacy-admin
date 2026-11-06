@@ -662,6 +662,39 @@ export async function register() {
     }
   };
 
+  /**
+   * Reads whatever has been put in the watched folders (the folder beside the database and OneDriveProviderPay).
+   *
+   * The sweep that reads them lived only inside the Medicare MFP pull (mtfCycle), which returns at once when no MTF key is stored,
+   * so with none stored a file copied into OneDriveProviderPay was never read unless somebody pressed the button on /remits or ran
+   * a script. On 6 November 2026 forty-eight 835s, the Remit Summary and the Wells Fargo history were each read by hand. This is the
+   * same sweep, on the half-hourly beat, and it touches the disk only: nothing here reaches the network or a model. It stays quiet
+   * when the folders hold nothing, and anything it could not read is left in the folder, as the sweep already does.
+   */
+  const folderWatchTick = async () => {
+    try {
+      const { remittanceDirs, sweepRemittances } = await import("./lib/claim-payments");
+      const fs = await import("node:fs/promises");
+      let waiting = 0;
+      for (const d of await remittanceDirs()) {
+        try {
+          for (const e of await fs.readdir(d, { withFileTypes: true })) if (e.isFile() && !e.name.startsWith(".") && !/^read ?me/i.test(e.name)) waiting++;
+        } catch {
+          /* a folder that is not there is not an error */
+        }
+      }
+      if (waiting === 0) return;
+      const r = await sweepRemittances({ name: "Folder watch" });
+      const { setSetting } = await import("./lib/settings");
+      await setSetting(
+        "folder_watch_result",
+        `${new Date().toISOString()}: ${r.files} file${r.files === 1 ? "" : "s"} seen, ${r.read} remittance file${r.read === 1 ? "" : "s"} read, ${r.payments} payments posted${r.alsoRead.length ? `, ${r.alsoRead.length} other file${r.alsoRead.length === 1 ? "" : "s"} read` : ""}${r.problems.length ? `, ${r.problems.length} thing${r.problems.length === 1 ? "" : "s"} it could not do` : ""}`,
+      );
+    } catch {
+      /* Never allowed to stop the app; the result is on the setting either way. */
+    }
+  };
+
   const runAll = async () => {
     await publicAccessTick();
     await whenIdle("warm", warmTick);
@@ -759,6 +792,7 @@ export async function register() {
     await whenIdle("payer-learn", payerLearnTick);
     await whenIdle("ar-report", arReportTick);
     await whenIdle("mtf", mtfTick);
+    await whenIdle("folder-watch", folderWatchTick);
   };
 
   /**
