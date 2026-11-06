@@ -133,6 +133,16 @@ export type Facts = {
    */
   unbankedRemittances: { payer: string | null; remitOn: string | null; amountCents: number; tie: Tie; history: History }[];
   /**
+   * Remittances with a payment number and no cash found, whose deposit the bank lines on file could not show even if it had arrived,
+   * because those lines end before the advice date plus the fortnight the matcher allows a deposit to land. They are not "advised and not
+   * banked": nothing is known to be missing, the bank record that would say has not been loaded. On 6 November 2026 the bank lines on
+   * file ended 30 September and all 47 remittances of $527,349.38 this check called unbanked were advised in October.
+   */
+  remittancesBeyondBank: number;
+  remittancesBeyondBankCents: number;
+  /** The newest bank line on file, null where there are none. */
+  bankLinesThrough: string | null;
+  /**
    * Remittances with a payment number that no receipt carries by that number but whose deposit ProviderPay's own account history shows,
    * swept to a bank line of the same amount (engine/remit-sweep.ts). They are banked and are in neither count above; they are said here so
    * that a passing line does not hide that its evidence is the history and not a receipt.
@@ -400,7 +410,17 @@ function bankedFingerprint(f: Facts): string {
     const h = r.history;
     return fp(r.payer, r.remitOn, r.amountCents, r.tie, h.state, h.state === "holds a deposit" ? h.on : h.state === "has a gap" ? h.month : null);
   });
-  return fp("register", f.remittancesNotBanked, f.remittancesNotBankedCents, items.join(","));
+  return fp("register", f.remittancesNotBanked, f.remittancesNotBankedCents, items.join(","), f.remittancesBeyondBank > 0 ? "beyond the bank record" : null);
+}
+
+/**
+ * The remittances this check cannot judge because the bank record on file stops before their deposits could appear, said as what they are:
+ * not yet measurable, with the day the bank record ends, so that "advised and not banked" is never said of money nobody could have seen.
+ */
+function beyondBankSaid(f: Facts): string {
+  const n = f.remittancesBeyondBank;
+  const through = f.bankLinesThrough ? `the newest bank line on the site is ${f.bankLinesThrough}` : "no bank line is on the site";
+  return `${n} remittance${n === 1 ? "" : "s"} with a payment number, ${money(f.remittancesBeyondBankCents)} between ${n === 1 ? "it" : "them"}, ${n === 1 ? "was" : "were"} advised too late for the bank record on file to show ${n === 1 ? "its" : "their"} deposit (${through}), so ${n === 1 ? "it is" : "they are"} not yet checked: nothing is known to be missing${horizon(f)}`;
 }
 
 export function runDailyCheck(f: Facts): Check[] {
@@ -715,8 +735,8 @@ export function runDailyCheck(f: Facts): Check[] {
     reads:
       "The remittance register, filled from the Remit Summary export. Each remittance with a payment number, advised since the books began, is looked for among the cash receipts and in ProviderPay's account history, by the Remits tab's own computation, and an amount alone does not count as proof for one that has a payment number. It sees only as far as the last export, and a deposit with no remittance advice is not looked for.",
     fingerprint: bankedFingerprint(f),
-    href: "/remits",
-    action: "See the remittances",
+    href: f.remittancesNotBanked === 0 && f.remittancesBeyondBank > 0 ? "/money" : "/remits",
+    action: f.remittancesNotBanked === 0 && f.remittancesBeyondBank > 0 ? "Load the bank record" : "See the remittances",
     shouldBe:
       "A remittance carrying a payment number is the payer saying that deposit has been made, and the deposit is banked from the payer payment report under that same number. Every such remittance advised since the books began should therefore have cash banked against it: a receipt carrying that number; or, where the receipt was banked under another remittance of the same amount, ProviderPay's account history showing the deposit under that number swept to a bank line of the same amount; or a receipt keyed to the remittance's own number. A receipt of the same amount near the advice date is not enough for one that has a payment number, because two remittances of one amount are two deposits. One with no payment number cannot be looked for by number: ProviderPay has not matched it to a payment yet, or its payer pays by cheque and never will. It is said apart from the count, with what stands for it, and joins the count if it is given a number.",
     observed:
@@ -731,15 +751,19 @@ export function runDailyCheck(f: Facts): Check[] {
         ? f.remittancePaymentsPosted === 0
           ? "no remittance has been read yet, so there is nothing to compare"
           : `${f.remittancePaymentsPosted} payments came from a remittance and the register holds none of them, so nothing can be compared`
+        : f.remittancesNotBanked === 0 && f.remittancesBeyondBank > 0
+          ? beyondBankSaid(f)
         : f.remittancesNotBanked > 0
-          ? `${f.remittancesNotBanked} of the ${f.remittancesNumbered} remittances with a payment number, advised since the books began, ${f.remittancesNotBanked === 1 ? "is" : "are"} advised as paid and not banked, ${money(f.remittancesNotBankedCents)}${f.remittancesNotBanked === 1 ? "" : " between them"}${unbankedNamed(f)}${sweptSaid(f, "other")}${namedSaid(f, "other")}${unnumberedSaid(f)}${notPositiveSaid(f)}${horizon(f)}`
+          ? `${f.remittancesNotBanked} of the ${f.remittancesNumbered} remittances with a payment number, advised since the books began, ${f.remittancesNotBanked === 1 ? "is" : "are"} advised as paid and not banked, ${money(f.remittancesNotBankedCents)}${f.remittancesNotBanked === 1 ? "" : " between them"}${unbankedNamed(f)}${f.remittancesBeyondBank > 0 ? `. Separately, ${beyondBankSaid(f)}` : ""}${sweptSaid(f, "other")}${namedSaid(f, "other")}${unnumberedSaid(f)}${notPositiveSaid(f)}${horizon(f)}`
           : f.remittancesNumbered === 0
             ? `no remittance advised since the books began carries a payment number, so there is nothing for this check to compare${unnumberedSaid(f)}${notPositiveSaid(f)}${horizon(f)}`
             : `all ${f.remittancesNumbered} remittances with a payment number, advised since the books began, have their cash${sweptSaid(f, "of them")}${namedSaid(f, "of them")}${unnumberedSaid(f)}${notPositiveSaid(f)}${horizon(f)}`,
-    ok: f.remittancesNotBanked === 0 && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
+    ok: f.remittancesNotBanked === 0 && f.remittancesBeyondBank === 0 && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
     difference:
       f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0
         ? "The register is empty while payments posted from remittances are on the books, so this check is measuring nothing. Re-read the Remit Summary export to fill it; until then neither this check nor the cash side can be trusted."
+        : f.remittancesNotBanked === 0 && f.remittancesBeyondBank > 0
+          ? `This is not measured, and it is not missing money: no bank line after ${f.bankLinesThrough ?? "the start of the books"} is on the site, so a deposit for any of these remittances could not show even if it had arrived. Nothing is known to be wrong. Load the bank record for the months after that (Money → upload the bank export) and this check judges them.`
         : f.remittancesNotBanked === 0
           ? null
           : `${money(f.remittancesNotBankedCents)} is advised as paid and no receipt carries its payment number. Two causes look the same here: the deposit has reached the bank and has not been tied to this payment number yet, or the payer has advised it and not yet paid it. A deposit of that amount on the bank statement, on or after the advice date, settles which — unless that deposit already stands for another remittance of the same amount, because two remittances of one amount are two deposits. ProviderPay's account history for the month shows each deposit by its payment number and each sweep to the bank; where it shows this remittance's deposit reaching a bank line, the remittance is banked and leaves this list, so one that is on it is one the history on file does not show, or does not yet reach. The Payments export, read, can tie a deposit too, but the site can refuse its receipt as the same money as a receipt it already holds of that amount within a week, so where one is already there the account history is what settles it. Each remittance named above says what stands for it and what the history can show.`,

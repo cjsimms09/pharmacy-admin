@@ -25,6 +25,9 @@ const wellRun: Facts = {
   remittancesNotBanked: 0,
   remittancesNotBankedCents: 0,
   unbankedRemittances: [],
+  remittancesBeyondBank: 0,
+  remittancesBeyondBankCents: 0,
+  bankLinesThrough: "2026-09-17",
   remittancesBankedBySweep: 0,
   remittancesBankedByRemitNumber: 0,
   remittanceRegisterRows: 51,
@@ -1215,5 +1218,44 @@ describe("the press on the card is wired to its two actions (read from the sourc
       const acts = body.indexOf(touch);
       assert.ok(asks > -1 && acts > -1 && asks < acts, `${action} does not ask who is pressing before it records`);
     }
+  });
+});
+
+describe("remittances advised after the bank record on file ends are not yet measurable, and are never called unbanked", () => {
+  const beyond = { remittancesBeyondBank: 47, remittancesBeyondBankCents: 52_734_938, bankLinesThrough: "2026-09-30" };
+
+  test("only remittances the bank lines could not show: the check still fails, but says what is true and points at the bank record", () => {
+    const c = check(beyond, BANKED);
+    assert.equal(c.ok, false, "never a pass: nothing was measured");
+    assert.doesNotMatch(c.observed, /advised as paid and not banked/);
+    assert.match(c.observed, /47 remittances/);
+    assert.match(c.observed, /\$527,349\.38/);
+    assert.match(c.observed, /2026-09-30/);
+    assert.match(c.observed, /nothing is known to be missing/);
+    assert.equal(c.href, "/money");
+    assert.equal(c.action, "Load the bank record");
+    assert.match(String(c.difference), /not measured, and it is not missing money/);
+  });
+
+  test("with a remittance the bank record could show and does not, that one is still called unbanked and the other is said apart", () => {
+    const c = check(
+      {
+        ...beyond,
+        remittancesNotBanked: 1,
+        remittancesNotBankedCents: 150_000,
+        unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-09-10", amountCents: 150_000, tie: null, history: { state: "none" } }],
+      },
+      BANKED,
+    );
+    assert.equal(c.ok, false);
+    assert.match(c.observed, /advised as paid and not banked/);
+    assert.match(c.observed, /Separately, 47 remittances/);
+    assert.equal(c.href, "/remits");
+  });
+
+  test("the same finding is the same finding whatever the beyond-bank totals, so what he said of it survives an import", () => {
+    const a = check(beyond, BANKED).fingerprint;
+    const b = check({ ...beyond, remittancesBeyondBank: 52, remittancesBeyondBankCents: 60_000_000, bankLinesThrough: "2026-10-02" }, BANKED).fingerprint;
+    assert.equal(a, b);
   });
 });

@@ -152,6 +152,18 @@ async function gather(): Promise<Facts> {
     return uncovered ? { state: "has a gap", month: uncovered } : { state: "reaches past", through: reach.through };
   };
 
+  /*
+   * What the bank record on file can show. A remittance is "advised and not banked" only where a deposit for it would appear in the bank
+   * lines we hold if it had arrived: those lines must reach past the advice date plus the fortnight the matcher allows. Where they stop
+   * sooner the remittance is not unbanked, it is not yet measurable. On 6 November 2026 the bank lines ended 30 September, the October
+   * export of 15 October was never loaded, and 47 October advices ($527,349.38) were called unbanked on the strength of a file nobody had loaded.
+   */
+  const bankThrough = await db
+    .select({ d: sql<string | null>`max("on")` })
+    .from(schema.bankLines)
+    .then((r) => r[0]?.d ?? null);
+  let beyondBank = 0;
+  let beyondBankCents = 0;
   const unbankedRemittances: { payer: string | null; remitOn: string | null; amountCents: number; tie: Tie; history: History }[] = [];
   let unbankedCents = 0;
   let bankedBySweep = 0;
@@ -164,6 +176,11 @@ async function gather(): Promise<Facts> {
     }
     if (s.banked === "remittance number") {
       bankedByRemitNumber++;
+      continue;
+    }
+    if (s.row.remitOn !== null && (bankThrough === null || bankThrough < addDays(s.row.remitOn, STANDING_WINDOW_DAYS))) {
+      beyondBank++;
+      beyondBankCents += s.row.amountCents;
       continue;
     }
     unbankedRemittances.push({ payer: s.row.payerName, remitOn: s.row.remitOn, amountCents: s.row.amountCents, tie: s.banked, history: historyOf(digits(s.row.paymentNumber), s.row.remitOn) });
@@ -216,6 +233,9 @@ async function gather(): Promise<Facts> {
     remittancesBankedBySweep: bankedBySweep,
     remittancesBankedByRemitNumber: bankedByRemitNumber,
     unbankedRemittances,
+    remittancesBeyondBank: beyondBank,
+    remittancesBeyondBankCents: beyondBankCents,
+    bankLinesThrough: bankThrough,
     remittanceRegisterRows: registerRows,
     remittancesNumbered: numbered,
     remittancesNotPositive: notPositive,
