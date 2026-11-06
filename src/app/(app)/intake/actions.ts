@@ -54,10 +54,11 @@ export async function readIntoIntake(
   if (hint?.kind === "balance_on_hand") {
     try {
       const { fileOnHand } = await import("@/lib/shelf");
-      const r = await fileOnHand(bytes, file.fileName, { userId: user.id }, { countedOn: hint.countedOn ?? undefined, documentId: docId });
+      const r = await fileOnHand(bytes, file.fileName, { userId: user.id }, { countedOn: hint.countedOn ?? undefined, documentId: docId, fallbackCountedOn: todayIso() });
       const summary = r.ok
         ? `${r.items.toLocaleString("en-US")} items counted on ${r.countedOn}` +
           (r.replaced ? ", replacing the count already held for that day" : "") +
+          (r.dateAssumed ? " (the file carries no date, so it is dated the day it was dropped)" : "") +
           (Object.keys(r.skipped).length > 0
             ? `; ${Object.entries(r.skipped).map(([why, n]) => `${n} ${why}`).join(", ")}`
             : "")

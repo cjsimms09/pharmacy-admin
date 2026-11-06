@@ -97,11 +97,13 @@ export async function fileOnHand(
   buf: Buffer,
   fileName: string,
   by: { userId: string },
-  opts: { countedOn?: string; documentId?: string | null } = {},
+  opts: { countedOn?: string; documentId?: string | null; fallbackCountedOn?: string } = {},
 ): Promise<
   | {
       ok: true;
       countedOn: string;
+      /** True where the file carried no date and the day the caller named as a fallback was used, so the caller can say so. */
+      dateAssumed: boolean;
       items: number;
       replaced: boolean;
       /** How many older counts the retention rule removed, and how many remain. */
@@ -114,7 +116,13 @@ export async function fileOnHand(
   const parsed = readOnHand(buf.toString("utf8"));
   if (parsed.problems.length > 0 && parsed.rows.length === 0)
     return { ok: false, why: parsed.problems[0] };
-  const countedOn = opts.countedOn ?? parsed.countedOn;
+  /*
+   * A count the file does not date is dated by the caller's fallback where one was given: the day a person dropped it. The intake
+   * page refused such a file and left it "waiting for you" for two months (8 September to 6 November 2026) with nothing to press that
+   * could clear it. A date the file carries, or one he typed, always wins over the fallback.
+   */
+  const dateAssumed = !opts.countedOn && !parsed.countedOn && Boolean(opts.fallbackCountedOn);
+  const countedOn = opts.countedOn ?? parsed.countedOn ?? opts.fallbackCountedOn;
   if (!countedOn) {
     return {
       ok: false,
@@ -158,7 +166,7 @@ export async function fileOnHand(
     unitsThousandths: totals.unitsThousandths,
     valueCents: totals.valueCents,
     rxValueCents: rxTotals.valueCents,
-    datedBy: opts.countedOn ? "typed" : (parsed.countedOnSource ?? null),
+    datedBy: opts.countedOn ? "typed" : dateAssumed ? "day dropped" : (parsed.countedOnSource ?? null),
     documentId: opts.documentId ?? null,
     createdBy: by.userId,
   });
@@ -197,6 +205,7 @@ export async function fileOnHand(
   return {
     ok: true,
     countedOn,
+    dateAssumed,
     items: parsed.rows.length,
     replaced: Boolean(existing),
     unmappedColumns: parsed.unmappedColumns,
