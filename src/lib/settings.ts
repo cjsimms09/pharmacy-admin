@@ -441,6 +441,7 @@ export const SETTING_KEYS = [
    * improvement to the reader arrived too late for exactly the invoices that needed it.
    */
   "invoice_short_reread_result",
+  "invoice_undated_reread_result",
   /**
    * The morning check: when it last ran, and what it found (daily-check.ts).
    *

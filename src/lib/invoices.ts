@@ -2481,6 +2481,40 @@ export async function setInvoiceDate(id: string, invoiceDate: string, user: { na
 }
 
 /**
+ * Puts the printed date on an invoice that was filed without one, by reading the stored document again.
+ *
+ * Two IPD invoices (1039869 and 1040450, shipped 4 and 5 November 2026) sat in the archive with no date, so a date range could not
+ * produce them and the morning list said "2 invoices have no date", though both pages print "Ship Date: 11/04/2026" and the reader has
+ * known that label for weeks. It had been taught after they were filed, and nothing ever read them again: the same gap as the invoices
+ * recorded short, which have their own re-read. The date is the one the document prints (setInvoiceDate), so this is the reader doing
+ * what the person would do, never a guess from the day the invoice arrived. A document with no readable date keeps its row as it is.
+ */
+export async function rereadUndatedInvoices(
+  opts: { user?: { name: string } } = {},
+): Promise<{ checked: number; dated: number; stillUndated: number }> {
+  const rows = await db.query.supplierInvoices.findMany({ where: sql`${schema.supplierInvoices.invoiceDate} is null or trim(${schema.supplierInvoices.invoiceDate}) = ''` });
+  const { readFile } = await import("./files");
+  let checked = 0;
+  let dated = 0;
+  for (const row of rows) {
+    const doc = await db.query.documents.findFirst({ where: eq(schema.documents.id, row.documentId) });
+    if (!doc) continue;
+    try {
+      const text = textOf(await readFile(doc.storageKey));
+      if (!text) continue;
+      checked++;
+      const date = classifyInvoiceText(text).invoiceDate;
+      if (!date || !/^d{4}-d{2}-d{2}$/.test(date)) continue;
+      await setInvoiceDate(row.id, date, opts.user ?? { name: "the re-read of undated invoices" });
+      dated++;
+    } catch {
+      /* Unreadable now as before: it stays undated and stays on the list. */
+    }
+  }
+  return { checked, dated, stillUndated: rows.length - dated };
+}
+
+/**
  * The day an invoice was paid, as somebody recorded it.
  *
  * For a supplier with no ledger feed the cash account's cost of goods counts the invoice in the month

@@ -476,6 +476,11 @@ export async function register() {
           `, ${s2.stillShort} still short`,
       );
 
+      /* And the invoices filed with no date: the reader may have learned the label since, and nothing else would look at them again. */
+      const { rereadUndatedInvoices } = await import("./lib/invoices");
+      const dated = await rereadUndatedInvoices({ user: { name: "the nightly re-read" } });
+      if (dated.dated > 0) await setSetting("invoice_undated_reread_result", `${new Date().toISOString()}: ${dated.dated} dated from the document, ${dated.stillUndated} still without a date`);
+
       const { fillLineSchedules, correctLinesBySupplierClass } = await import("./lib/line-schedule-backfill");
       /*
        * The supplier's class first, because it corrects answers the fill below would never revisit:
