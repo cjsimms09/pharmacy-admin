@@ -1,0 +1,200 @@
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import { groupKey, groupProducts, equivalentsOf } from "../src/lib/product-groups";
+
+/**
+ * Whether two NDCs are the same product for buying purposes. The key is product-key.ts's reading of
+ * NADAC's description plus the things that must also match — brand/generic, pricing unit, OTC —
+ * and it errs towards too many groups: a product split loses a comparison, a product wrongly
+ * merged recommends a switch that cannot be dispensed.
+ */
+const row = (ndc11: string, description: string | null, over: Partial<{ classification: string; pricingUnit: string; otc: boolean }> = {}) => ({
+  ndc11, description, classification: "G", pricingUnit: "EA", otc: false, ...over,
+});
+
+describe("what makes two NDCs one product", () => {
+  test("the same NADAC description from two manufacturers is one product", () => {
+    const g = groupProducts([row("00093505698", "ATORVASTATIN CALCIUM 40 MG TABLET"), row("68180063609", "ATORVASTATIN CALCIUM 40 MG TABLET")]);
+    assert.equal(g.size, 1);
+    assert.deepEqual([...g.values()][0], ["00093505698", "68180063609"]);
+  });
+
+  test("spacing between a number and its unit does not split a product", () => {
+    assert.equal(groupKey(row("1", "AMLODIPINE 5 MG TABLET")), groupKey(row("2", "AMLODIPINE 5MG TABLET")));
+  });
+
+  test("a salt or a release profile is never blurred, as product-key.ts guarantees", () => {
+    assert.notEqual(groupKey(row("1", "METOPROLOL SUCCINATE ER 50 MG TABLET")), groupKey(row("2", "METOPROLOL TARTRATE 50 MG TABLET")));
+    assert.notEqual(groupKey(row("1", "METFORMIN HCL ER 500 MG TABLET")), groupKey(row("2", "METFORMIN HCL 500 MG TABLET")));
+  });
+
+  test("a brand and its generic are not one buying decision", () => {
+    assert.notEqual(groupKey(row("1", "LIPITOR 40 MG TABLET", { classification: "B" })), groupKey(row("2", "LIPITOR 40 MG TABLET", { classification: "G" })));
+  });
+
+  test("different strengths, units or OTC status are different products", () => {
+    assert.notEqual(groupKey(row("1", "ATORVASTATIN CALCIUM 40 MG TABLET")), groupKey(row("2", "ATORVASTATIN CALCIUM 20 MG TABLET")));
+    assert.notEqual(groupKey(row("1", "X 5MG TABLET", { pricingUnit: "EA" })), groupKey(row("2", "X 5MG TABLET", { pricingUnit: "ML" })));
+    assert.notEqual(groupKey(row("1", "X 5MG TABLET", { otc: false })), groupKey(row("2", "X 5MG TABLET", { otc: true })));
+  });
+
+  test("an NDC with no description, or one too thin to key safely, is placed nowhere and is its own equivalent", () => {
+    assert.equal(groupKey(row("1", null)), null);
+    assert.equal(groupKey(row("1", "   ")), null);
+    assert.equal(groupKey(row("1", "LATANOPROST")), null); // no strength: a name alone is not a product
+    assert.deepEqual(equivalentsOf([row("1", null), row("2", "X 5MG TABLET")], "1"), ["1"]);
+  });
+
+  test("one NDC with several NADAC rows is one NDC, placed by its first description", () => {
+    const g = groupProducts([row("1", "X 5MG TABLET"), row("1", "X 5MG TABLET"), row("1", "SOMETHING ELSE 1MG TABLET"), row("2", "X 5MG TABLET")]);
+    assert.equal(g.size, 1);
+    assert.deepEqual(equivalentsOf([row("1", "X 5MG TABLET"), row("2", "X 5MG TABLET"), row("3", "Y 5MG TABLET")], "2"), ["1", "2"]);
+  });
+});
+
+/**
+ * The FDA directory's key, which is the identity wherever the directory carries the NDC.
+ *
+ * This exists because reading the product out of a description failed in the direction the module
+ * says it must never fail in. Measured against the directory across the 23,494 catalogue NDCs where
+ * both had an answer, keying on NADAC's description merged 1,092 keys covering 10,427 NDCs that
+ * the FDA says are different products — lithium carbonate 300mg arriving as one product covering
+ * the capsule, the tablet and the gelatin-coated capsule, because NADAC's house style often states
+ * no dosage form and everything collapses into "unspecified-form".
+ */
+describe("the FDA directory decides the product where it carries the NDC", () => {
+  const fda = (ndc11: string, equivalenceKey: string | null, description: string | null, over: Partial<{ classification: string; pricingUnit: string; otc: boolean }> = {}) => ({
+    ndc11, equivalenceKey, description, classification: "G", pricingUnit: "EA", otc: false, ...over,
+  });
+
+  test("two labelers of one FDA product are one product, whatever their descriptions say", () => {
+    const key = "atorvastatin calcium|20 mg/1|tablet|oral";
+    assert.equal(
+      groupKey(fda("00093505698", key, "ATORVASTATIN CALC TB 20MG BRP 90")),
+      groupKey(fda("68180063609", key, "ATORVASTATIN 20MG TABLET")),
+    );
+  });
+
+  test("the form the description lost is still kept apart, because the FDA states it", () => {
+    // The real case: NADAC gives no form for either, so both keyed to "lithium carbonate|300mg|
+    // unspecified-form" and one group covered the capsule and the tablet.
+    const capsule = "lithium carbonate|300 mg/1|capsule|oral";
+    const tablet = "lithium carbonate|300 mg/1|tablet|oral";
+    assert.notEqual(
+      groupKey(fda("1", capsule, "LITHIUM CARBONATE 300MG")),
+      groupKey(fda("2", tablet, "LITHIUM CARBONATE 300MG")),
+    );
+  });
+
+  test("a brand and its generic share an FDA key and are still not one buying decision", () => {
+    const key = "atorvastatin calcium|20 mg/1|tablet|oral";
+    assert.notEqual(
+      groupKey(fda("1", key, "LIPITOR 20 MG TABLET", { classification: "B" })),
+      groupKey(fda("2", key, "ATORVASTATIN 20 MG TABLET", { classification: "G" })),
+    );
+  });
+
+  test("two pricing units are never one product, FDA key or not", () => {
+    const key = "amoxicillin|400 mg/5ml|suspension|oral";
+    assert.notEqual(
+      groupKey(fda("1", key, "AMOXICILLIN 400MG/5ML", { pricingUnit: "ML" })),
+      groupKey(fda("2", key, "AMOXICILLIN 400MG/5ML", { pricingUnit: "EA" })),
+    );
+  });
+
+  test("the description is read only where the directory has no answer", () => {
+    // Same description, one placed by the FDA and one not: two groups, which costs a comparison
+    // and cannot recommend a switch. That is the safe direction.
+    assert.notEqual(
+      groupKey(fda("1", "gabapentin|300 mg/1|capsule|oral", "GABAPENTIN 300 MG CAPSULE")),
+      groupKey(fda("2", null, "GABAPENTIN 300 MG CAPSULE")),
+    );
+    // And where neither has an FDA key, the description still groups them as it always did.
+    assert.equal(
+      groupKey(fda("1", null, "GABAPENTIN 300 MG CAPSULE")),
+      groupKey(fda("2", null, "GABAPENTIN 300MG CAP")),
+    );
+  });
+
+  test("an FDA key can never collide with a description key", () => {
+    const both = "gabapentin 300mg|300mg|capsule";
+    assert.notEqual(groupKey(fda("1", both, null)), groupKey(fda("2", null, "GABAPENTIN 300 MG CAPSULE")));
+  });
+
+  test("an NDC the FDA places needs no description at all", () => {
+    assert.ok(groupKey(fda("1", "gabapentin|300 mg/1|capsule|oral", null)) !== null);
+    // Where it has neither, it is still unplaceable rather than placed loosely.
+    assert.equal(groupKey(fda("1", null, null)), null);
+  });
+});
+
+/*
+ * An OTC row is reimbursed differently or not at all, so it is not the same buying decision as its
+ * prescription counterpart — groupKey has always said so by appending OTC or RX.
+ *
+ * Three of the four stores unified in 1c8591d did not pass `otc` at all, so every NDC keyed as RX
+ * in them and as OTC in replay-store. Two failures at once: an OTC product merged with the
+ * prescription one in three stores, and a group formed in replay-store could not be reconciled with
+ * the same product anywhere else, because the keys differed by construction.
+ */
+test("an OTC row is never the same product as the prescription one", () => {
+  const rx = { ndc11: "1", equivalenceKey: "ibuprofen-200-tab-oral", description: "IBUPROFEN 200MG TAB", classification: "G", pricingUnit: "EA", otc: false };
+  const otc = { ...rx, ndc11: "2", otc: true };
+  assert.notEqual(groupKey(rx), groupKey(otc));
+  assert.match(groupKey(rx)!, /\|RX$/);
+  assert.match(groupKey(otc)!, /\|OTC$/);
+});
+
+test("an OTC flag nobody passes reads as prescription, which is why it has to be passed", () => {
+  // The bug in three stores: `otc` simply absent, so an OTC NDC keyed as RX and merged.
+  const passed = groupKey({ ndc11: "1", equivalenceKey: "k", description: null, classification: "G", pricingUnit: "EA", otc: true });
+  const dropped = groupKey({ ndc11: "1", equivalenceKey: "k", description: null, classification: "G", pricingUnit: "EA" });
+  assert.notEqual(passed, dropped);
+});
+
+describe("a shared equivalence key is not permission to substitute", () => {
+  const src = (ndc11: string, equivalenceKey: string, teCode: string | null) => ({
+    ndc11,
+    equivalenceKey,
+    teCode,
+    description: null,
+    classification: "B",
+    pricingUnit: "EA",
+    otc: false,
+  });
+
+  test("Ozempic and Wegovy are not one product, whatever the key says", () => {
+    /*
+     * The recommendation this test exists for, in the owner's words on 9 September: "why are these
+     * popping? there is only 1 ndc.. we need to check the logic here". The site had offered him
+     * $193.31 a fill to buy one instead of the other. Same molecule, same strength, same form,
+     * same route, same manufacturer, so the same FDA equivalence key — and two applications for
+     * two different indications, neither dispensable for the other.
+     */
+    const key = "semaglutide|4 mg/1|tablet|oral";
+    const ozempic = groupKey(src("00169170430", key, null));
+    const wegovy = groupKey(src("00169440431", key, null));
+    assert.ok(ozempic && wegovy, "both are placed");
+    assert.notEqual(ozempic, wegovy, "an unrated product is substitutable for nothing");
+  });
+
+  test("Mounjaro and Zepbound likewise, and every other strength of them", () => {
+    for (const strength of ["2.5 mg/.5ml", "5 mg/.5ml", "15 mg/.5ml"]) {
+      const key = `tirzepatide|${strength}|injection, solution|subcutaneous`;
+      assert.notEqual(groupKey(src("00002150680", key, null)), groupKey(src("00002240680", key, null)), strength);
+    }
+  });
+
+  test("two packages of the same product are still one buying choice", () => {
+    // The safe direction has to stay useful: different pack sizes of one application still compare.
+    const key = "semaglutide|4 mg/1|tablet|oral";
+    assert.equal(groupKey(src("00169440431", key, null)), groupKey(src("00169440499", key, null)));
+  });
+
+  test("products the Orange Book rates equivalent are one group, and the suffix is part of the rating", () => {
+    const key = "metoprolol succinate|50 mg/1|tablet, extended release|oral";
+    assert.equal(groupKey(src("00093733301", key, "AB")), groupKey(src("00378318001", key, "AB")));
+    assert.notEqual(groupKey(src("00093733301", key, "AB1")), groupKey(src("00378318001", key, "AB2")));
+    assert.notEqual(groupKey(src("00093733301", key, "AB")), groupKey(src("00378318001", key, "AB1")));
+  });
+});

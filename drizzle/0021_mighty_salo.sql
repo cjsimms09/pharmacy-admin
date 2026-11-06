@@ -1,0 +1,1 @@
+ALTER TABLE `documents` ADD `no_expiry` integer DEFAULT false NOT NULL;

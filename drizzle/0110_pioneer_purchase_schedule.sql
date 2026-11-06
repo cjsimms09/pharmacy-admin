@@ -1,0 +1,20 @@
+-- What the pharmacy's own system says each delivery carried, by DEA schedule.
+--
+-- 21 CFR 1304.04(h)(1) wants the Schedule II records kept apart from everything else, so every
+-- invoice on this site is filed by what it carries. Until now that answer came from reading the
+-- wholesaler's page: the class letter printed beside each line where the layout prints one, and
+-- a model where it does not.
+--
+-- The model is the part that has to go. The owner: "We need to find way to do this without using
+-- api, if we need to use more info from pioneer and just use invoice for image than do that but we
+-- still need to separate c2, c3-5, non controlled invoices." He is right, and PioneerRx already
+-- holds the better answer — `Item.Item.DeaSchedule`, the schedule of the item the pharmacy itself
+-- booked in against that invoice number. It is the receiving pharmacy's own determination rather
+-- than a reading of somebody's typography, it costs nothing, and it never declines to answer.
+--
+-- The wholesaler's PDF stays exactly where it is and stays the record. This decides which drawer
+-- it goes in.
+--
+-- Stored as the distinct schedules seen on the delivery, comma-separated and sorted: "0",
+-- "0,2", "0,4", "2". Null where the delivery predates this column.
+ALTER TABLE pioneer_purchases ADD COLUMN dea_schedules text;

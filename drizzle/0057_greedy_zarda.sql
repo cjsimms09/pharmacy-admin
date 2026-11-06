@@ -1,0 +1,1 @@
+ALTER TABLE `claims` ADD `cash_plan` integer DEFAULT false NOT NULL;

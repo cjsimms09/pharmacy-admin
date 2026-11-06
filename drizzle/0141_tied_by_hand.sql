@@ -1,0 +1,12 @@
+-- Who tied a payment to its claim by hand, where the site could not choose.
+--
+-- A payment that fits two claims equally well (the same amount, the same fill, a take-back that equals neither)
+-- is left tied to none, and the Payments page asked for a decision it gave no way to take: "Attach each to the
+-- claim it paid. The site has no way to do that by hand yet." 33 payments, $2,017.47, stood in that state on
+-- 5 October 2026. Tying one by hand has to survive what the site does by itself afterwards (the sweep that
+-- revisits tied payments, the next import of the same money), and tell the owner apart from the matcher when
+-- the tie is read back, so the choice is held on the payment: the name of whoever made it, null where the
+-- matcher did.
+--
+-- Additive; every payment already held reads as the matcher's.
+ALTER TABLE `claim_payments` ADD COLUMN `tied_by` text;

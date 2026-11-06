@@ -1,0 +1,1826 @@
+# What the owner has asked for
+
+Everything the owner says, written down the moment he says it, whether or not it is being worked
+on. He types while a session is working and does not expect it dropped or acted on immediately.
+Nothing leaves this file because it was inconvenient; a line leaves when it is **done and
+verified against the real database**, and moves to "Done" with the number that proves it.
+
+`docs/HANDOFF.md` remains the channel between the two sessions. This file is the owner's queue.
+
+## The standing brief
+
+> "Everything we do, we need to consider the end goal which is finding way to make pharmacy more
+> money — if it doesn't lead to that then what we are doing is pointless."
+
+> "Take the request I give you and act as me, give me what I want and the best tool, not
+> necessarily exactly what I ask for."
+
+> "Double check all logic to make sure it makes sense — ordering logic, NADAC, pricing, which
+> supplier to buy from."
+
+**Order of work, in the owner's words (7 September):** *"Help keep building the base of this site,
+the data ingestion, and once we have a solid base and the site is getting everything it needs we
+will start to help improve profits."* So: ingestion and arithmetic first, profit tooling second.
+The math has to be perfect — a wrong number that looks right is worse than no number.
+
+## Now
+
+### 0b. 7 October: "spd", legal names, and the quarterly report (asked mid-turn; not yet understood)
+
+> *"spd is uploaded. we need to make sure we get legal names, then double check to make sure our quareterly report is being done correctly, accurately, and as state intended"*
+
+Queued here, not dropped, and not guessed at. What a session on the pharmacy computer could establish on 7 October by read-only counts (no patient information, no folder listing, no names printed):
+
+- **"spd".** No file name or title on the site contains it: nine tables hold a file name, and every text column of every table was searched except those named like an id, hash, key, token, encrypted value, JSON, body, raw text or HTML, so a message body was not searched. The rows that match the three letters are a Medicare Part D plan's processor code on claims and plan rows and the notes about that plan (three `proposed_from` cells were not read), which is not an upload. The two documents a person (not the mailbox sweep) filed since the evening of 6 October are PDFs of category "other", each attached to a person and to a credential; they were not opened (the upload folder is read-denied) and neither is named "spd". If "spd" went anywhere else (a message to a session, a shared folder, another login), nothing here has seen it.
+- **The quarterly report.** The one periodic report the site prepares for the state's benefit is the CQI summary (K.A.R. 68-19-1 is quoted in `src/lib/cqi.ts`), and it is prepared **every two months**, not every quarter: four on file, April–May (carries the one incident; final; entered as historical), June–July and August–September (null reports; final), October–November (draft, due 15 December). Their null-report flags agree with the incident dates: the one incident was reported on 7 April, and the three later windows contain none. The quarterly duties on Compliance are three (controlled-substance receipts against dispensings, the emergency-kit check, a backup restore test), none of them a report to the state; rebate periods, the recurring-expense cadence and two practice-decision choices also say "quarterly" and none of those is one either. No report of payroll, wages or tax for an agency turned up by a search of file names for those words (payroll appears as an expense category on the accounting pages); no page was read for it.
+- **Legal names.** A person is stored as a first name and a last name, and nothing says whether that is the name on their licence. The printed CQI summary (`cqi/summaries/[id]/print/page.tsx`, read only for these lines) builds the pharmacist's name from that first and last name and takes "Facility Name" from the one pharmacy-name setting; there is no separate field for the name the registration is held in. The only other "legal name" wording in the code is the supplier match and the business-associate form's label.
+
+SHOULD BE: cannot be written yet. Which report he means, and what the state wants on it, are not on the site: the Kansas rule is quoted in one code comment and no copy of the state's form or text is in the repo. So this is not a finding. It is one question.
+
+**Question for him (not yet asked):** what is "spd" and where did you put it (the site's Documents or Intake, a folder, a message)? And which quarterly report: the CQI summary, which the site prepares every two months, or one the state asks you to file each quarter, and which? If it is the CQI summary, is "legal names" the facility name and the pharmacist's name on its printed page?
+
+Not checked: the contents of any uploaded file; the printed CQI summary against the state's form; whether the names printed on it match anyone's licence; anything outside the site.
+
+### 0a. 18 September: reconciling claims perfectly, and getting the 835s to arrive on their own
+
+> *"now did we reconcile every claim we can? we need to correctly account for adjustments, this
+> will factor into cash accounting. we need to be able to reconcile claims perfectly... keep track
+> and account for fees, etc"*
+
+> *"I also need to know what companies we arent getting 835s for? and how I can change all 835s to
+> come into the SFTP that we setup.. this could be a pain in the ass and I need you to automate
+> this as much as possible. find who I need to send emails to and use email in site to request
+> changes to 835s and to bank account (EFT)"*
+
+Measured on the real database the same afternoon, after the ProviderPay detail import:
+
+- **Reconciliation, where it is possible at all.** 600 payments are for fills dispensed on or
+  after 1 September; 505 of them found their claim, 84%. The rest of the book cannot match and is
+  not a fault: claims run 5 Aug – 17 Sep while payments reference fills back to Feb 2024, and
+  *"we only have claims from 09/01"*.
+- **73 payments, $2,609.35, are for claims the site holds as `reversed`.** `findClaim` refuses to
+  attach money to a reversed claim, so these sit with no claim and nothing on any screen says so.
+  Almost certainly the brand-to-generic rebill shape fixed in `fillKey` on 17 September — the
+  money belongs to the row the prescription was re-billed on. **Open.**
+  **Update, 4 October:** `/claims/no-claim` now lists every payment that ties to no claim with its
+  reason, these among them. Counted again that day: 189 payments, net $6,779.52, sit on reversed
+  claims. In 10 of them (net $2,181.31) a reversed claim carries a sale date, which is a question
+  to him (OPEN-ITEMS, "Waiting on him"); in the other 179 (net $4,598.21) none does. Built, not
+  deployed.
+- **Remittance adjustments are not booked at all.** Every difference between the portal's remit
+  amount and what the site holds for that remittance is exactly the portal's "Adjust" column —
+  $12.40 on one remittance, $67.84 on another, $73.04 on a third, and so on, about **$259
+  across September**. `readRemitDetail` skips adjustment rows because they carry no prescription
+  number, so they can be posted against no claim. They are real money the payer kept and they
+  belong on the cash side. **Open — needs a decision on where they land** (expense, or an offset
+  against third-party revenue).
+- **Which payers' 835s never arrive by themselves, and moving them to the SFTP.** **Open.**
+  Needs: the list of payers by how their remittances actually reach the pharmacy, the enrolment
+  contact for each, and drafted emails requesting both the 835 routing change and the EFT
+  details. He has asked for this to be automated as far as it can be. Nothing is sent without him
+  approving each one.
+
+### 0. Everything he asked for on the afternoon of 16 September, and where each stands
+
+He said it plainly: *"dont just drop what you are doing, everything I say needs to be fixed.. you
+need to be keeping track and make sure evrything gets done"*. So every ask from that afternoon is
+here with its state, and nothing leaves until it is done and measured.
+
+| His words | State |
+|---|---|
+| "redsail says they sent an 835 yesterday and received an error" | **Done.** Their file had arrived and been read. Chasing it found five silent doors — see `OPEN-ITEMS.md`, all five fixed and deployed. |
+| "make sure veridikal and redsail will be received, reconciled and sorted perfectly next time" | **Done as far as data allows.** Both Veridikal reports read end to end; RedSail's 835 read and banked; allocation to the programme rather than the plan fixed and tested. A *live* match still waits on a September-fill remittance (late October). |
+| "we should still be able to test our logic.. does our logic make snese" | **Done.** `tests/voucher-chain.test.ts` walks all three programmes claim-to-settlement, and `scripts/voucher-dry-run.ts` runs the real September claims through the real functions: 48 of 48 attach to the right claim, none wrongly, none ambiguous, none unmatched. It found and fixed a real gap — a coordinated fill was refused because the matcher was not told which row carries the voucher. |
+| "improve what to expect page, with a table that is easier to read" | **Done.** Status leads each row with a colour bar, four counts above the table, wrong in red. |
+| "needs to include everything we are expecting" | **Done.** Every mailbox route that has ever delivered now appears, so a feed nobody wrote down cannot be invisible. |
+| "are we getting Balance on hand daily?" | **Yes, measured.** Nine consecutive days of emails, 8–16 September; counts loaded on seven of them. On the page as a daily row. |
+| "also mckesson reports" | **All on the page.** Drill down daily (10 days), returns daily since the 11th, totals sheets daily since the 11th, AP transactions once (11th), rebate breakdown once (5th). The last two are too few to measure a rhythm from and say so rather than guess. |
+| "it should show month closed only once everything is done, money matches and everything lines up" | **Done.** Four states; "closed" needs every document in *and* every figure tying. |
+| "get rid of still to upload for august alert" | **Done**, in the checklist rather than the alert, so every reader is fixed. |
+
+**Waiting on him, added late on 16 September:**
+
+- **Press "Read it again" on the Rx Systems line in the Inbox.** The supplies reader is deployed and
+  proved against that invoice — $1,715.00 of goods, $406.00 of freight excluded on their own printed
+  terms, arithmetic tying to their $2,121.00 total — but the message-id fix means that message will
+  never be swept again, so the one already in the vault needs the press. Everything they send after
+  today books itself.
+- **Vendors have no sending addresses.** Rx Systems and Endicia are both on the vendor register with
+  the right categories and no sending address recorded. The supplies reader falls back to matching on
+  the name, so Rx Systems works; the next supplies vendor will not until its address is on its row.
+  Deliberately not learned from the mail — that is the inference that nearly renamed his claims after
+  their courier this afternoon.
+
+**Answered on 17 September, and what each answer became:**
+
+- *"delete on gmail"* — a checkbox on Settings → Email, off until he ticks it, gated on proof rather
+  than on having finished: every attachment stored, every one identified, no reader that stopped
+  short. Anything less leaves the message where it is for ever.
+- *"AI output rate what do you need from me? fix it"* — nothing was needed. A $0 output rate is not a
+  price; the published rate for the model stands in, the page says so and names the **$87.00** the
+  zero was hiding, and his invoice figures replace it whenever he types them.
+- *"emprise you get at end of month.. stop asking"* and *"same with wells fargo"* — both moved to
+  month end and neither chased before it.
+- *"loggers exp date, idk leave vague but compliant"* — done by session 2 and merged. The clause
+  requires a current traceable certificate, kept and producible; dates recorded where known, said to
+  be unknown where not; currency confirmed at the annual review. No interval named, because the
+  certificate names its own.
+- *"bactrim indication ignore"* — dropped.
+
+**Still waiting on him, not on me:**
+
+- **Four BIN names** on Payers → Nobody can name. 73 claims carrying $1,830.76 have no payer, and
+  BIN 015581, 610097, 610502 and 025706 are most of the money. He reads these on sight; the site
+  never will, and after the courier incident it is not going to guess.
+- Every temperature sensor is typed `refrigerator`, including the room one, so the monthly log an
+  inspector reads prints "Room Temperature (refrigerator) · acceptable range 68.0F to 77.0F". Put to
+  him twice; display-only, but it prints on the document an inspector reads.
+
+### A. Stop the setup list nagging about things he does not have (16 September)
+
+> "these are all irrelevant, i dont have them or they arent relevant, need system to leave me
+> alone about them"
+
+Forty-five items, pasted from the setup list: an order minimum and a rebate ladder for eleven
+wholesalers each, a price file for eighteen, plus the Kansas Medicaid dispensing fee and ANDA's
+ladder. Most name suppliers he does not buy from on terms, or does not buy from at all.
+
+Two separate faults, and the second is the one that matters:
+
+1. **There is no way to say "not applicable".** Every one of these says *"something is wrong until
+   this is done"* and there is no third answer. A list that cannot be told it is wrong is a list
+   that only grows, and he stops reading it — which costs the items that are real.
+2. **It asks for a minimum and a ladder from suppliers who cannot have one.** A supplier whose
+   PioneerRx receipt is the invoice, or who is a manufacturer rather than a wholesaler, has no
+   order minimum to enter. The capture line on the compliance panel had exactly this fault and
+   was fixed by excluding `invoiceFromPioneer` suppliers; the setup list was never told.
+
+What it needs: a dismissal that survives the next import, per item, with the reason recorded and
+reversible — clause 4, "a one-press *this is wrong / this is settled / override*". Plus the
+supplier-shaped exclusions so most of these never appear. **Do not simply hide them**: the
+dismissed ones belong behind a count, so nothing silently disappears.
+
+**Question for him, and only one:** for the eleven wholesalers with no minimum — is it that there
+is no minimum, or that he does not buy from them at all? Those are different answers and the
+second one retires the supplier.
+
+### B. Vaccine storage: logger calibration, temperature records, the excursion plan (16 September)
+
+> "Review vaccine storage: logger calibration, temperature records and the excursion plan ... and
+> write and implement our policy for this"
+
+The standard, from the CDC Vaccine Storage and Handling Toolkit and the VFC programme: a certified
+digital data logger with a **current calibration certificate** (traceable, re-certified on the
+interval the certificate names), temperature recorded as the programme requires — VFC wants twice
+daily min/max readings on a paper or electronic log kept **three years** — and a **written routine
+for an out-of-range reading**: quarantine the stock, do not discard it, label it "do not use",
+call the manufacturer or the programme for a viability determination, and record what was decided.
+
+This is a policy the pharmacy performs, not a calculation, so the manual rule applies: *the manual
+is a standard, not a description* — nothing may be written that claims a practice nobody performs.
+
+**Cannot be started without his answers:**
+1. Does the pharmacy stock vaccines at all, and is it enrolled in VFC (which imposes the stricter
+   rules) or private stock only?
+2. What logger is in the unit, and when was it last calibrated — is there a certificate to file?
+3. Who is the primary and who is the backup vaccine coordinator? The plan needs two names.
+
+What the site can hold once those are answered: the certificate as a filed document with its
+expiry driving a reminder, the excursion plan as a written procedure, and each excursion as a
+record — reading, duration, what was quarantined, who was called, what they said, the outcome.
+
+### 0. Two-payer fills: understood, fixed, and reconciled to the penny (9 September)
+
+The owner: "We need to make sure we really understand secondaries and how to reconcile. How much to
+expect from each payer. Math has to be perfect and logic has to be sound." And, correcting me:
+"Secondary claims are not another claim are they? Same claim but 2 payors." Right on both counts —
+one fill, one script, two payers; the money adds and the script count must not.
+
+**Three things about PioneerRx that were guessed wrong first**, all now checked against the live
+database and written into `src/lib/pioneer-claims.ts`:
+
+1. `IsLatestClaimRecord = 1` returns one row per *fill*, not one per payer. The old feed used it, so
+   on a two-payer fill it kept whichever claim was transmitted last and threw the other away — it
+   saw one side of each and could not tell which. It reported "0 secondary claims" every run.
+2. `ClaimID` is a uniqueidentifier, so `max(ClaimID)` is not "the latest claim". Order by
+   `Transmission.CreatedOn` or `TransmittedDate`.
+3. `IsPrimaryThirdParty` is not the coordination-of-benefits position. `PrimaryClaimID` is: null on
+   the first payer, pointing at that payer's claim on the second.
+
+**The rule.** A fill's current money is the claims where `IsDuplicateClaim = 0`,
+`IsLastValidClaimForPayMethod = 1` and `TransactionResponseStatus = 'P'` — one row per payer, after
+reversals and rebills have settled. What each payer paid is its `NetAmountPaid`; what the patient
+owes is `PatientPayAmount`, which PioneerRx puts entirely on the last payer in the chain and zeroes
+on the earlier ones. So they can be summed across a fill, and the identity holds:
+
+    sum(NetAmountPaid) + sum(PatientPayAmount) = the fill's total price
+
+Verified on September: exact on all 37 two-payer fills, and on 1,614 of 1,617 single-payer ones. The
+three exceptions differ by $16.50 in total and are named rather than absorbed.
+
+**The trap.** Do not sum `Prescription.Claim.PatientPayAmountPaid` across payers. That is the raw
+NCPDP field, where the primary states the balance it passed on and the secondary states what is left
+after it; adding them counts the same dollar twice, by $50,644.55 across September. The
+remittance-pricing figures are the ones to read.
+
+**Fixed.** `pioneer-pull.ts` reads one row per payer and `fillsFromClaimRows` assigns position from
+`PrimaryClaimID` alone — the old reader put the first row it saw into the primary slot whatever its
+flag said, so a secondary returning first was lost twice over. Twelve tests, including that the
+order rows arrive in changes nothing, and that a third payer's money is counted even though the
+site's shape holds two. The run now reports 1,654 fills, 37 with two payers, 37 secondaries filled
+in where it used to say none.
+
+**Still open, and it is not this feed's fault.** PioneerRx says September's payers owe $136,104.14;
+the site holds $132,161.53. Every fill on both systems agrees to the cent and none differ — the
+whole $3,942.61 is 32 fills the site has never seen, because the claims come from the daily
+transaction report and some of those reports were run before their day finished. 7 September holds
+76 of 101 fills. The feed now names the short days so the reports can be sent again, and counts the
+opposite error too: one fill the site holds that PioneerRx does not.
+
+**Also settled:** Pharm D is the pharmacy's cash plan, so cash-pay fills arrive as third-party claims
+(every one of September's 1,916 fills has `IsCashPaid = 0`) — there is no missing cash-Rx feed. But
+no 835 will ever pay them, and whether the site treats them as receivables waiting for one is not
+yet checked. 147 claims carrying no money at all are rejections and are correctly dropped; 107 fills
+are cancelled or unfinished at $0.
+
+
+### 1. The drug catalogue has to be sound (7 September)
+
+The owner's four requirements, each of which is a thing the catalogue must be able to state for
+every drug it carries:
+
+- **Which drugs are equivalent.** This is the weak one. `productKey()` builds the grouping key out
+  of each supplier's own description text, and the wholesalers write in their own shorthand, so the
+  same drug fragments: **10,429 NDCs carry more than one product key**, and **64% of catalogue rows
+  (40,728 of 63,818) come out with no dosage form at all** because the keyer knows `tab` and `cap`
+  but the catalogues say `TB`, `CP`, `OS`, `SS`, `CPLT`, `PFS`, `SDV`. **7,655 McKesson rows key to
+  nothing at all.** Mounjaro 12.5mg is three products; Trulicity 0.75mg is three. This reaches
+  money directly: `reimbursement-fit.ts` takes a median MAC per product key to decide a payer's
+  formula, and `product-groups.ts` feeds `drug-profit.ts`'s choice of the most profitable NDC in a
+  product. Both are averaging across fragments of one product. **In progress.**
+- **Price from each supplier, including rebates.** Proven wrong and fixed 7 September: no rebate
+  rate was in force for any supplier because McKesson's three ladders never said which ratio drives
+  them, so 7,165 contract generics were compared at printed price — about 30% too high. Migration
+  `0084`; McKesson now 29% off contract items. Still to do: the GPR 1% off every generic (A), and
+  **the owner's actions** — forward McKesson invoices to the inbox and give the register McKesson's
+  invoice sender address, because there is not one McKesson invoice in the system and the rebate
+  earned-so-far figures run on invoices.
+- **NADAC of each drug.** Answered 7 September and sound: 26,246 of 45,791 catalogue NDCs, and 652
+  of the 681 NDCs actually dispensed, 650 of those current within three months. The misses are CMS
+  genuinely not pricing hospital injectables, devices, supplies and repackager labels — not a
+  formatting fault, and not fixable by a product-level proxy (that would rescue 197 NDCs, 0.4%).
+- **The supplier's own item number, per supplier.** Done 8 September: all five suppliers
+  **100%** (McKesson 44,242 of 44,242). McKesson's read as zero only because its stored catalogue
+  was imported on 6 September, before the code that reads the column reached the site; the parser
+  reads every one, and re-running the stored file through the importer filled them. Nightly
+  imports keep it so. Note: no McKesson catalogue arrived on 7 September (the other four did).
+- **Pack sizes, against the FDA (8 September).** The levelled catalogue agrees with the FDA
+  package on about 95% of rows at every supplier. The rest: 0.5–1% where the FDA is a whole
+  multiple of the catalogue (IPD "30 EA" for 30 blister packs of 6 = 180, a sixfold unit-cost
+  error), 2.5% where the unit differs (GM against EA), 1.5% other — and many of those are the
+  FDA *reading* being wrong, because `packageUnits` takes the outer count ("3 BLISTER PACK") and
+  ignores the inner ("28 TABLET in 1 BLISTER PACK"). The parser has to read the nested description
+  to the innermost unit. Assigned to session 2 as the Data health row it belongs to.
+- **AWP where a supplier prints none.** Done 8 September: the levelled catalogue carries the
+  newest printed AWP for the NDC onto every row of that NDC that has none, naming the lender
+  (`borrowAwp`, `awpBorrowedFrom`). Rows with an AWP went from **50,870 to 59,741 of 63,809**
+  (79.7% → 93.6%); IPD 95.3%, ParMed 96.9%, where both had been zero. The 4,068 still without are
+  NDCs no catalogue prices at AWP.
+
+### 2. Every claim matched to its contract, and to the formula that priced it (7 September)
+
+The owner's chain, in his words: *"The contracts in the folder need to be understood as much as
+possible. Goal is to match a specific claim to a specific contract so we can gather its
+reimbursement formula — ie is based on NADAC, AWP, MAC, because this will tell us the best way to
+make a higher profit on that claim. If we can do that for all claims we can start to identify which
+drugs to buy and from where that would net us highest profit."*
+
+This is the spine of the whole site, and it is the thing that turns the base into money. It runs in
+four links, and it is only as good as its weakest:
+
+1. **Read the contract.** Built and running live — `contract-extract.ts`, the folder sort
+   (`/payers/sort`), `proposeFromContract` with `governs` and `quoteFound` so a document that is
+   not ours, or a rate whose quote is not in the text, is refused rather than applied.
+2. **Match a claim to the contract that governs it.** Partly built — `claim-contract.ts`,
+   `payer_links`, `plan_groups`, BIN/PCN/group. **Measured 7 September: 0 of 1,081 insured claims
+   match a contract.** Only 2 of 357 contract documents have been read, and the matcher looks for
+   BIN/PCN/group while rate exhibits identify themselves by network name and chain code; claims
+   carry PioneerRx's network id (82 distinct values). Two jobs follow: read the library (re-run the
+   2 stale failures, triage the 249 never triaged, queue by dollars of claims behind each payer),
+   and teach the matcher the network id → network name mapping that `payer_links.contract_id` was
+   made for. Full numbers in `docs/HANDOFF.md`.
+3. **Name the formula that priced the claim.** Two readers exist and they should agree:
+   `reimbursement-fit.ts` infers the formula from what was actually paid, and the contract reader
+   takes it from the document. Where the export carries the PBM's 522-FM basis code
+   (`claims.basisOfReimbursement`) that is a third opinion. **Where all three are available they
+   should be set against each other — a disagreement is either a misread contract or a claim
+   matched to the wrong one, and both are worth knowing.**
+4. **Turn the formula into a buying decision.** Started — `drug-profit.ts` values every NDC in a
+   product under the payer's own model: under a MAC or a flat price the cheapest NDC wins, under
+   NADAC + fee the one furthest *under* its own NADAC, under AWP − x% the higher AWP. This is
+   exactly the owner's omeprazole example.
+
+**Link 3 and link 4 both depend on item 1 above** — they group by product key, and the product key
+currently fragments. Fixing the key is the prerequisite, which is why it is first.
+
+### 2b. Contract ingestion is session 1's own job (7 September)
+
+The owner: *"I want you handling the contract ingestion. All the contracts are in the contract
+folder. The goal is to extract as much info as we can to match claims with a contract. So you
+should be familiar with all the info we get from claims."* Session 1 reads the whole library —
+357 documents, 353 unread, the 2 stale failures re-run — in a separate process, queued by the
+dollars of claims behind each payer, and widens what the reader extracts to every identifier a
+claim carries (BIN, PCN, group, network reimbursement id, chain code, NCPDP, NPI, plan names) and
+to the 835/EFT/EDI enrolment instructions below. The claims side of the join is inventoried first
+so nothing extractable is left unasked.
+
+### 2b-ii. The payer model: payor → contract → plan → claim → payment (7 September)
+
+The owner: *"Once contract ingestion is done, you need to make sure the contract info (plans,
+groups, bins, payors) are organized in best way possible to not only match claims to contract and
+reimbursement but also to payors. To know the reimbursement of a claim we need to know the specific
+contract id (group #, etc) but payments come from the payor (ie Caremark, Blue Cross, Optum, etc).
+Payors will have many different BINs and groups under them. We also need to be thinking of data we
+will need to completely reconcile payments to claim when we start getting 835s."*
+
+Two different questions, which today are muddled into one `pbmName` string:
+
+- **Who priced it** — the contract. Reached from the claim through its routing (BIN, PCN, group,
+  network reimbursement id, days supply, line of business) to a rate line with a formula.
+- **Who pays it** — the payor. Reached from the 835 through the payer name on the remittance
+  (N1*PR) and payer id, and from the bank through the deposit descriptor. One payor has many BINs,
+  PCNs and groups under it, and one contract (a PSAO's, say) can price claims that several payors
+  then pay.
+
+The read so far confirms what the data has to look like: of 86 contracts read, 63 identify
+themselves by network name, 39 by chain code, 5 by BIN, 0 by network reimbursement id — so the
+contract side is named by network, the claim side is coded by BIN/PCN/group/network id, and the
+join between them is a table the pharmacy fills once per network id, not a string match.
+
+**Drafted 8 September — `docs/reference/payer-model.md`, with A to audit before any migration.**
+The deliverable as first stated: `docs/reference/payer-model.md` defining
+the entities and their keys — payor, processor/PBM, contract document, rate schedule, network,
+plan (BIN/PCN/group), claim, remittance, deposit — with one canonical name per payor, the
+existing tables (`payer_bins`, `plan_groups`, `payer_links`, `network_rates`, `payment_routing`,
+`era_enrollments`) mapped onto it, and the migrations that make it so. Then the payers page shows a
+payor as a tree: its BINs and groups, its contracts, its enrolment state, its receivable.
+
+**What a claim must carry to be reconciled against an 835 later** (for B's ERA work and the
+PioneerRx export ask): the pharmacy's claim reference that will come back in CLP01 (the Rx number
+and fill as submitted), the PBM's authorization number (NCPDP 503-F3), the payer claim control
+number if returned, date of service, NDC, quantity, submitted and adjudicated amounts by component
+(ingredient, fee, tax, copay), and the BIN/PCN/group. From the 835: N1*PR payer name and id, the
+TRN trace (check/EFT number and amount), each CLP with its CAS adjustment codes, PLB provider-level
+adjustments (DIR, recoupment, fees) — which are money that belongs to no single claim and must
+still reach the books.
+
+### 2b-iii. Provider manuals do not fit one read (8 September)
+
+Twelve documents ran past the reader's 32,000-token answer limit — every provider manual in the
+library (CVS Caremark 2025 state addenda 256 pp, ESI 2026 state 182 pp, Capital Rx 2025 151 pp,
+ESI 2026 federal 142 pp, CVS Caremark 2026 114 pp, Liviniti 2025 66 pp) and five smaller ones that
+should not have (Aetna 2015 Medicare D 51 pp; four of 1–18 pages, which suggests the answer looped
+rather than the document being long). Manuals carry appeal windows, DIR and audit terms, not rates.
+Needs a read-in-parts path in `contract-extract.ts` (page ranges, one answer per part, merged with
+citations kept) and a retry of the four small ones. Session 1. Also: three documents were refused
+*whole* because one field, `dirFeeBasis`, came back without a quote — `requireCitations` treats it
+like a rate. A rate without its sentence is unusable; a DIR basis without one is a field to drop,
+not a reason to lose the counterparty, the networks and every contact on the document. **Done 8 September:**
+the uncited value is dropped and named in `unclearOrMissing` (`dropUncited`), a rate without its
+words still refuses the read; and contract runs now count toward the site's own ceiling
+(`spend()` reads `contracts.*` audit rows as well as `ai.*`). Still to do: the read-in-parts path
+for the manuals, and re-reading the three refused documents once the console limit is raised.
+
+### 2b-iv. Claims with secondary payors: profit by payor, and who owes what (8 September)
+
+The owner: *"We need a deep audit of how we handle claims with secondary payors! We need to make
+sure the profit and loss of these claims are correct, we need to make sure we know how much money
+we are expecting from each payor. I've noticed we tend to assert all the profit to one payor which
+doesn't make sense. We need to really think this through from a profit perspective as well as what
+to expect when we start receiving remit payments (who owes us what) so that we can reconcile
+properly."*
+
+One fill, several transmissions, each to a different BIN: the primary adjudicates, the secondary
+picks up some of the patient's share, sometimes a third. Today `fills.ts` groups the transmissions
+into one fill and sums their revenue, which is right for the fill's margin — but anything that
+reports *by payor* then hangs the whole fill's profit on one of them. Two things have to be true
+at once and are not the same figure:
+
+- **Profit belongs to the fill**, not to a payor. The fill has one acquisition cost and one total
+  revenue (every payor's remit plus what the patient finally paid). It is a whole or it is nothing.
+- **Money owed belongs to each payor separately.** Each transmission is its own receivable: this
+  BIN owes this remit for this claim, and it is settled by that payor's 835, not by anyone else's.
+  A secondary's remit is a residual after the primary, and a coordination-of-benefits row can carry
+  a zero acquisition cost on purpose (the drug was costed on the primary row).
+
+So the audit has to answer, on the real claims: how many fills have more than one payor; how the
+site attributes their revenue and profit today, page by page; whether any figure double-counts the
+acquisition cost or the patient's share across rows; and what "expected from payor X" should be
+defined as so it reconciles line by line when the 835s arrive. Assigned to A (audit, first item on
+the claims audit) with session 1 supplying the counts. The fix follows the audit.
+
+### 2b-v. Fees on 835s have to be classified, and the contracts hold the key (8 September)
+
+The owner: *"We also need to start thinking about how we are going to handle and classify fees that
+come over with 835s. These will need to be accounted for properly. Fees often come over with a code,
+we might need to get codes from contracts in order to decipher what that fee is."*
+
+An 835 carries adjustments at two levels: on the claim (CAS segments, with a group code and a Claim
+Adjustment Reason Code — CO-45 contractual, PR-3 copay, and so on) and on the provider (PLB
+segments, with a reason code such as WO, FB, L6, 72, and a reference the payor chooses). The
+standard code sets say the *kind* of adjustment; what a given PBM's "L6 — TRANSACTION FEE" or
+"DIR-Q2" actually is comes from the contract, where `transactionFees[]`, `postPointOfSaleDiscounts[]`
+and `dirFeeBasis` are already extracted. Deliverable: a fee dictionary — standard CARC/RARC and PLB
+codes with their meaning, joined to each PBM's contract-named fees — so every adjustment on an 835
+lands in the books under the right heading (contractual write-off, patient share, DIR, transaction
+fee, recoupment, interest) and none lands as "other". Assigned to B with the ERA work; the
+extraction side (making sure the reader captures every fee a contract names, with its code where
+printed) is session 1's.
+
+### 2c. Get the 835s sent here (7 September)
+
+The owner: *"Also want to search contracts for info to request 835 changes. Want to automate request
+to have 835s sent to this site instead of where they currently go!"* Two halves: the extraction
+(session 1, inside 2b — for every contract, where remittance advice is delivered today, who
+changes it, the form or portal or address, the payer ID, the clearinghouse) and **the request
+itself** — one generated, ready-to-send enrolment request per payer, tracked from sent to
+acknowledged to first 835 received, on `/payers/routing` (`era-enrollment.ts`, `era_enrollments`,
+`payment_routing`, `pbm_contacts` already exist). Assigned to B, ahead of the inbox recogniser.
+
+### 2d. Claims data joins the audit list (7 September)
+
+The owner: *"We also need to add claims data to the list of things to audit."* The claims reader
+(`claims.ts` and every column alias it accepts), fills grouping (`fills.ts`), payments
+(`claim-payments.ts`), and the reimbursement inference (`reimbursement-fit.ts`) — audited like the
+buying logic: one meaning and one unit per figure, nothing inferred that the export states, and
+every figure the profit chain uses traced back to the export column it came from. Assigned to A
+after the contract match; session 1 supplies the real-data queries.
+
+### 3. Re-measure the six buying-logic fixes against real data (HANDOFF item 2) — DONE, see Done
+
+Fixed on 8 September in commit `8d51d73`, none measurable at the time. Each needs a real number:
+margin at net rather than printed price, short-dated stock being recommended, the cross-unit NADAC
+false alarms, rebate rates matched to the wrong wholesaler by first-containment, and offers with no
+`netUnitMicros` being invisible to both the buy and the margin. (The sixth, the CMS placeholder
+rows, is done — see below.)
+
+### 4. The Money tab has to be sound, complete and free of double counting (7 September)
+
+The owner's words: *"The money tab needs to have sound logic, needs to not forget about expenses or
+revenue it knows, needs to not double count things. This is how I will track financials of pharmacy.
+It should be able to operate on a cash and accrual basis. It needs to take into account everything
+and needs to do it correctly."*
+
+This is his books, not a report — so the bar is a bookkeeper's bar, not a dashboard's. What that
+means concretely:
+
+- **Nothing counted twice.** The live risk is named in `docs/HANDOFF.md`: two period modules landed
+  the same night and both are wired into the sidebar. `period-account.ts` + `periodAccount()` /
+  `monthlyTrend()` + `/money/report` (pharmacy session) and `ledger.ts` + `ledger-store.ts` +
+  `/money` (cloud session) read the same claims and expenses by two different routes. One has to
+  absorb the other before either can be trusted as "the books". The cloud session proposes keeping
+  `/money/report` and `period-account.ts` as the reporting surface with its `loadShared()`
+  underneath — which is also a speed fix, because `periodAccount()` and `monthlyTrend()` currently
+  read every claim once per month, twelve full passes for a year, where `loadShared()` reads once.
+- **Nothing forgotten.** Every feed that carries money has to reach the books: claims, remittances,
+  supplier invoices, other expense invoices, MTF/facilitator payments, cash receipts, bank lines,
+  rebates. Each one needs to be traceable from the statement back to the document it came from.
+  Rebates in particular are a reduction in cost of goods, never revenue (`expense-categories.ts`) —
+  putting them in revenue overstates both sales and cost.
+- **Cash and accrual both, and the difference explained.** The owner's rule (7 September): *"System
+  total accrual shows how much we collected in copays, this should be received on cash side, but
+  third party payments shouldn't until we get the 835 or remit. For accrual side, both should be
+  accounted for that month."* Copays are cash when collected; payer money is cash only when the 835
+  or remit arrives and a receivable until then; accrual books both in the fill month. Assigned to A
+  with a required fixture. A cash change has no accrual side and must print as a dash rather than a
+  number — that was already caught once on the books page.
+- **Checked by arithmetic, not by eye.** Per CLAUDE.md: every reader that decides money is checked
+  by arithmetic before anything is stored. The books should be able to prove they balance.
+
+### 5. The inbox has to know what arrived, and let the owner say when it doesn't (7 September)
+
+The owner's words: *"I have an email integrated into the site, so that I can automatically send
+invoice, catalogs, claims, etc to this email to get into the site. The tools I have on this inbox
+folder need to be a lot better and a lot smarter. The inbox should eventually be able to know
+what's coming in based off name, email, contents but I also need tools on this page to route things
+exactly where they need to be or tell system exactly what we received. There will be numerous
+things coming to this email from employee compliance documents, to supplier catalogs, to expense
+invoices, to more. It needs to be able to handle it all allow me to tell it what it received. From
+there it should know how to use it."*
+
+Two halves, and the second is the one that must never be missing:
+
+- **Guess well** — from sender address, sender name, subject, attachment name and file contents.
+  The routers that exist (`mailbox.ts`, `looksLikePioneerCatalog`, `looksLikeNadacHeader`,
+  contract triage) each know one shape; the inbox needs one place that ranks all of them and says
+  how sure it is and why.
+- **Always be correctable** — the owner tells it what a document actually is, and it is then
+  handled as if it had been recognised. A guess that cannot be overridden is worse than no guess,
+  because the document goes somewhere wrong and silently. The override has to be on the page, in
+  his words, not a re-send.
+
+Categories seen so far: supplier catalogues, supplier invoices, expense invoices, claims exports,
+NADAC files, reimbursement contracts, employee compliance documents, ERA enrolment, appeals,
+MTF/facilitator remittances. The list will grow, so the design has to take a new category without
+a rewrite.
+
+### 6. PioneerRx over SQL — the tables have to be ready for it (7 September)
+
+The owner's words: *"I am in the process of trying to get info from PioneerRx via SQL request. This
+should allow us to get much better info and more efficiently about our claims and catalogs. But you
+will have to build the tables to request this info. Just keep that in mind."*
+
+A direct read replaces file exports for claims and catalogue, which removes a whole class of
+problem: no column-name guessing, no export that silently drops a field, no waiting for a file. It
+also changes what the site should store — a direct read can be re-run, so the tables want to be
+shaped around what PioneerRx actually holds rather than around what its export happened to print.
+`scripts/pioneer-discover.ps1` and `scripts/pioneer-locate.ps1` already exist for finding it.
+
+**His sequencing, which is the order of this file:** *"Once our drug file is sound and does all the
+things above, the next part is going through the contracts to see how we can efficiently match
+claims to a specific contract."* Drug file first, then claim-to-contract matching.
+
+**What to pull once SQL is connected (8 September, 1, the owner: "we should be thinking about all the
+info we will want to get from sql").** Per claim: everything in the dispensed export (AWP, WAC, NADAC,
+MAC, DAW, days supply, fee, basis of reimbursement, contract id, received plan id, DIR fee,
+e-voucher, secondary payer) plus the EDI response itself — the network reimbursement id, the
+response messages, reject codes, other-payer amounts — and the timestamp of every transaction and
+reversal. Per fill: sold date, quantity, the dispensed NDC, a hashed patient key, never a name.
+Third-party setup: every plan with BIN, PCN, group, plan name and network. Pricing as PioneerRx saw
+it at adjudication, per NDC and date. Inventory: on-hand daily, order points, the drug file. The
+daily text report stays the automatic feed until then, proved nightly; the export enriches when one
+is sent by hand.
+
+**8 September evening (1) — the connection is built; the owner has the credentials.** He wrote: *"I have
+info on how to access sql I have instance name, username, password, and sql database name … can you use
+a sequel tool to build these reports for me?"* What went in: `src/lib/pioneer-sql.ts` (read-only intent,
+READ UNCOMMITTED on every batch so nobody at the counter waits on a lock, one SELECT at a time, TLS with a
+clear-text retry for an old server), a **PioneerRx database** card under Settings → Connections (server
+or instance, database, user in the clear; the password encrypted like every other credential), the page
+`/tools/pioneer-sql` (test the connection, read the table names into `data/pioneer-schema.json` — names,
+types and row counts only, never a value — search them, run one SELECT capped at 500 rows, shown and
+stored nowhere), and `scripts/pioneer-sql.ts` for the machine session (`test`, `tables [needle]`,
+`query "select …"`). The reports themselves cannot be written until the table names are on the machine:
+PioneerRx does not publish its schema. Order of work once they are: (1) the dispensed feed as a query,
+proved against the daily text report for the same day before it replaces anything; (2) the third-party
+plan table (BIN, PCN, group, plan name, network) for the linking chain; (3) the drug file with AWP, WAC,
+NADAC as PioneerRx holds them; (4) on-hand and order points nightly. Each feed lands beside the reader it
+replaces and proves itself the same way (SESSION-RULES §1c).
+
+### 7. Finish the logic audit (HANDOFF item 3)
+
+Not yet looked at: `shelf.ts` (895 lines, the largest and least examined), `order-plan.ts` beyond
+its documentation, the rebate ladder and band arithmetic (`rebate-rates.ts`, `band-strategy.ts`,
+`ratio-effect.ts`), claim-to-contract matching, and the cash-versus-accrual split.
+
+### 8. The site has to look and work like a professional product (7 September)
+
+The owner: *"Site needs a lot of work in terms of design and usability functions! Are all the tools
+there that are needed? Are we presenting info in clean, clear way? This site should look and
+function like a professional website."*
+
+Three questions, each answerable page by page against `docs/reference/design-audit.md` (the site's
+design rules and page inventory), and none of them needing the database:
+
+- **Are the tools there?** For every page: what decision does the person on it have to make, and
+  can they make it without leaving? The test is the owner's own workflow, not a feature list.
+- **Is the information clean and clear?** One question per screen, the answer first, the number
+  with its unit, the reason in a sentence a pharmacist reads, and nothing on the page that does not
+  change what he does next. Folded detail rather than long lists; dashes where a figure is unknown,
+  never a zero that means "not known".
+- **Does it look and behave like a professional product?** Consistent layout, spacing, type and
+  colour across every page; states for loading, empty, error and success; forms that say what they
+  want and what went wrong; works on the phone he actually uses it from.
+
+The owner again, 8 September: *"I really want this design edit to be done thoroughly and really
+make the site look and operate well. Good plumbing, efficient, visually appealing, better use of
+design elements like tables and charts when appropriate. Really make an effort to make sure viewer
+can understand lots of info in a clear way in a small compact area."* So: density without clutter
+— tables where rows compare, charts where a shape says more than a number, one screen answering
+one question, and the plumbing behind it fast (no page reading the whole database on open; the
+stores are held between requests and the page reads the store). This is a full pass over the page
+inventory and needs no data, so it is **a fifth session, C, in the cloud**, working from
+`docs/reference/design-audit.md` and `docs/ASSIGNMENTS.md` (Helper C), one section of the site per
+pull request, screenshots of before and after in the description.
+
+### 12. The secondary add-ons list has to make sense (8 September)
+
+The owner: *"Let's also add an audit of the secondary supplier add-ons. This part of the site is to
+give us things we could add on to an existing secondary supplier to hit the minimum. The things it
+recommends from each supplier should make sense based on BOH, price, usage. The site will not know
+what's already in order so it should list multiple options. We will use this list to find things we
+could add on for that supplier to hit minimums."*
+
+That is `/purchasing` — one card per non-primary wholesaler: "Order these" and "Next best to add,
+soonest needed first" (`minimum-filler.ts`, `minimum-store.ts`, `shelf.ts buyListNow`). The audit
+question is whether each recommended line is defensible on its three facts: **on hand** (from the
+latest count — and no count has ever arrived, so today it runs on claims-derived usage alone and
+must say so), **price** (the levelled, rebate-netted unit cost, this supplier against the best),
+**usage** (units per day from the fills, over a window that is stated). A line the pharmacist would
+not order — a slow mover with months on hand, a drug cheaper at the primary after rebate, a pack
+larger than a season's use — is the failure. Multiple options, ranked, running total to the
+minimum, never a single answer. Assigned to A (audit); session 1 supplies the live list and the
+facts behind each of its top lines.
+
+**Re-evaluated 8 September afternoon (1), at the owner's word** — "it lists very little options
+for each supplier… I dont want to order things we dont use but we need options of things we can
+add on to hit minimums." Measured first: every list empty; 442 of 545 dispensed drugs failed the
+three-test `steady` bar on fifteen days of claims; a saving under $5 was dropped; an equal price
+was dropped; and the planner's top-up took the whole days-of-stock cap (seven pods, $2,129, for a
+$169 gap). Changed: an add-on needs only to be *used* (two days or two prescriptions in the
+window; one fill is still refused), the cap on the observed rate bounds what it can cost; the same
+price as the primary is an option; a top-up buys the packs the shortfall needs. After: IPC 0 → 11
+options ($125.90 toward $200), IPD 0 → 3, the pod ×1. ANDA and ParMed still list nothing because
+**no minimum is on file for either** — the owner's to give. McKesson's price in every comparison is
+net of the ladder rebate at the band in force, and each basket prices its band cost.
+### 13. The design pass is a fifth session (8 September)
+
+See item 8. Session C: cloud, no data, owns `src/app/**` presentation and `src/components/**`
+only — never a `*-store.ts`, never a pure module — and hands back one section per pull request.
+
+### 9. Data health: complete, linked, and it says what is missing (7 September)
+
+The owner: *"The logic and data in this site needs to be correct, full, and cleanly organized. If we
+are missing data, I need to know and we need to fix it. Data needs to link when it should! This
+system needs to be incredibly organized and complete from many ends or we will get bad numbers.
+Main pieces are data from claims, data from supplier catalogs, data from third party sources
+(NADAC, AWP, package sizes, equivalents) — all these things HAVE to be correct or what we are
+building will not only fail but lead us astray."*
+
+So the site gets one page that measures itself: **Data health**. For each dataset, how complete it
+is, how current, and how many of its rows link where they must — counted on the real database,
+with the gap named as an action. Tonight's answers by hand were exactly this kind of figure (NADAC
+covers 96.9% of what we dispense; the FDA directory 96.9%; 0 of 1,081 claims match a contract; not
+one McKesson invoice; no on-hand count ever). They should be on a screen, every day, not in a chat.
+
+The links that must hold, each a row on that page with its coverage and its worst gaps:
+
+| Link | Why it matters |
+| --- | --- |
+| claim NDC → FDA directory | equivalence; without it a product cannot be compared |
+| claim NDC → NADAC (current within 3 months) | the benchmark every "over/under" figure uses |
+| claim NDC → a catalogue row with a pack size | a per-unit cost; without it no margin |
+| catalogue row → AWP | needed where a plan pays a discount off AWP (ParMed and IPD carry none) |
+| claim → payer (BIN/PCN/group resolved) → plan class | who paid, and under what law |
+| claim → contract (network id → contract) | the reimbursement formula |
+| claim → 835 line → bank deposit | cash actually received |
+| invoice → supplier register row → rebate ladder | what was really paid, after rebate |
+| catalogue row → FDA package size | unit arithmetic that does not cross units |
+| on-hand count → catalogue row | what is on the shelf, valued |
+
+Each row: numerator, denominator, percent, the date it was last measured, and the top gaps in
+words ("29 dispensed NDCs have no NADAC — 2 are devices, 27 are repackager labels"). Pure counting
+in a module, a store that runs it, a page that shows it. **Assigned to session 2** after its invoice
+follow-ups, because it runs on the pharmacy computer and can see the real database.
+
+### 10. Plans have to be classified, or the law-first pricing never fires (8 September)
+
+Data health's first run: **6 of 1,054 fills sit on a plan the register has classified.** The site
+decides which law governs a fill — and so whether the Kansas floor (NADAC + the greater of $10.50
+and the Medicaid fee) applies — from `plan_groups.classification`, which the owner sets per
+BIN/PCN/group. With 99% unclassified, `drug-profit.ts`'s law-first rung is a rule with nothing to
+act on. Two halves: the owner classifies the plans behind the most fills (the payers page; the Data
+health row should name the top unclassified triples); and where the BIN listing states the line of
+business (`payer_bins.linesOfBusiness`, Medicare Part D BINs are published), the site proposes the
+class with its source and the owner confirms — proposed, never assumed. Assigned to A after the
+contract match; owner action for the top plans now.
+
+### 10b. The site holds three weeks of claims (8 September)
+
+The paid claims archive runs from 24 August: a **15-day span** (Data health, "claims window").
+Every rate the site computes — units a day, days on hand, steadiness, which NDC pays, the add-ons
+list — is judged on it, and 449 of 553 dispensed NDCs fail the "dispensed on 3 separate days"
+test for that reason alone. **Owner
+action: load the claims history** — a PioneerRx "Rx Transaction Details" export covering the past
+twelve months into the inbox, or the SQL read the owner is arranging. The reader already handles
+the report; it only needs the months.
+
+### 11. Pack sizes: fix every one we can, and a place to look up and correct the rest (8 September)
+
+The owner: *"We need to fix correctly all the package sizes that we can. For those we can't, I need
+a way to lookup and correct. These corrections need to stick."*
+
+Data health measures 48,852 of 51,502 catalogue rows agreeing with the FDA's package (94.9%);
+2,650 disagree, split between clean multiples (a catalogue counting inner packs — IPD's "30 EA" for
+30 blisters of 6) and the rest. A pack size is a divisor under every per-unit cost, so each wrong
+one is a drug that looks several times cheaper or dearer than it is. Three parts:
+
+- **Fix automatically what the FDA settles.** Where the FDA's description reads cleanly to a
+  dispensing unit and the catalogue's count is a whole multiple or fraction of it, the FDA's size
+  is written as the correction, marked as the FDA's, with the arithmetic that justified it.
+- **A page to look up and correct the rest** — every disagreement the FDA cannot settle (unit
+  differs, description stops at a container, no FDA row), showing the FDA text, every supplier's
+  pack size for the NDC, and the cost per unit under each reading, with one control to say which is
+  right or type the truth. Searchable by NDC and name.
+- **Corrections stick.** `ndc_pack_fixes` (per NDC) and `supplier_item_fixes` (per supplier and
+  NDC) already exist for this and are laid over every import; the levelling reads the pharmacy's
+  answer first, then the FDA's, then the wholesaler's. A correction records who, when and why.
+
+Assigned to session 2.
+
+### 14. Audit the P&P manual: compliant, and true to what the site actually does (8 September)
+
+The owner: *"We need to audit P&P manual, make sure it is compliant and matches what we do in the
+site."* The manual is one document, read and edited by chapter (`/manual`, its text in
+`src/app/(app)/manual/page.tsx` and `manual_sections`), printed from the live copy, and every
+procedure it promises has a form or a page somewhere in the site (`documents/manual` appendix A
+lists them). Two audits in one, and a cloud helper can do both because the text is in the repo:
+
+- **Compliant.** Chapter by chapter against what governs an independent pharmacy in Kansas: the
+  Kansas Board of Pharmacy regulations (K.A.R. 68), K.S.A. 65-16xx, DEA 21 CFR 1300–1321 for
+  controlled substances, HIPAA 45 CFR 164, OSHA bloodborne pathogens and hazard communication, and
+  the immunization protocol statute (K.S.A. 65-1635a). Each finding names the section, the rule,
+  what the manual says, what it must say, and a proposed sentence — never a rewrite the owner has
+  not read. Inherited text that describes a chain (a Human Resources Manager, a Chief
+  Administrator) is a known kind of finding.
+- **True to the site.** Every procedure the manual describes must be the procedure the site
+  performs: the training cadence and attestation, the CQI incident and summary path, the annual
+  controlled substance inventory and Form C-250, the temperature log, the self-inspection, the
+  document retention periods, the invoice and receipt records. Where the manual says one thing and
+  the site does another, the finding says which should change, because the site is what the
+  inspector will be shown running.
+
+Assigned to **helper B after the inbox recogniser**, or to a sixth session if the owner wants it
+sooner; session 1 answers questions of what the site does in practice from the real data.
+
+### 15. The Add tool has to let the owner say what a document is (8 September)
+
+The owner's words, uploading the balance-on-hand report: "no way to tell system that's what this
+is in the add tool. need many more options!!!" The page offers a person and a credential type and
+nothing else; every report goes through the recogniser's guess. Wanted: a "what is this" choice
+listing every kind the site can read — Rx Transaction Details, Drug File Print (balance on hand,
+with the count date asked for, because the report carries none), each wholesaler's invoice, a
+supplier catalogue, an 835, a contract or provider manual, a bank statement, a staff document —
+with "let the site work it out" as the default, and a named kind skipping the guess. **Assigned
+to 2.** The report itself was filed by 1 by hand on 8 September: 1,770 items counted as of that
+day, 36 lines without an NDC skipped, the first on-hand count the site has ever held.
+
+### 16. The site has to be fast, and stay fast (8 September)
+
+The owner's words: "site is still incredibly slow! we need to fix this and make sure it stays fast
+and efficient." Measured 8 September at 12:10: free memory **765 MB of 7,105 MB**; the site
+**1,300 MB** one hour after its restart; the two Claude sessions 930 MB; Chrome 660 MB; Defender
+328 MB. Anything else that starts — a type check, a test run, a script that loads the catalogue —
+pushes the machine into paging, and that is what "incredibly slow" is. Three causes and their
+fixes: (1) `held.ts` never evicts and `refreshStale` recomputes every entry ever held on every
+tick, including yesterday's books under yesterday's date key — fixed by 1 on 8 September (evict
+what nobody has read for six hours; refresh only what was read in the last hour; cap the map);
+(2) the heap ceiling in `launch.mjs` is not in force until the launcher itself restarts —
+tonight; (3) Helper A's memory audit (`docs/audits/2026-09-08-memory.md`): `loadDrugDirectory`
+peaks at 430 MB inside the web process and four readers pull 42 columns where they use nine —
+the directory load moves to a script (2), the column lists are 1's. Rule for every session on this
+machine, added to SESSION-RULES §1a: nothing that loads the catalogue or the directory runs in a
+second process during pharmacy hours; measure with a query, not by importing the module.
+
+### 17. The shelf screen has to show the drug, and everything a person needs beside it (8 September)
+
+The owner's words: "the shelf screen needs to be better. not showing the drug name or any other
+specifics that might be needed. need to audit this page and make better and more useful." Measured
+on the first count (8 September, 1,770 rows): **every row is nameless** — the report's first column
+is "Drug", which the reader's aliases did not include (fixed on 2's branch, ships with the reader
+fix); **every row is costless** — the report's "Cost" column is not an alias either, so the page
+says "the file carried no values"; "Order Point" and "Size" are dropped. And the page should not
+depend on the file for any of it: 1,652 of the 1,770 NDCs are in the FDA directory (name, strength,
+form, labeler, schedule) and 1,735 are in a supplier catalogue. The page itself is the surplus and
+returns list titled "The shelf": it lists only lines beyond twice the target days. What is wanted:
+the whole dispensing shelf, searchable — drug with strength and form, NDC, on hand in units and
+packages, per day and days of stock, PioneerRx's order point against on hand, cost and value, the
+cheapest supplier today, last dispensed, schedule — with the surplus section kept beneath it.
+Reader aliases ("Cost", "Order Point", "Size") are 2's; the page and `shelf.ts` are 1's.
+### 18. Pack sizes: where more than two suppliers carry an NDC, the majority settles it (8 September)
+
+The owner's rule: "if more than 2 suppliers then go with majority agreement." Placed in the
+levelling (`catalogue-cache.ts`, 1's) beneath the two documents: a pack the pharmacist typed wins,
+then the FDA where a supplier already reads the box the FDA's way, then — for the NDCs neither
+settles — the whole-package reading (count and unit) that more than half of three or more
+suppliers share. Compared as readings, not strings, so "(2) 33.4 GM" and "66.8 GM" are one
+vote. A tie or a two-supplier split still waits for the pharmacist on the pack-sizes page.
+
+### 19. When the contracts are read: how many claims match a contract, and what would raise it (8 September)
+
+The owner's ask: "once all contracts are done, want a breakdown of how many claims we can match
+to contract and how we can improve it more." Deliver as a page section on Payers and contracts and
+a HANDOFF paragraph: claims matched, by which route (network id, BIN, chain code, owner link), the
+unmatched grouped by BIN/PCN with the fills and dollars behind each, and for every unmatched group
+the one thing that would close it — a document not yet in the folder, a link the owner can make,
+a plan class. Waits on the read finishing, which waits on the Settings → Claude ceiling.
+### 20. Returns: the site has to tell the owner before a credit drops, and today it cannot (8 September)
+
+The owner's question: "is our system setup to make sure I am returning things when I need to? if
+we still have a bottle ordered from them we need to send it back before credit dips." Measured 8
+September: the arithmetic exists (`returns-due.ts`: credit now, the day it drops and to what, the
+day the window shuts, per invoice line against the supplier's own steps; surfaced on What to send
+back, the shelf's surplus list and Money found on Today), **and it has one invoice to work on** —
+IPC, 4 September, 8 lines. No ANDA, IPD, ParMed or McKesson invoice has ever been loaded, so no
+bottle from them can be timed; and IPD and ParMed have no returns policy on file. Nothing pushes
+a warning either: it waits on the page. Three pieces: (1) invoices from every wholesaler have to
+arrive — each one's invoice email to the mailbox, a fixture per shape, 2's pipeline; (2) IPD's and
+ParMed's policies, pasted by the owner as ANDA's was; (3) a warning that reaches him — a line in
+the daily digest and on Today whenever a credit step drops within 7 days or a window shuts within
+14, naming the bottle, the supplier and the dollars.
+### 21. Return soon: one list of everything to send back, by policy, by idleness, by the dollars (8 September) — BUILT
+
+The owner's words: "a return soon tool that shows everything the system thinks I should return
+either based on return policy or non use, or expensive.. expensive things should have a much
+quicker return time.. if not used we need to send back. cant have money sitting on shelf." Built
+the same afternoon: `return-soon.ts` (pure ranking, tested) and `/purchasing/return-soon`, listed
+under Buying. Three reasons in one list — a credit step or window from the supplier's policy on
+the invoice line; nothing dispensed in the claims window; days of stock beyond what a line of
+that value may hold ($1,000 or more: 7 days; $250: 14; less: 30). Soonest clock first, then the
+dollars. Measured on the 8 September count: 1,200 lines, $137,606 sitting, 20 this week — and
+every one without a supplier, because only IPC's one invoice is on file; and with 15 days of
+claims "not moving" is a list to check, not to ship, and the page says so. Item 20's three
+pieces are what make it real: every wholesaler's invoices, IPD's and ParMed's policies, and a
+warning in the digest and on Today.
+### 22. The add-on lists are only as right as the prices and equivalents under them (8 September)
+
+The owner's words: "For this list we really need to make sure our equivalents and drug pricing per
+supplier is correct or these recommendations will be wrong!" What holds today, from Data health on
+8 September: 48,852 of 51,502 comparable catalogue rows agree with the FDA on the package; 630
+rows are a whole multiple out (the expensive kind — a per-unit cost wrong by that factor) and
+those are exactly what the pack-sizes page and the majority rule (item 18) work down; 485 of 486
+dispensed NDCs carry a per-unit cost. The add-on rule compares the *same NDC* across suppliers,
+so an equivalent under another NDC never enters it — safe, and narrow: a cheaper equivalent at a
+secondary is never offered. Two pieces: (1) a pack-mismatch guard on the add-on list itself — a
+line whose package the FDA and the wholesaler disagree on by a whole multiple is not offered until
+settled, and the row says so; (2) add-ons by product (`equivalence_key`), offering the cheapest
+equivalent NDC the pharmacy already dispenses under, never a brand for a generic or the reverse.
+### 23. The chain: payer → BIN/PCN/group → plan class → network id → contract → rate → backtest (8 September)
+
+The owner's framing, as ideas rather than statements: "Payor to bin to group to network id to
+contract sounds like the whole game right?? This is what we need to do and correctly. This should be
+organized this way also.. then we can backtest to see if correct.. especially on ERISA and part d
+plans. Commercial plans will most likely be paying NADAC + 10.50?" It is the payer model in
+`docs/reference/payer-model.md`, and the site holds every hop, unevenly. Measured 8 September:
+BIN → payer: the claims report names the PBM on 1,302 of 1,304 paid claims and 36 payer links
+came off contracts. BIN/PCN/group → plan class: 6 of 1,054 fills on a classified plan; item 10's
+proposals wait on the owner's clicks. Network id → contract: 82 ids on 1,030 claims, 0 linked;
+2 printed by a document, 52 ranked by their PBM, 28 with nothing to rank. Contract → rate: 65
+rate lines in `network_rates` from 74 applied documents. Rate → price: `priceFromRate` exists and
+prices nothing yet, because nothing is linked. **The backtest does not exist**: for every fill on
+a linked contract, price it from the rate and set it beside what the plan actually remitted, by
+plan class — Part D, Medicaid (the Kansas floor, NADAC plus the dispensing fee), commercial,
+ERISA where a document says so — with the differences ranked by dollars. That is item 19 built as
+a page, one hop per column, each hop's coverage as a fraction, and it is the shape the Payers
+section should take. Owner's two ideas to test, not assume: ERISA plans priced apart from the
+floor; commercial at NADAC plus $10.50. Order: link the top networks (one click each, biggest
+first), finish the read (the ceiling), then the backtest on what is linked.
+
+**Built 8 September, 15:02 (1):** no clicks where the paper decides. `deduceNetworkLinks` links a
+network on its own when a document prints the id, or when its payer has exactly one document
+written for this pharmacy's chain code; the reason is written on the link. Ran once: 14 networks,
+305 claims (all nine Blue Cross networks to Prime's 2025 Limited Commercial exhibit — the only Prime
+document read so far, so provisional until the rest are read; Capital Rx, MedOne, two Navitus).
+Left: 47 networks with several documents written for us (590 claims: Optum 10, ESI 12, Caremark
+9–10) — the PSAO listing or the backtest; 21 with nothing written for us (135 claims: Humana, Argus).
+**8 September, 17:10 (1) — the last 21 claims, read off their own arithmetic.** With AWP and NADAC on
+the rows (item 32), each open network's formula can be read from the claims: CNCKSNPN (Express
+Scripts, BIN 003858, PCN A4 and MA, group 2ELA) paid **NADAC + $10.50** on every priced claim, basis
+of reimbursement 20 (NADAC) — the Kansas Medicaid rate, so it is Sunflower Health Plan's KanCare
+network under ESI; deduced and linked with the state's own fee as the document. Caremark's Part D
+ids: MDR1S100S7 (retail, 30-day) and MDE1S100S7 (extended, 90-day) pay generics at MAC with a
+$0.05 fee (basis 07) and the one brand at **AWP − 25.00% + $0.05** (basis 03); MDR0S02025 pays
+Breztri at **AWP − 20.00% + $0.10** and its BIN 020115 / PCN IS rows carry Medicare contract H6316
+with a $0.25 fee — all to be confirmed by the Medicare D guides when read, not linked yet. PAR001
+(Caremark, PCN ADV, plan DTC_CMK_) is a **direct-to-consumer discount programme**: the patient pays
+the whole discounted price, basis 6 (MAC), and the plan's "remit" is a −$5.00 programme fee —
+marked a programme. The transaction report's basis-of-reimbursement code (NCPDP 522-FM: 03 AWP
+less a percentage, 06/07 MAC, 20 NADAC) is what makes this reading safe; it is now on every row.
+
+**8 September, 17:00 (1) — RXADV, from PioneerRx's own screen.** The owner sent the EDI response for
+Rx 900000: Ventegra (BIN 012528, group VRX0071) returned Network Reimbursement ID (2F) RXADV with the
+message "RXADV-AC: NOVO NORDISK HAS PROVIDED A $1027.03 VOUCHER TOWARDS THE PATIENT COPAY. ORIGINAL
+COPAY: $1376. NEW COPAY: $348.97", after the plan rejected the drug (reject 70, plan exclusion). So
+RXADV is the id a plan returns when an automatic manufacturer voucher was applied at the point of
+sale — it rides on whichever plan adjudicated, which is why it sits under five payers — and the
+"remit" on such a row is voucher money toward the copay, not a plan payment. Marked a programme;
+Ventegra's BIN annotated on the register; the money belongs with item 24's reconciliation. The site's
+row for 900000 was faithful to the report; the owner's memory that a voucher was involved was also
+right; the report's "Amount" simply does not say which kind of money it is. That is the lesson for
+item 30: a proof against the source file is necessary and not sufficient — the kind of money is a
+fact the response carries and the transaction report does not.
+
+**8 September, 16:00 (1) — the 148 open claims, and what the web says (hints, never links).**
+Web findings carry a source and stay proposals until a document on file says the same. NET=400
+(5 claims, $3,960) is the **CMS Medicare GLP-1 Bridge**, BIN 028918 / PCN MEDDGLP1BR, paid by CMS's
+central processor at a fixed $50 copay through 31 December 2027 — CMS's own pharmacy document is
+downloaded and filed in the library (cms.gov/files/document/glp-1-pharmacies-c.pdf). PHXCOM30 (3
+claims) is the **Phoenix RxAdvantage discount card**, BIN 610268 / PCN PHXD (phoenixpbm.com savings
+card) — the discount-card family, item 25. DODT5IND (24 claims, $1,959) is **TRICARE**: BIN 003858,
+group DODA is TRICARE's own published BIN and group (tricare.mil FAQ); the rate is the TRICARE
+retail network agreement with Express Scripts, not in the folder. FEHBP01001 (11 claims, $1,617):
+BIN 610239 / PCN FEPRX is Caremark's Federal Employee Program routing (Caremark payer sheets), and
+the guide prints a "Federal Employee Health Benefit Plan National" Caremark rate — the strongest
+open proposal, one click or the backtest. Humana NET=0116/0111 (50 claims, $6,280): BIN 015581 /
+PCN 03200000 is Humana Medicare Advantage (Humana payer sheets); no web page prints the network
+id; the Humana Pharmacy Solutions manual and the pharmacy's own Humana agreement are the
+documents. RXADV and CNCKSNPN (13 claims): nothing on the web.
+
+Two follow-ups: run the deduction after every `applyAllReads`, and re-evaluate links the site made
+when new documents arrive (today it skips anything already linked).
+### 24. Copay-card remittance confirmations have to be read and reconciled to the claims (8 September)
+
+The owner's words, uploading one: "this is remit confirmation for copay cards. we need to be
+reconciling against the claims. we probably dont have these claims in our system but lets make
+sure this process is set up and correct for future." The document: a scanned statement from
+RedSail Technologies (RAS enrollment, Spartanburg SC) listing claims by prescription and fill with
+the drug and the amount, totals ("Total Claims 177.25 … Total Amount Paid"), no text layer worth
+reading. RedSail is BIN 028249 on the claims — 223 paid claims, the one BIN the PSAO listing does
+not name — so these are the copay-assistance secondaries, and the confirmation is their remit.
+Wanted: a reader on the intake path (the model read, since it is a scan; the same money guard the
+invoice reader now has), one `claim_payments` row per line with source `copay_card`, matched to
+the claim by prescription, fill and date the way the 835 reader matches, unmatched lines held and
+named, and the statement's own total as the arithmetic gate. The sample is in the session's
+uploads folder (`5171c9d9-Image_001.pdf`); a fixture with identifiers changed goes in `fixtures/`.
+Assigned to 2 after the directory move; the recogniser side is B's.
+
+**Reviewed 8 September, 16:45 (1), from the statement's own text layer (page 2 has one):** it is
+RedSail's "Remittance Advice — RAS Copay Voucher Reimbursement": payment date, check/ACH number,
+payment amount, NPI; rows of rx (twelve digits, zero-padded), date of service, NDC, drug, qty,
+submitted, patient paid, voucher paid, with reversals as the same row negated; footer Total Claims,
+Total Fee, Balance Forward, Total Amount Paid. The rows net to the printed total to the cent
+($177.25 = 900001 $174.31 + 900002 $2.94; five other prescriptions paid and reversed) — the
+arithmetic gate. The claims it settles adjudicate on BIN 028249 / PCN RXLOCAL (308 on file); the
+claim's remit is what the voucher promised, so a line settles it (revenue 0) and a difference is
+flagged. Spec sent to 2 in full on 8 September; these lines are August fills, before the claims
+on file begin, and match once the twelve-month export lands.
+
+### 25. The PSAO's discount card and copay networks guide (8 September)
+
+Uploaded as `898d0c4f-2026hmadiscountcardandcopaynetworks_1.xlsx`: a different shape from the
+networks guide — a rate tab per discount card programme (BIN, PCN, group, rates by days supply),
+a "Discount Card Listing" of BIN/PCN/group per card, and drug lists (Apollo Care NDCs by
+manufacturer, ConnectiveRx programmes, Visory specialty). Read it the way the networks guide is
+read (`psao-guide.ts`), one document per programme, with the BIN/PCN/group as the rate's routing;
+the drug lists are what says a claim on those BINs is a copay-card claim rather than a plan's.
+### 26. When the PSAO's guides roll to a new year, the site has to ask for the new ones (8 September)
+
+The owner's words: "also need a way ie 2027 for when they change to alert me to get new list." The
+guides are dated documents in the library now — the 2025 networks guide (42 documents), the 2026
+PBM listing, the 2026 and 2027 Medicare D guides. Rule: from 15 November of a guide's year, and
+again each month, if no guide for the coming year is on file for that family (networks, PBM
+listing, Medicare D, discount card), a line on Today and in the weekly email says which guide is
+missing and where it comes from (Atlas, pbmrelations.hmatlas@mckesson.com). And when a newer guide
+is loaded, the older year's rate lines are marked superseded from the newer one's effective date,
+never deleted: last year's claims still price on last year's guide. Lives with the contract clocks
+(`contractClocksDue`).
+
+### 27. Remittance advices (835s) emailed to the site have to be recognised and applied (8 September)
+
+The owner's words: "dont forget about remittance advice. going to have those emailed into site as
+well, system needs to know how to correctly handle them." Today an 835 is handled only when
+dropped through the Add tool (`intake/actions.ts` → `importRemittance`); the mailbox sweep
+(`autoroute.ts`, `mailbox.ts`) does not recognise one, whatever its extension. Wanted: recognise an
+835 by its content — an ISA envelope with ST*835 — under any name (.835, .edi, .txt, .dat, or a
+zip holding one), route it to `importRemittance` with the same balance check the reader already
+enforces (refuse a file whose CLP, PLB and BPR do not balance), post the payments onto the claims
+by prescription and fill, and file the payer's 835 as the receipt the cash books read. Unmatched
+lines are held and named, never dropped. Recogniser side B's; route and post 2's; the reader is
+A's and already tested. The facilitator's files already arrive this way through the MTF tool.
+### 28. From contracts to profit: prove the rate, then change what is bought and dispensed, on one page (8 September)
+
+The owner's words: "we have contract info and can make a lot of connections. how do we use that to
+extract more profit, change what we order. whats best way to do this.. are we sure about
+reimbursement rate, can we prove it? how do we turn that into more profit.. how do we present that
+info to me in a clear way to make it actionable??" And, the same hour: "a little concerned your
+info doesnt match reality." The order is fixed by that concern. (1) **Prove it** — the backtest of
+item 23: every fill on a settled network priced from its rate and set beside what the plan paid,
+by network, with the share that reproduces within a dollar; nothing downstream is trusted from a
+network the backtest has not proved. (2) **Then use it**, three levers each measured on the real
+fills: which NDC to dispense within an equivalence group under each network's formula (a MAC or
+AWP-minus rate pays the same for a dearer NDC, so the cheapest to buy wins; a NADAC-plus rate pays
+cost plus a fee, so the choice is indifferent); which wholesaler to buy each from given that; and
+where a days-supply band (84+) or a preferred network pays differently. (3) **Present it** on one
+page, Profit by payer: per network — fills, revenue, cost, margin, expected against paid, the top
+drugs losing money and the one action each — with the proof share printed beside every figure.
+### 29. Which NDC nets the most for a drug: an aggregate over the drug's claims, and only the exceptions (8 September)
+
+The owner's design, in his words: "I cant necessarily tailor my ordering to one claim, this is why
+we will have to look at aggregate of claims for 1 drug and find which NDC nets the most for that
+drug based on reimbursement (contracts) we do for that drug and what we purchase at.. this will be
+a fluid calculation.. and really our system is set to order cheapest net drug, so system should be
+looking for cases where that isnt true and let me know. will take multiple months to get enough
+data to be confident." So, per drug (equivalence group), not per claim: take every fill of that
+drug in the window, the network each fill priced under and that network's formula (proved by the
+item 23 backtest, never assumed), and for each candidate NDC the pharmacy could buy compute what
+those same fills would have paid under each formula (AWP-minus pays more for a higher-AWP NDC; MAC
+and NADAC-plus pay the same or by that NDC's own benchmark) less what the NDC costs to buy today,
+net of rebate — a net per unit for the drug's actual payer mix. The buy list already orders the
+cheapest net-cost NDC; this reports only the exceptions: drugs where a dearer-to-buy NDC nets more
+across the mix, with the dollars a month, the fills behind it, and a confidence that grows with
+the months of claims (thin until the twelve-month export lands). A very high-dollar item may be
+judged per claim; everything else in aggregate. `drug-profit.ts` is the start of it. Depends on
+23 (proved rates), the catalogue's AWP and NADAC per NDC, and the equivalence keys.
+### 30. Proof rows: every dataset re-proved against its own source file, every night (8 September) — the most important thing
+
+The owner's words: "these things need to be right!! we need to make sure claims are matching
+their info properly and continue to. we need to do the same with drug info (pricing, nadac, awp,
+equivalents, etc).. this is the most important thing." SESSION-RULES §1c is the rule. What holds
+today: the claims reader checks three totals against the report at import and refused nothing
+wrongly (the 4 September rows re-read from the stored file matched field for field); Data health
+measures completeness and linkage on twenty rows. What is missing is the nightly re-proof from
+the stored files. Build, in this order: **claims** — every stored report file re-read each night,
+rows and the report's own totals set against the claims table per day, any row that differs
+named; **catalogues** — each supplier's last file's row count and price sums against the stored
+rows; **NADAC** — the CMS file's rows and as-of date against the table; **FDA directory** — the
+zip's product and package counts against the table, and the equivalence keys re-derived; **on-hand**
+— the report's own count against stored (2 built the gate); **invoices** — total against lines;
+**remittances** — the 835's CLP and PLB against the payments posted; **the guides** — the
+workbook's rows against the documents. Each a Data health row with the file's date, each
+disagreement a red row on Today. Data health is 2's: the rows and the nightly script; the claims
+re-read is 1's. Ahead of item 24 in 2's order, by the owner's word.
+### 31. The site starts clean on 1 September 2026: no history is coming (8 September)
+
+The owner's words: "i will not be uploading claims from before sept.. or anything. this site is
+starting clean as of 09/01/.." So the twelve-month claims export is withdrawn from every list that
+waited on it (10b, 23, 24, 29, the HANDOFF owner list), and the site needs a stated start date:
+a `site_start_on` setting, 2026-09-01, read wherever the site judges a window. Consequences to
+build, small: the 23 facilitator payments and the RedSail statement's August lines are for fills
+before the start and will never match a claim — they are shown as "before the site's start" and
+counted in cash as received, not as unmatched; the facilitator page, the remits Data health row
+and the copay-card reconciliation say so in those words. Every rate, steadiness and idleness
+judgment carries the window it was made on, and the window grows from 1 September: the
+"short window" caveats on Return soon, the add-on lists and item 29 stand until the months
+accrue, and the pages print the number of days held. The claims of 24–31 August already on file
+stay (they are real and proved) but are outside the start.
+### 32. PioneerRx's dispensed export is the second claims feed: it enriches, it never duplicates (8 September)
+
+The owner uploaded `daily_0901_to_0907.xlsx` — "this is the correct info" — one row per
+prescription sold, 51 columns, with what the transaction report never prints: AWP, WAC and NADAC
+for the dispensed quantity, DAW, days supply, dispensing fee, basis of reimbursement, the plan's
+own contract id, DIR fee, e-voucher, the sold date, and the secondary payer beside the primary.
+Compared row for row the same day: 916 of 943 prescriptions in both agreed on the remit to the
+cent; every difference had a reason (the export prints the primary's copay, the transaction
+report what was left after a secondary paid; a $0 primary here is the paying secondary there).
+Built the same hour: `dispensed-export.ts` — pure parse, tested; `enrichClaimsFromDispensedExport`
+writes the export's columns onto the claims the transaction report proved, keyed by prescription,
+fill and BIN, and names what it cannot place (303 rows on the first file: fills processed before
+the site's records, per item 31). Migration 0091. First run: 940 primaries and 28 secondaries
+enriched; September's paid claims now carry AWP on 957, days supply on 1,035, NADAC on 914, the
+sold date on 952. Left to do: the export as a daily feed through the mailbox and the Add tool
+(its own kind; 2 and B), a nightly proof row that re-reads the stored file against the enriched
+columns (item 30), and the transaction report's `Rx Transaction Details` stays the source of the
+claim itself — the export enriches, it never creates.
+### 33. The 835 reader has no arithmetic gate: lines are stored without being checked against the remittance's own total (8 September)
+
+Found by 2 while writing the manual's payments section, then withdrawn from the manual because it was not true
+of the code: `claim-payments.ts` stores every payment line an 835 carries and never adds them up against the
+remittance's printed total (the BPR amount, and per-claim CLP totals against their SVC lines). The invoice
+reader refuses a document that does not add up, on the argument that a partial read is the dangerous outcome
+rather than the failed one: every figure that was read looks sound, and only the dropped line's dispensing
+appears to have been paid less than it was. The same argument applies exactly here (SESSION-RULES §1c, and the
+rule that every reader that decides money is checked by arithmetic before anything is stored). What to build:
+sum the CLP payment amounts and compare to BPR02; sum each claim's SVC paid amounts plus adjustments to its CLP04;
+a remittance that fails either is held whole, shown on Remits with the two figures, and nothing from it is
+matched until it is read again or the owner accepts the difference by name. The facilitator's 835s and RedSail's
+copay remits (item 24) go through the same gate. 1 builds it after the PioneerRx feeds (item 6).
+
+### 34. Multi-pack unit costs: the printed "Cost Per Unit" is n times too high, and one page read it raw (9 September)
+
+Found by the first run of 2's catalogue proof and settled the same night. PioneerRx's catalogue export prints a
+"Cost Per Unit" that, for a bracketed pack — McKesson, ANDA and ParMed write multi-packs as "(5) 1 ML", "(3) 28
+EA" — is the carton's cost over the inner pack alone, so it is n times too high. Proved against NADAC: of 2,147
+multi-pack rows with a NADAC, 1,593 land at the benchmark only once divided by the bracket, 30 fit as printed,
+524 fit neither (worth their own look: brand rows against a generic NADAC, and packs whose bracket is not a
+count). `catalogue-cache.ts wholePackage` already levels every row to the whole package at read time, so the
+shelf, the buy list and the planner were right. `minimum-store.ts` — the secondary-supplier add-on list on What
+to add — read the raw table and so priced every multi-pack add-on up to thirty times too high, in the direction
+that sends the order to whoever printed the pack without a bracket. Fixed the same night: it reads the levelled
+catalogue like everything else. Settled the same day by 2 (`work/appeal-packs`): `appeals.ts` was the one still raw, and it is the worst place
+for it — the per-unit figure it derives is what the pharmacy submits to a PBM as what the drug cost. It now reads
+the levelled catalogue, and `packQtyOf` refuses a multi-pack bracket instead of answering with the inner pack, so
+every caller is safe rather than only the ones that were looked at. The invoice readers themselves derive nothing:
+`invoice-lines.ts` takes the per-package price as printed and proves it against quantity times unit equals extended,
+so the only place that divides by a pack is the appeal. Also found: `wholePackage` leaves a row untouched when it
+prints no pack total, so a levelled row can still carry a bracket and "read the levelled catalogue" was never on its
+own enough — which is what the refusal in `packQtyOf` covers. Also from that run, settled: every "price differs" the proof reported was a second listing
+of the same NDC in the same file (539 NDCs in McKesson's, 19 in IPC's); the importer keeps the cheapest
+full-dated listing, and 2's proof now proves an NDC against any of its lines. The tables match their files.
+
+## The data the site has to ingest
+
+Named by the owner on 7 September as what is still being connected. Each one needs a reader, a
+place, and an arithmetic check before anything is stored.
+
+| Feed | Cadence | State |
+| --- | --- | --- |
+| Rx claims | daily | ingesting |
+| Supplier invoices | daily | ingesting |
+| NADAC | weekly | ingesting, coverage measured 7 Sep |
+| MTF / facilitator payments | as they arrive | page exists (`/remits/mtf`) |
+| On-hand counts | weekly | **owner asked 7 September: "Did we receive a balance on hand report yet? Didn't come in right?"** — checked on the live database that night; see Done/HANDOFF for the answer |
+| Supplier catalogues with pricing | nightly from PioneerRx | ingesting, 5 suppliers — **but on 7 September only ANDA and ParMed arrived; McKesson, IPC and IPD did not.** Owner action: check PioneerRx's scheduled deliveries for those three. Data health gains a per-supplier "last file" row so the site says this itself. |
+| Other expense invoices | as they arrive | ingesting |
+| Third-party reimbursement contracts | as signed | reader built, first live runs done |
+| **835 remittance files** | **future** | **none received yet**; the request builder is live (B), the remittance tables are designed (`payer-model.md`, A auditing) |
+| **Bank statement** | monthly | **never uploaded** — the owner's action at month end; the reader (`bank-statement.ts`) and the placement (`money/bank.ts`) exist; the deposit-to-remittance reconciliation is 2's next build |
+
+## Done
+
+- **McKesson's rebate reaches prices (7 September, deployed as `e471895`).** All three ladders were
+  stored without the ratio that drives them, so no band was ever chosen and 7,165 contract generics
+  were compared at printed price. Migration `0084`; verified live at 29% off contract items and
+  0.75% off brand. HANDOFF item 2, the six buying-logic fixes, measured in the same pass.
+- **Invoice lines belong to the supplier the invoice named (session 2, merged in `29f953b`).**
+  `invoice_lines.supplier_id` carried from the invoice, `suppliers.aliases` typed by the pharmacy,
+  equality matching only, unplaced lines counted and named on every supplier card. IPC's two
+  invoice spellings typed as aliases.
+- **The site deploys itself from the pharmacy computer (7 September, 9:34 PM).** `npm run deploy`
+  pushes `feature/compliance` and has the launcher rebuild, migrate and restart, and waits until
+  the app answers on the new build. "Let Claude run the site.cmd" was run once: the machine-local
+  permissions are in, the session starts at sign-in with `--continue` and Remote Control, and
+  migrations are at 83. Verified on the live database after the restart: zero placeholder rows in
+  either table. Nobody needs to walk to that computer for the site.
+- **Product identity comes from the FDA directory** (commit `1c8591d`, live since 9:34 PM):
+  96.9% of dispensed NDCs placed by `equivalence_key`; the 10,427-NDC cross-form merge is gone.
+- **The nine reserved placeholder rows** ("TBD DO NOT DELETE OR RELEASE") are refused by both
+  catalogue importers and cleared by migration `0082`. They were McKesson rows priced at $110.25 a
+  unit on NDCs nobody can order, flagged "not rebated" — the flag the buy list reads as a reason to
+  source elsewhere. The refusal written on 8 September guarded the NADAC path, where they had never
+  been.
+- **NADAC coverage is measured and the site is not blind** — see item 1 above and `docs/HANDOFF.md`.
+
+## 2 October 2026, while speed was being fixed on the old site
+
+- **"We really need to work on the 'the books' page, its hard to follow."** The books is `/money`: the period on both
+  bases with every figure linked to its rows (design audit §2 calls the money list the product and the page wordy).
+  A design pass, with the method now in force: rendered, printed, every sentence read as him, before he sees it.
+  Order: after speed, with Today on the old site.
+- **"also is there a way to reconcile bank statements"** — there is: the Emprise statement scan is read into
+  `bank_lines`, placed by the placement engine (89 → 2 on September's statement), and proved to the cent against the
+  printed opening and closing balances every night (`bank_to_cent`). The screen is Bank review under Money
+  (`/money/bank-review?month=2026-09`). That he asked means the screen is not where he looks for it: the same door
+  problem as the staff pages. Make the reconciliation findable from the books page and from Today's cash figure.
+- **"the site isnt terrible, its just not very user friendly and has ALOT going on.. its hard to follow."** The
+  standard for every page the design pass touches: fewer things on the screen, one line per thing, the explanation
+  one press away, the primary figure and the primary action unmistakable (design audit §3, changes 1–3).
+- **The brief for the whole pass, his words, 2 October:** "and better, more relevant tools. ie easy way to reconcile
+  bank statements (tell site things it cant match). we need to apply this logic to all pages, simpler, easier to read,
+  better tools. I dont want to lose functionality but it needs to be cleaner... Also, so many irrelevant things in
+  site. You need to go through each page, act as me. Remeber the things i am using this site for the most and make it
+  better... this should look like a professional, client facing software that I could sell.."
+  Method: one page at a time, as him — what he does there, what he never does there — rendered, printed and read
+  before he sees it; no function removed without his word on that page; the register of pages and verdicts in the
+  design audit §8 is the inventory to walk.
+- **The scope, his words, 2 October (evening):** "what things should we drop from site? we need to make this site more
+  useble.. I want compliance, I want invoice organization and storing, temp logs, delivery invoices, accounting, and
+  remits reconciliation and tracking(MTF, Aytu, SFTP). Everything else can go.." and "it needs to be more clean, less
+  busy, more professional, faster, more accurate, more automated and help me with the things above.. what do we need
+  to drop in order to do that. I get a headache looking at this site and trying to read all the paragraphs and words.."
+  The cut (about 33 pages): all of buying (what to buy, shelf, minimums, catalogue, products, replay, return soon,
+  supplies, over NADAC, NADAC, pack-size fixes as a page — not the rebate ladder: "yes keep rebate latter"), money found and "worth
+  the most", claims analysis (appeals, Kansas floor, who pays best, plan classification, networks to contracts,
+  contract reading), tools (morning check, data health, report check, sort the folder, extra
+  sections), the v2 screens; on Today: money waiting, supplies, the Claude ceiling line, the credential nags.
+  Method: out of navigation and Today first, computations stopped, nothing deleted from the database for a month.
+  To confirm with him: the rebate ladder as one figure; pack-size fixes kept hidden.
+
+- **2 October, afternoon, his words:** "dont you feel like the site could do a better job of presenting this things to
+  me??" — said after three answers (where the loan row came from, what the 187 payments are, what the 44 fills were)
+  had been found by script and given in chat. The standard from here: whatever a script had to find for him is a thing
+  the page shows, with its source and a press. Done the same afternoon: every cash row opens to its bank lines; the
+  Checks card says what the pull took. Not yet: the remits page on untied payments; the supplier invoices page.
+
+- **2 October, late afternoon, his words:** "do it, the 5800 check is for drugs. Fix what we can, fix the backend engine..
+  make this site efficient, accurate, and automated!!!" · "too many issues with it not recognizing emials and not knowing
+  what to do with statements, invoices, etc" · on the billed-against-booked card: "fix! these are the things that are
+  annoying, dont know why its happening, have to read a novel to figure it out". What was done the same afternoon is in
+  OPEN-ITEMS ("his three complaints"); what is still open is in HANDOFF.
+
+- **2 October, evening, his words:** "now way accural broke even?" · "are we sure we are calculating accural correctly??" ·
+  "did we include est rebates?" · "OTC Protis" · "also you say there have been no DIR fees, but that cant be true. DIR
+  fees are mostly proactive and at POS now. but there are 'adjustments' made.." · "No I am not having the adjustment
+  report emailed, just the OTC profit. we should already hjave all the info we need for adjustments on 835s..." What
+  each led to is in OPEN-ITEMS ("are we sure we are calculating accrual correctly??").
+
+- **5 October, his words:** "33 of those ($2,017.47) need one" · "Still failing: the nightly 'remit to claim' proof
+  has failed every month and links to a retired page ... you need to fix". Done the same day, not deployed: the 33 are
+  now 7. Nine pairs of an exact payment and take-back (net $0.00) need nothing, six take-backs and two facilitator
+  refunds tie to the claim each belongs to, and the 7 left are the one plan payment that fits two claims, which now
+  has a press with an undo, and six on claims the pharmacy reversed, which wait on his answer. The proof judges
+  exactly the payments the Payments with no claim page asks about and its line opens that page, so it still fails,
+  correctly, for the 27 payments ($2,127.47) that need him or the next claims load. Forty-one links to retired pages
+  are fixed, with a test that fails when a screen links to one (HANDOFF, top item; OPEN-ITEMS, "Found 5 October"). A
+  page the site retires next must be added to `src/lib/retired.ts`, or that test cannot know.
+
+- **6 October, his words:** "fix issues" · then, the morning check: "The morning check found 3 things — Should be:
+  invoices add up to what they say they come to. Found: 1 short by $20.31 in total. · Should be: the mailbox is being
+  swept. Found: last swept 7 hours ago. · Should be: money the payer says it has sent has reached the cash account.
+  Found: 1 remittance advised as paid and not banked, $2,008.00, reading to 2026-09-30 (6 days ago) — the last
+  ProviderPay export." · then, on the Compliance page: "1 period went by without being covered. Those do not become
+  fine because a later one was done — they are what an inspector finds. Closing one now records the date it was
+  actually done, which is honest and still better than a gap I think Ij ust did this and still getting alert". Done in
+  the working copy, not deployed: the Compliance banner, the mailbox line and the $20.31 invoice were the site's own
+  mistakes and are fixed; the $2,008.00 was first written up as a real question for him to answer in ProviderPay; it
+  was not one, because ProviderPay's September account history, filed on 1 October, already showed it banked on 24
+  September, and the card now reads that (OPEN-ITEMS, "Found 6 October"; HANDOFF, top item).
+
+- **6 October, later, his words:** "Are we learning from all these mistakes it makes and making sure it knows how do
+  to it correctly.. we need to get to the point where this site doesn't have all these mistakes all the time.." The
+  record behind the answer: the five wrong alarms he was shown that morning were written on 4 Sept, 10 Sept, 17 Sept,
+  15 Sept to 1 Oct and 2 Oct, three of them after the rules of 12 Sept; of 417 commits since, 4 record another
+  session reading the change, so he has been the second reader. Queued, in this order: (1) a reader who is not the
+  author on every change he will read, named in the commit; (2) every check, alert and banner that can reach him
+  audited for the stand-in shape (it says one thing and reads a neighbour of it while the real thing is on file), on
+  live data, read-only, and fixed where it does; (3) the one-press "this is wrong" on the morning-check card, stored,
+  and read at the start of every session on the pharmacy computer (Rule 4); (4) the lesson written where every session reads it. The measure
+  is how many alarms he has to tell us about: five on 6 October.
+  - **Status when the remittance-line commit was written:** (1) done for this one change and not yet a procedure: a
+    second Claude, with none of the author's reasoning, read an earlier version of the sweep-deposit change cold, and
+    the commit names what only the author read. (2) five cold readers have reported (the checks and proofs, Today with
+    its alerts and feeds, the money pages, Compliance, and the sweep change itself); what they reported is listed
+    below as leads, none of them checked. (3) and (4) are not started.
+  - **Status on 7 October, when the remittance-line change was finished:** the sweep-deposit change was read cold by a
+    second Claude twice, once at six points and once, after the month-coverage and non-positive-advice rules had been
+    added, at ten. Each point was checked against the code, and where it depends on data against the live database
+    read-only (counts only), before it was used: what held became code and tests or a row in OPEN-ITEMS ("Found 6
+    October", from the SS&C HEALTH row to "Eight edges of the remittance line"); what was a choice, or has no instance
+    on file, is said in those rows as such. One claim could not be checked, that no screen reads the Remits view's
+    standings, because the folder holding it is read-denied to the session that wrote this; it is asked of the cloud
+    session in HANDOFF. What only the author read is the code written after the second report. **A reader's lead can be
+    wrong: two of the leads below (A2-4 and A2-6) were refuted when checked, and A2-3 is true in the code and dormant;
+    each says so in its own entry.** Nothing here is registered as a fact until it has been checked this way.
+  - **Status on 7 October, when the press (3) was built:** (3) is built and committed, not deployed. Each failing line of
+    the morning-check card, except the one saying the check could not run, now says what its check reads ("Reads: ...")
+    and, for the owner and the pharmacist in charge, takes "This is wrong" or "This is settled" with a note; either sets
+    the line aside until what it found changes or the check passes (a check whose fingerprint is one bare number, or a
+    count and a dollar total, cannot tell a different set of the same size from the one he pressed), and the set-aside
+    lines stay listed on Today, under a closed "findings set aside" heading, with a "Put back" button. A "wrong" press
+    is kept as a report until a session on the pharmacy computer answers it, `scripts/wrong-alarms.ts` lists the open
+    ones, and Today counts the presses (OPEN-ITEMS, "The morning check could not be told it was wrong"; the data
+    dictionary, section 12). It needs migration `0142_check_marks`, which the launcher's migration step applies on the
+    first start after a deploy; if that step fails the launcher starts the site anyway and a press then fails. Two fresh
+    Claude subagents read it cold, the first the change and the second the written account of it afterwards, and handed
+    back eleven points and nine; each was read against the code and acted on, and the limits that remain are in that
+    row. No person has read the card's wording yet. (1) and (4) are CLAUDE.md rules 6 and 7, committed on 7 October,
+    and rule 3 now names the script, so a session on the pharmacy computer reads the open reports before it builds
+    anything new (a cloud session cannot read the database, and leaves them to it). (2) goes on: the leads below are
+    checked in the order of worst case, and each entry says where it stands. The measure is as it was, five alarms he
+    had to tell us about on 6 October. The press counts presses on the card's own lines, from its first use after the
+    deploy: an alarm on another screen (the Compliance banner has no press) or one he did not notice is not counted,
+    and one pressed twice is counted twice, so it is the nearest measure there is and not the number of untrue
+    sentences the site showed.
+
+- **6 October, the cold readers' leads: LEADS, NOT FINDINGS.** Nobody but the reader who wrote each one has checked it
+  against the code or the live data, and a cold reader's claim is something to verify, not a fact (CLAUDE.md, rule 1:
+  a finding is written in three lines and its SHOULD BE comes from the business, not from what the reader saw). Each
+  was reported by a reader who had not seen the morning's work, looking for the shape that put five wrong alarms in
+  front of him: a check that reads a neighbour of the thing its sentence names while the real thing is on file.
+  Prefixes: A2 is the morning check and the nightly proofs, A3 is Today with its alerts and feeds, A4 is Compliance,
+  A5 is the money pages. To take one: read the code it names, and where it depends on data read the live database
+  read-only (counts and sums, never rows), then write it in three lines in OPEN-ITEMS or drop it, and fix it with a
+  test that fails without the fix. Order: what he can see now that is a false alarm (A3-2, A2-5, A3-3, A3-5, A3-6),
+  then false all-clears (A3-1, A3-4, A2-3, A2-4, A2-6, A2-7, A2-8, A5-1 to A5-4), then Compliance (A4). Questions for
+  him that came out of them are marked Q; none has been asked.
+  - **A3-1** `dashboard/page.tsx` near line 131 wraps `dailyCheck()` in a `.catch` that returns no checks and no
+    failures, so if the morning check cannot run, Today looks clean; a check that did not run is never-measured and
+    should say so (rule 5).
+    Checked 7 October (the code; the check itself ran fine live that day): true, and not firing. Fixed in code on 7
+    October and not deployed: `checkCouldNotRun` in `daily-check.ts` gives the card one line, "not measured", with a
+    "Try again" that reopens Today; four tests, one reading the dashboard source. Registered in OPEN-ITEMS, "Found 6
+    October". Not built: the nightly run (`dailyCheckTick`) still swallows its own failure and stores nothing, and
+    nothing live reads the stored line, so a failed night leaves no trace.
+  - **A3-2** `feeds.ts` near lines 253-258 judges the 835 feed on the newest advice date after 14 days, while
+    ProviderPay is pulled by hand once a month; the feed would read "stopped arriving" for about half of every month.
+    The morning check's `horizon()` already tells the day the export was read from the newest advice date.
+    Checked 6 October against the live database (dates and counts only): NOT a false alarm today. The newest 835
+    payment is dated 6 October, the widest gap between days an 835 payment was dated since 1 September is 5 days,
+    and payments arrive between the monthly pulls (an Access Health EFT and single 835s were loaded on 2, 3 and 6
+    October). What remains is the reverse: the feed is judged on the payer's paid date and not on when the file
+    arrived, so a missed monthly pull would be hidden by a stray 835 paid in the days after it (check 10's horizon
+    covers the export's own currency). Not fixed, and not a finding until a month shows it.
+  - **A3-3** `mail-health.ts` near lines 49-56 reports the mailbox failing when the last send failed or when any
+    training assignment carries a send error, so a stale bounce pins "the last attempt did not get through"; which
+    failure it names is unordered.
+    Checked 7 October (the code, and the live database, counts and yes/no only): NOT firing. This is the state of
+    sending training emails, not the sweep of the mailbox. Live there are no open training assignments, so none can
+    carry a send error, and the last send result is on file and does not say it failed. A successful re-send clears
+    an assignment's error (`training-assignments.ts` near line 216), so a bounce pins "failing" only until the next
+    send that gets through or the assignment is completed. Left as it was: which of two failures the sentence names.
+  - **A3-4** `feeds.ts` near line 286 judges the MTF feed on `mtf_last_pull`; `mtf.ts` writes it near line 298 before
+    `if (!r.ok) return`, and again near line 589 after "Could not fetch", so a failed pull reads as on time.
+    Checked 7 October (the code, and the settings and counts read-only): the stamp is written whatever the outcome in
+    both places, so it says when the site last tried and not when it last succeeded. Not a false alarm today: the last
+    result reads "Ran successfully. Nothing new to download for that range. Nothing new to post." and the newest of
+    the 57 MTF payments ($14,088.14 in all) was received on 5 October. **Fixed in code 7 October (committed, not
+    deployed; `docs/OPEN-ITEMS.md` has the three lines and the pre-flight):** `mtf_last_pull` stays the time of the last
+    try, because the daily job reads it (`instrumentation.ts`, `mtfTick`, 20 hours) so it does not run twice in a day;
+    new settings `mtf_last_ok` (only a pull that worked moves it) and `mtf_last_failed`; the feed's clock is
+    `mtf_last_ok`, its allowance still 14 days, and a failed latest pull is said in the feed's sentence beside the badge,
+    with the last one that worked. Until the first pull after the deploy is recorded as working the clock is the newest
+    payment received (5 October), as before. `mtf.ts`, `feeds.ts` and `feed-rules.ts` have CRLF line endings; edit them
+    with a tool that keeps them. **For the cloud session, who owns the remits-side MTF page:** `mtfStatus()` still returns
+    `lastPull` (the time of the last try) and `lastResult`; if that page's "last pull" should show when one last worked,
+    read `mtf_last_ok` and `mtf_last_failed` (neither is exposed yet). **Not asked of him:** whether the badge should turn
+    before 14 days after several failures in a row.
+    **Follow-ups from a cold read, 7 October (committed, not deployed; the three lines, what was checked and what
+    became of each of the reader's six leads are in OPEN-ITEMS, "Cold read, 7 October"):** `downloadMtf`, which a pull
+    run on its own goes through, now records through `recordMtfPull` with its own verdict, so the two new clocks and
+    the sentence agree after a pull run on its own; `mtfCycle`'s fetch passes `verdict: false` (the attempt only) and
+    the cycle records its verdict once, after `sweepRemittances` has read the folder, so a pull whose reading throws is
+    not recorded as one that worked; `keyDaysLeft` moved to `feed-rules.ts` beside a new `keyExpirySays`, so the key's
+    age is worked out once and a key past its 90 days says it has run out and a new one is made at CMS (the feed read
+    "expires in -7 days");
+    the feed's sentence says when no pull has been recorded as working. **For the cloud session, on the remits-side
+    MTF page:** `mtfStatus()` returns `keyDaysLeft`, which is negative once a key has run out, and `keyExpirySays` in
+    `feed-rules.ts` words it; its `lastPull` is still the time of the last try, so a "last pull" line there can read
+    as a success after a failure (`mtf_last_ok` and `mtf_last_failed` are the clocks of a pull that worked and of one
+    that did not). This session cannot read that page (a read-deny on the remits folder). **Not built:** recording a
+    failure of `applyKey()` when a pull is run on its own (it hands its message back to whoever called it, and
+    only the daily cycle records it, at the end), and a history of failures.
+    **Follow-up on the key's age, 7 October (committed, not deployed; the three lines and the pre-flight are in
+    OPEN-ITEMS):** the live key has no day on record (`mtf_key_set_on` is empty), so the old warning, which printed only
+    in the last 14 days and only with a day to count from, could never print. New `keyAgeSays` in `feed-rules.ts` puts
+    "the day this key was made is not on record" in the feed's sentence when a key is stored and no usable day is; the
+    MTF card on the Connections page has a "Day this key was made" box with a check, and shows whenever a key is
+    stored; `keyDaysLeft` now returns null for a day that does not exist or has not come yet. **For the cloud session,
+    on the remits-side MTF page:** `mtfStatus().keyDaysLeft` is null in those cases now; say "not on record" there as
+    `keyAgeSays` does. **Q for him, not yet asked (it goes in the report):** the day he made the facilitator key at CMS,
+    or whether the portal shows it; if neither is known, make a new key and store it on the Connections page (it
+    cancels the old one, so choose a time when a missed pull does not matter). **Not built:** an end date guessed from
+    the date of the stamp or of the newest payment.
+  - **A3-5** `alerts.ts` near lines 692-702: the monthly-checklist alert links "See the list" to `/money`; the list is
+    on `/expected`.
+    Checked 7 October (the site's own `alerts()`, read-only): live on 5 and 7 October, "September 2026: 1 thing still
+    to upload" at level "soon" with the link `/money`; the one open item is ProviderPay's payment report, pulled to 18
+    September. Fixed in code on 7 October and not deployed: the link is `/expected`; one test reads the alert's link
+    from the source and checks the page asks `monthClose`, so it does not depend on the day of the month, and one
+    proves the alert appears from the 5th and not before. Registered in OPEN-ITEMS, "Found 6 October".
+    **Q for him, not asked:** September cannot be checked or closed while that report is outstanding. The month close
+    makes every checklist item a document that must arrive and asks whether the bank lines mean something only when
+    none is outstanding (`month-close-store.ts`), so `/expected` reads "N thing(s) still to arrive before September
+    can be checked at all". The two sentences that say why, the checklist's "Until it is in, none of the month's payer
+    money is on the account at all" and the alert's "Until they are in, September 2026's cash account is not the
+    bank's", were written on 11 September, before his 2 October rule that the cash account is the bank statement.
+    What the report still does, as far as the code shows, is create the cash receipts that bank lines are tied to
+    (the header of `payer-payments-store.ts`); what the placement of ProviderPay's transfers needs without those
+    receipts has not been traced. The question is whether he still wants that report pulled every month, now that the
+    account history the site already reads lists deposits by payment number, or whether the month's check should stop
+    waiting for it. The checklist and the alert are left as they are until he says.
+  - **A3-6** (also reported as A2-1) `dashboard/page.tsx` near lines 521-523: the claims-proof alert links "See the
+    checks" to `/money`, which shows no proofs; Data health was retired on 2 October; and a proof that has never run
+    is silent.
+    Checked 6 October against the live database (counts only): the nightly claims proof ran today and found 0
+    disagreements across 41 stored reports and no file problems, so the alert is not firing and there is no
+    false alarm to see. The link still goes to a page that does not show the proof, and a proof that never ran is
+    still silent; both matter only on the day it fails. Beside it: the proof's other direction counts 474 paid
+    claims that no stored report accounts for, shown nowhere since Data health was retired. 442 of them belong
+    to the imports named "PioneerRx backfill", which carry no transaction key by design; 32 are rows from daily
+    reports whose key is in no stored daily report (cause not examined; it needs a look at the rows). Not fixed.
+  - **A3-7** `alerts.ts` near lines 417-419 says "No backup has run for two days" when none has ever run; its
+    threshold is 50 hours.
+  - **A3-8** the rebate feed is judged on `filedAt` (`feeds.ts` near lines 365 and 468) and the morning check's check
+    3 on `periodTo`; they can disagree.
+  - **A3-9** `dashboard/page.tsx` near line 155 requires `pharmacy_dea`; `setup-store.ts` does not.
+  - **A3-Q** `feeds.ts` near line 124 judges the claims feed on the newest fill date, `automation-status` on
+    `claim_imports.created_at`; which one Today should mean is for him to say.
+  - **A3-10** loose ends: `MAX_QUIET_HOURS` in `automation-status` is an orphan comment; `cqi` and `reminders` are
+    `enabled: true` unconditionally; `mail-health.ts` near line 45 decides success by testing a stored string for
+    "FAILED". Not a lead for action, and not to be re-added: `alerts.ts` near line 937 holds a pattern that drops "N
+    supplies need ordering", correctly, because purchasing was cut on 2 October.
+  - **A3-11** (found 7 October while building the press, read back from the code and not from a reader) A reader that
+    throws is turned into an answer that looks like "nothing to say" in three places. `alerts.ts` has nine catches (near
+    lines 302, 358, 391, 473, 657, 705, 789, 854 and 891), each of which drops the error and adds nothing to the list,
+    so an alert whose reader failed looks on Today like an alert with nothing to report. `dashboard/page.tsx` turns a
+    failed read into an empty list or null near lines 120 and 128 (contract clocks, the claims proof) and 970 and 971
+    (the month's books, the last bank-closed month). `instrumentation.ts` near line 700 wraps the nightly morning
+    check in a catch with nothing in it; the line it stores is read by the retired `/tools/check` page and, in a search
+    that leaves out the read-denied remits folder, by nothing else. A reader that could not run is never-measured, not
+    measured-and-none (rule 5; CLAUDE.md rule 7, first corollary). Not checked: whether any of these has thrown on the
+    live site, which would be seen only in the server log, and what each of the null results renders as. The shape to
+    copy is `checkCouldNotRun`, one line saying which reader could not run and why. **Done for `alerts.ts` on 9 October 2026**: each of the nine catches now adds a row, "<area> could not be checked", with the first line of the reason; run against the live rows read-only it added none. Still open: the four `dashboard/page.tsx` places and the `instrumentation.ts` one.
+  - **A3-12** (found 7 October, from the code) `getSettings()` gives every key it does not hold an empty string, so
+    `s.key ?? "a sentence"` never prints the sentence. `automation-status.ts` near lines 91, 113, 121, 129 and 229 and
+    `feeds.ts` near line 396 each hold one ("No backup has run yet.", "Not connected. Reports emailed here are not
+    being filed.", "Connected, not yet swept.", and the iMonnit, reviews and NADAC ones), and the NADAC `lastAt` near
+    line 227, `s.nadac_last_ok ?? s.nadac_last_fetch ?? null`, can never reach its second term. Dormant on the live
+    site: all fourteen of the settings those lines read are set there (checked 7 October, set or unset only). The same
+    slip put "NaN hours ago" on the morning check for a mailbox never swept; that one is fixed and has a test. Not
+    checked: where each of these lines is shown. Not started; the fix is `||` in each place and a test on an empty
+    settings table.
+  - **A2-2** `instrumentation.ts` near lines 527-595: the nightly proofs for NADAC, the catalogue, invoices and the
+    directory write only to the retired data-health page; only `claims_proof` has a reader that is still live.
+  - **A2-3** check 4, "every invoice on file reconciles", reads only invoices where `lines_short_cents` is not null;
+    an invoice with a total and no lines read is outside it (`invoices.ts` near line 2994 returns before the write).
+    Checked 7 October (the code, and counts read-only): true in the code and dormant today. The check counts the
+    invoices that have a short figure recorded (two today, $51.32 in all); `storeInvoiceLines` returns before it
+    writes one when the text is under 200 characters or no line parsed, so an invoice whose text could not be read
+    keeps no figure and is counted with the ones that add up. All 219 invoices on file have lines read and none has a
+    total and no lines, so nothing is hidden now. The small fix is a never-measured count beside the short one
+    (invoices with a total and no lines read), said on the card in its own words. Not built.
+  - **A2-4** check 8 groups by supplier, eligibility and ratio measure; `rebate-view.ts` `sumOver` filters on
+    eligibility only and sums every current ladder, so a doubled rate can pass the check.
+    Checked 7 October (the code, and the ladders read-only): refuted. Of the four current ladders on file, the one
+    (supplier, eligibility) pair that `sumOver` adds across measures is the contract-generic basket's two statement
+    rebates, one measured by generic compliance and one by the generic purchase ratio; they are paid together, so
+    adding them is right, and check 8 groups by measure so that it flags only a second ladder on the same measure,
+    which is the renamed-programme doubling it was written for. Zero baskets are flagged. One question stays open and
+    is not a finding: the all-generics ladder (current from 1 July 2026) is added to the contract rate in the
+    purchasing comparison and the rate explainer, while the monthly estimate prices flagged lines on the contract
+    rate alone, so if that ladder pays on top of the statement's two rebates the estimate is low, not high. Not asked
+    of him yet.
+  - **A2-5** `engine/proofs.ts` near line 67: `claimsEqualPioneer` is scoped to `c.coverTo`, which moves, and
+    `needs-you.ts` near line 246 takes the latest proof per (proof, scope), so the failing line ("PioneerRx holds 38
+    fills the site does not") never resolves.
+    Checked 6 October against the live database (counts and dates only): real and dormant. Five
+    `claims_eq_pioneer` lines are open on five moving scopes (30 September to 5 October); the oldest still says
+    "PioneerRx holds 42 fills the site does not" although every run since 2 October found none missing, and its
+    link, `/claims`, does not show the comparison (the Checks card on `/money` does). But no screen reads the
+    needs-you list (`engine/read.ts` is imported only by `scripts/support/engine-run.ts`, and the engine's screens
+    were retired on 2 October), so nobody sees them. Fix before those screens come back: keep only the newest
+    run of a proof whose scope moves, give the line an id without the date, link it to `/money`. Not fixed.
+  - **A2-6** check 3's no-statement branch says the boot correction fixes it; `correctStandingRebateStatement` returns
+    `{ moved: false }` first when none is standing, so the instruction cannot clear the line.
+    Checked 7 October (the code): refuted as written. The no-statement branch of check 3 says only that nothing is
+    setting the contract rate; it does not mention the boot correction. The branch that does ("the correction at boot
+    puts the newest statement on file back in charge") is true: `correctStandingRebateStatement` moves a standing
+    statement more than 60 days old to a newer one that reads and passes its own checks. The corner left: a newer
+    statement that is on file and fails its own checks is not moved, and the card then says it "has not arrived" when
+    it has arrived and was refused. Dormant (check 3 passes today). Not fixed.
+  - **A2-7** `expectedArrived` (`proofs.ts` near line 206) and `readerArithmetic` (near line 76) pass on an empty
+    population, and `needs-you.ts` near line 250 drops both. The same family as the morning check's "no remittance has
+    been read yet" branch, which passes and is deferred with it.
+  - **A2-8** check 9 joins `claim_payments` to `claims` on `rx_number` and `date_filled` and lacks `fill_number`,
+    which `fills.ts` `fillKey` includes.
+  - **A2-9** loose ends: `paymentsOnce` pairs only rows that share a source (MTF against plan); `receipts_to_bank` is
+    a permanent Today line for a past month with no statement; check 2 says "can be removed" while
+    `duplicatesToRemove` leaves a residue; `data_health_last` is stamped before the child process spawns; check 5 uses
+    6 hours where `feeds.ts` uses 26.
+  - **A2-Q** check 6 counts only `REBATE|%` expenses while its sentence says "money booked off a statement"; should it
+    cover what the other statement readers book?
+  - **A5-1** `needs-you.ts` near line 220 and `money/page.tsx` near line 256 say "Every line placed and every proof
+    passed"; `month.ts` near line 128, `closeState`, reads no proof. A known carry-forward, and the September
+    remit-to-claim proof fails.
+    Checked 7 October (the code; the live database, counts and dates only). Half of the lead is wrong: the sentence is
+    in `needs-you.ts` alone, and no live screen reads that list (`todayView()` is called only by a support script,
+    because the rebuild's Today is paused); `money/page.tsx` near line 256 shows a Close button on the same "ready"
+    state with no sentence. The other half holds: `closeState` is "ready" when the bank has lines, none is unplaced,
+    every receipt without a bank line is a credit memo or one of the last four register days, and the month is over
+    (`month.ts` line 126); no proof is read. Live, September is closed (2 October, 18:18 UTC): its audit line says the
+    pharmacy session closed it on his word ("can we close sept?", then "dont see close button?"; the old site had no
+    close control), after he had been told it was ready, which the comment in `close-month.ts` also records; the
+    button on the Money page came after. Its remit-to-claim proof had failed in all ten of its runs, which fall on seven
+    days from 1 October, and fails in the latest (7 October, 03:58 UTC: 25 payments, net $977.95, tied to no claim and
+    open); its other two
+    proofs pass. September is a test month, so nothing is wrong in the books because of it; the same button on
+    October, the first real month, would close it the same way. Which proofs should stop a close is not readable from
+    the data: `expected_arrived` and `reader_arithmetic`, which belong to no month, and `claims_eq_pioneer`, which
+    belongs to a day, also fail today and would hold every month open for ever. The comment on the month's state in
+    `schema.ts` (near line 3860) says "ready (every proof passed…)" and is wrong in the same way, and the other branch
+    of the `needs-you.ts` line (218) says "It closes itself when every line is placed and every proof passes.", which is
+    false twice: only a press closes a month (`closeMonth`, `month.ts` line 192, reached from `close-month.ts`) and
+    "ready" reads no proof. Q for him: when a month is closed, should a failing proof for it stop the close, or only be
+    written down at the close? Not built; the plan without his answer is to say beside the button which of that
+    month's proofs fail, to write them into the audit line for the close, and to correct the three sentences.
+  - **A5-2** `money/page.tsx` near line 421 says "the cash account equals the bank to the cent", which holds by
+    construction over the rows it reads; only `bank_to_cent` proves the rows equal the statement, and the page's
+    upload path (`bank.ts` near lines 43-51) does not call `recordMonthBalances`.
+  - **A5-3** a cheque matched to an expected cheque is stored `placedAs` `noted` with a why that begins "Invoice N: ";
+    `cash-from-bank-rules.ts` near lines 188-193 looks the text before the colon up as a category, finds none and says
+    "Not yet named", while the bank page shows the line confirmed with no button: two states at once.
+    Checked 7 October (the code; the live database, counts only). The path is real (`bank-statement.ts` near line 764
+    makes a cheque matched to an expected cheque with an invoice number a "noted" line under the category "Invoice
+    N"), and when it fires the cash account lists the line under "Not yet named" while the bank page shows it
+    confirmed. Live, no line is noted with an "Invoice" why (the two noted lines start with a category name, "Drug
+    purchases (OTC)", which rule 9 finds), so it is not firing; and "not yet named" is arguably true of a cheque whose
+    invoice is not on file, so the lead is a design point, not a false sentence. Dormant.
+  - **A5-4** `bank.ts` near line 520 prints "Read from the scan and proved against its daily balances." only when
+    `o.notes?.length`, which looks inverted.
+    Checked 7 October (the code). Not inverted; dropped. `notes` holds the scan solver's exceptions (a printed balance
+    that could not be relied on, lines with no readable amount left out, summary figures that disagree with the
+    lines), and `placeStatementLines` uses only whether there are any, to append one canned sentence, and never shows
+    them; a read that left lines out says what a read that corrected a summary says, and a read with no exceptions
+    says nothing of the proof. The sentence also follows "marked paid" with no stop and ends "..". What it claims is
+    true, because a scan with a day still unproven stops before anything is placed (`bank.ts` near lines 51 and 163).
+    Not measurable live (the notes are not stored). Not fixed; the fix is to print the notes' own sentences, which are
+    written for a person, and to say "proved against its daily balances" for every scan, with a test on the sentence.
+  - **A5-5** loose ends: `cash-from-bank.ts` near line 58 decides "not yet at the bank" and "credit memos" by a
+    pattern on the source key, and near lines 115-116 returns `missing: []` with `usable: true`; `month.ts` near line
+    199, `statementOnFile`, is unused.
+  - **A5-Q** a receipt typed on the books page gets a month and no received day, so `month.ts` near line 87 leaves it
+    out and `cash-from-bank.ts` near line 54 keys on the month; should the form ask for the day?
+  - **A5-6** (found 7 October by the author, not by a cold reader.) The question "which receipts has a bank line
+    confirmed" was asked four ways and one of them read half the answer: `decideBankLine`'s "confirms run" branch read
+    only `bank_lines.receipt_id`, so a counter deposit decided by hand could take a register day an earlier line had
+    confirmed as its second or later receipt and book a false "Cash short", and the automatic counter-run pass printed
+    the loop's last running total (933.31) for days that add up to 690.68. Fixed in code (not deployed): one function,
+    `receiptsConfirmedByBank()` in `src/lib/bank-confirmed.ts`, for the placement, the decision, the matcher's context
+    and the month's balance; the sentence totals its own days; five tests, seven mutants. Not fixed, because each is a
+    live-database write that needs his word: two stored sentences (16 September, $232.67 and $690.69) that keep the
+    old total until the lines are placed again, two register days (2 and 3 September) confirmed by two lines, and five
+    link rows tying three payer receipts to counter lines, whose writer is not established. The SQL in
+    `cash-from-bank.ts` near line 54 keeps its own form of the question and reads both sources; a source test pins it.
+    One question for him came out of it and has not been asked: what the three 16 September counter deposits held (the
+    slips would say); optional, nothing waits on it.
+  - **A5-7** (watch, found 7 October by the author in the scan.) The 28 September Access Health deposit, $28,933.18,
+    has no remittance advice of its amount in the register, and the register holds no advice from any payer dated 25
+    or 28 September, though the export reads to 30 September; the other ten of the eleven Access Health deposits of
+    15-30 September each have one dated the business day before. Not a double count (checked: each deposit has one
+    receipt of exactly its amount and no receipt serves two). Expected-not-yet: look again when the next ProviderPay
+    export arrives. If it reads past 5 October and still has no advice for that amount, ask him one question: is there
+    an advice for it on ProviderPay, and did it come with the 29 September file? Until then nothing is asked.
+  - **A4-1** (found and read in code 7 October; fixed in code the same day, committed, not deployed.) OBSERVATION: the
+    register (`compliance/register/page.tsx`) painted a cell covered unless the list on Compliance carried that
+    period; `openItems()` skipped a duty still waiting for its yes or no and the periods before a late confirmation,
+    so those read green; a duty answered "no" was switched off and the register's list of active duties dropped it;
+    Compliance's green "You are clean.", Today's "Nothing is late" and the inspection sheet's register check each
+    ignored the waiting duties, and the inspection check also ignored part-done periods. SHOULD BE: a cell is covered
+    only for a period that was judged; a waiting duty reads "awaiting your answer"; a period before a late
+    confirmation reads "not judged"; a duty answered "no" is listed with the day and the person; no screen says clean
+    over a duty it did not judge. DIFFERENCE: the register decided "covered" by the list's silence. Fixed: `judged.ts`
+    is the one rule both read (`judgedPeriods`, `cellState`); `dismissedObligations()` feeds the register's
+    "Considered and not applicable" list; `registerSaid` for the inspection sheet; the yes and no sentences say what
+    they start and what they leave alone; Today's top card says "No alert is open today" and names the late count
+    when anything is late or waiting (it reads `alerts()`, which does not read compliance); `startedUsingSite()` takes
+    the earliest row; the dead `complianceSummary().clean` is deleted. Row in `docs/OPEN-ITEMS.md`. Left, each a lead:
+    (a) a judged period's "covered" is still the list's silence (`openItems()` leaves out a satisfied period).
+    (b) **A4-1b, next:** the way back from a mistaken "no": a one-press button in the register's "Considered and not
+    applicable" list that posts to the existing `answerAction` with `back=/compliance`. Until then the Compliance
+    page's "Answer once and it is settled" is true; the commit that adds the undo rewrites that sentence and extends
+    the answer's flash, and `tests/answer-again.test.ts` (written, not run; it fails until then, and its
+    `{ title }` assertion on `answerObligation()` becomes `{ title, cadence }`). (c) A period before a late
+    confirmation that has a filing still reads "not judged" and its hover omits the filing; after an undo, the stretch
+    between the no and the yes reads "not judged". (d) The Compliance page's "You are clean." does not read the
+    self-inspection findings or the invoice problems that Today counts as late. (e) The inspection sheet's part-done
+    sentence cannot fire today: no closure sets `perPeriod`. (f) "Every period that has ended" names no start date, by
+    his design.
+    **A4-Q3, for him:** a duty added by a later release: judged from the site's start, or from the day it was added?
+    Live today it changes nothing: three duties were added after the start (5 September and 2 October), all annual or
+    as-needed.
+    **A4-Q4, for him:** when he answers "yes" part-way through a period, is that period judged, so it can be late if it
+    ends uncovered (what the screen now says), or only the next one?
+  - **A4-2** "Test that a backup restores": the duty's detail names "the dispensing system and this desk"
+    (`obligations.ts` near lines 489-493) but its witness is only this desk's rehearsal archive, and
+    `instrumentation.ts` near lines 269-275 rehearses every 30 days, so the quarter would always cover itself. Q for
+    him: does anyone test the PioneerRx backup, and should the duty be about this desk only?
+  - **A4-3** (read in code 7 October; fixed in code the same day, committed, not deployed.) OBSERVATION: the Kansas
+    pharmacy registration and DEA registration duties are kind "renewal"; `witnessed()` had no case for them, `hrefFor`
+    returned nothing, `completeObligation()` has no caller in `src`, `scripts` or `tests`; by the code the 2026 Kansas
+    period was "open" with `dueOn` 2026-06-30 and sat under "not yet due" / "Nothing here is late" 99 days after that
+    date, and would have become a missed period nothing could clear on 1 January 2027, while the Kansas certificate on
+    file runs on into the first half of 2027. SHOULD BE: a registration renewal is done when a certificate that runs
+    past the end of the period is on file, and is late from the day after the date the certificate on file runs to.
+    DIFFERENCE: the duty could not see the certificate and was judged by the calendar year alone. Fixed:
+    `renewal-cover.ts` reads the pharmacy's certificate rows; `openItems()` makes a period "missed" once its own date
+    has passed; the item says what is on file and links to Licences; the register reads the list's state
+    (`openStates`); Today's quiet list prints its own sentence for a renewal (`comingSentence`); the row is in
+    `docs/OPEN-ITEMS.md`. Left, each a lead: (a) a late renewal covers only the period it is filed in, so the stretch
+    before it is not shown (the question below). (b) One lapse shows as several missed periods from the same date, and
+    as two rows, the duty and the certificate in the due list, on Today and in the digest. (c) "N days late" counts
+    from the date on the certificate, so an old certificate reads in thousands of days. (d) A certificate with no date
+    reads as late with its own sentence; there is no separate state for a date nobody recorded. (e) The duty reads every
+    row of the type, and the due list groups by type and label. (f) No form makes a pharmacy certificate "does not
+    expire" and a Licences edit-save sets that to false, so the `noExpiry` branch is reachable only by a row written
+    some other way. (g) The live Compliance, Today and register pages have not been read through `openItems()` (it
+    seeds rows); the first real look is after a deploy.
+    **A4-Q2, for him:** after a registration lapses and is renewed late, must the unregistered stretch stay visible on
+    the register, or does the late renewal close it? Today it closes the period it is filed in.
+  - **A4-4** `compliance-status.ts` near lines 123-154 judges training periods on today's on-site roster; an empty
+    population reads as missed for most duties and as satisfied for `immunization_protocol_review` (near line 148).
+  - **A4-5** a witnessed period recorded wrongly cannot be corrected (`page.tsx` near lines 341-351 has no form);
+    `imonnit.ts` near lines 505-507, `monthsSatisfied`, is false for every month when no sensor is tracked.
+  - **A4-Q** the "CQI program" duty's witness is a staff member who holds a `cqi_program_review` training record, a
+    different act from reviewing the written programme: which does the duty mean?
+  - **A4-6** loose ends: (fixed with A4-1: `startedUsingSite()` and the register page's start each took the first
+    obligations row and not the earliest `created_at`; the register now calls `startedUsingSite()`, which orders by
+    `created_at`); `inspection.ts` near lines 408-420 says "ready" from the last completed walk with no period test and would
+    disagree with the register from 1 January 2027; `periods.ts` near lines 102-105 re-chooses the judged years of a
+    biennial or triennial duty as today moves; the controlled-substance inventory line appears twice ("also late" and
+    "Nothing here is late"). The readers report reading these sound, on their word and not mine: `periods.ts`,
+    `backup.ts` near lines 423-446 and 480-522, `self-inspection.ts` near lines 133-176, `compliance-status.ts` near
+    lines 366-403, `obligations.ts` near lines 566-645, `imonnit.ts` near lines 504-513.
+  - **A4-7** (found 7 October by a cold reader of the A4-3 change; each point read against the code by the author.) The
+    readers of a pharmacy's own certificate rows each decided which row is current for themselves, and read a blank date
+    three ways. Fixed for the pharmacy-level readers (`credentialEnd` and `inForce` in `superseded.ts`, used by the due
+    list, the inspection list, the fact sheet and Licences; the row is in `docs/OPEN-ITEMS.md`). Left, each a lead:
+    (a) the person-level readers still disagree about a blank date: `staff/[id]/page.tsx` near lines 60-108 (`heldFor`
+    ranks it highest, `extraSplit` reads it as never expiring) and the person loop of `dueList()` (ranks it lowest);
+    dormant live, where the only undated person-level rows are two powers of attorney. (b) The inspection list's
+    registration, DEA and CSOS checks link to `/documents` (`inspection.ts`), where an upload makes no certificate row
+    for the pharmacy, so their state can stay blocking after he has uploaded the certificate; the link should go to
+    Licences, as the due item's now does. (c) `inventory/[id]/print/page.tsx` near line 20 takes the DEA number from the
+    first DEA row. (d) Intake's `replaceExisting` (ticked by default) replaces the first row of the type, not the one in
+    force, and a blank date there wipes the date. (e) Two kinds of one type with different labels get due items with the
+    same title. (f) A pharmacy certificate with no date recorded gets no due item (the inspection list says no expiry
+    date is on file; Today says nothing); a "no expiry date recorded" item was not built.
+
+- **7 October, the presses that reach Claude: LEADS, NOT FINDINGS (prefix A6).** Found while the presses that reach
+  Claude were put under the site's gate (`asked()` in `src/lib/ai-gate.ts`), by the author and by seven fresh readers
+  (subagents), each given the change and not the author's reasoning. What was confirmed against the code is in four
+  OPEN-ITEMS rows, each easy to find by its opening words: 'Thirteen presses that reach Claude', 'The "Read the lines
+  off the invoices" press', 'The sentences around the monthly Claude ceiling' and 'The "Write every fix that needs no
+  answer" button'. What follows is the rest. Each lead was read back against the code by the author on 7 and 8
+  October, and where it depends on data against the live rows, read-only and counts only; no press was run. A reader's
+  hand-back is a lead and some of it was wrong, so each point goes as far as the author checked it and no further. To
+  take one: read the code it names, read the live database read-only where it depends on data (counts and sums, never
+  rows), write it in three lines or drop it, and fix it with a test that fails without the fix. Code is named by
+  function and not by line. Q marks a question for him; none has been asked. A6-7 is not listed: it was a stale
+  comment above `storeInvoiceLines`, corrected in the same commit. The numbering continues the 6 October leads above
+  (A2 to A5).
+  - **A6-1** (what the gate says and what it records) (a) The comment on `asked()` in `ai-gate.ts` said the reason
+    given as `why` is on the usage log. It was not: `why` is held in the store for one call tree and nothing writes it
+    down; `whoAsked()` and `wasAsked()` have no caller outside `ai-gate.ts` and `tests/ai-gate.test.ts`, and every
+    `logUsage(` call (twelve in `ai.ts`, one in `business-docs.ts`) takes its own user and a fixed action name. The
+    comment is corrected in this commit. Still open: either record the press on the usage event, or never expect the
+    bill to be read that way; until then no screen or document may say it can be. (b) `client()` takes a name for what
+    is being done, but it is called with none at twelve places in `ai.ts` and one in `business-docs.ts`, so a refusal
+    from those always begins "This needs the model" and names nothing. (c) The refusal ends "Open the page and press
+    the button, and it will run then", which is wrong where no page can run the thing (the mailbox sweep on its timer,
+    A6-4).
+  - **A6-2** (`scripts/` is not scanned) `tests/ai-presses.test.ts` reads `src/` and not `scripts/`.
+    `scripts/read-contracts.ts` imports and calls `queueExtraction`, `collectExtraction`, `recoverFailures`,
+    `queueTriage` and `collectTriage` from `contract-extract.ts` under no `asked()`, so the gate refuses it and it
+    spends nothing. No `package.json` script and no page runs it, and the pages that used it are retired. Before this
+    note it was named in tracked files only in `docs/HANDOFF.md` and the OPEN-ITEMS row. Delete it, or wrap it and
+    extend the scan to `scripts/`; whether a script he runs by hand counts as pressing a button is his to say.
+  - **A6-3** (what the test cannot see) The test is a source scan and has the limits of one. The `ALLOWED` guards
+    (`ok`) test the text of a call, mostly with regular expressions. An `asked(` inside a server action is accepted
+    wherever the action is wired, so an action that a page calls on load instead of from a button is not detected. Two
+    functions of one name are told apart only by a guard (`testConnection`, for the PioneerRx SQL tool and for
+    Claude). The reach scan follows top-level names in `src/lib`, treats every identifier as a reference (so it
+    over-reports), and no test shows what it does with a path that runs through a name declared somewhere else. A
+    reader's lead that a guard on the Today page's `feedsNow` call could be defeated by passing `probe` through a
+    variable no longer applies: the guard is gone, and `feedsNow` and `setupNow` must reach no door at all. Tighten
+    the test the next time a door to the model is added.
+  - **A6-4** (the mailbox reaches the model under no `asked()`) `importRecognised` in `mailbox.ts` files each document
+    by kind, and two kinds call the model there: `readPurchaseDrillDown`, when the McKesson Purchase Drill Down's
+    layout cannot be read directly (its only caller is `importRecognised`), and `readReturnPolicy` (its other caller,
+    the supplier terms page, is under `asked()`). `importRecognised` is reached by the sweep, on its timer and from
+    the Inbox "Check for new mail now" button (`sweepNow`), by `importDropped` (the Inbox re-route and the Intake), by
+    `rereadInboxItem` (the Inbox re-reads) and by `resortInbox`. None of those is under `asked()`, by design (the
+    `FILING` reason in the test: wrapping them would make every filing spend), so the gate refuses both readings
+    however the document arrives, and the catch files it as "Filed, but could not be loaded: This needs the model, and
+    nothing calls it on its own. Open the page and press the button, and it will run then." `alerts.ts`
+    (`needsTheModel`) and `engine/proofs.ts` leave such rows out of alarms on purpose, and `inbox-line.ts` (the branch
+    on /needs the model/i) tells him the report is "filed; read with the model on your button", but no button can make
+    it run. Not checked: whether either kind of document has arrived since the gate was added, and what the live rows
+    say. Question A6-Q1.
+  - **A6-5** (suspect; never tried, because no invoice has reached it) `storeModelInvoiceLines` holds the model's
+    lines to `inv.totalCents ?? read.totalCents` with no allowance for freight or tax, while `storeInvoiceLines`
+    compares the lines with the goods subtotal where the page prints one (`readGoodsSubtotalCents`) and counts the
+    charges it read. A model reading of an invoice that prints freight or tax would therefore fail to add up whenever
+    the total it is held to includes them, and where there is no total anywhere the model's lines are kept with
+    nothing to prove them against (the press counts those as `keptUnchecked` and says so). On 7 October all 228
+    invoices on file had lines, so nothing has reached this path.
+  - **A6-6** (a reading that is not kept is paid for again on every press) An invoice that Claude read and the code
+    did not keep has no lines, so every later press sends it again, and a reading Claude finishes is charged whether
+    or not it is kept. No count of tries is stored. The press now says so in its "not kept" sentence. Question A6-Q2.
+  - **A6-8** (`fileInvoice`'s comments and `emptyInvoiceWarning`) `emptyInvoiceWarning` and its call in `fileInvoice`
+    (`invoices.ts`) are used only as yes or no: the warning is never shown or stored. The comment above the call says
+    the reason is written into `basis` and the one below says it is not written down. `modelTried: worthReading` is
+    passed to it although filing never asks the model for lines (the gate refuses, and `writeInvoiceLines` reports
+    that nothing was sent), so its sentence "Both readers have had this document" would be false if it were ever
+    shown. Pass `written?.model.sent`, or drop the argument, and make the two comments agree. Separately, `textOf`
+    treats a page with 200 characters of text or fewer as a scan; not checked: whether a short real invoice can be
+    mistaken for one.
+  - **A6-9** (counted as sent when it may not have been) `model.sent = true` is set just before `readInvoiceLines`
+    runs, so a request that fails after it has left counts as sent whether or not it was charged. Usage events are
+    written when a request finishes and could be read instead.
+  - **A6-10** (has he met a refusal?) Unknown. A refused press writes no usage event and, as far as read, no audit
+    entry, so nothing on file shows whether he pressed one of the thirteen and was turned away. The live usage events
+    end on 8 September.
+  - **A6-11** (`readInvoice` is refused for good) `readInvoice` (`ai.ts`) has two callers, `fileInvoice` and
+    `adoptDocument`, both filing and neither under `asked()`, so it is refused every time. `fileInvoice` also still
+    passes `allowModel: worthReading` to the line writer. Either a button reaches it, or the call and the code behind
+    it go.
+  - **A6-12** (the nightly re-read's wording) The nightly re-read writes "N with no text to read" from `r.unreadable`,
+    which holds scans and failures together (`instrumentation.ts`); the report now carries `failed`, so the sentence
+    can tell them apart. `invoice_lines_backfill_result` is written in `instrumentation.ts` and listed in
+    `settings.ts`, and nothing else in `src` names it.
+  - **A6-13** (the CQI "drafted" count counts asks, not drafts) `runCqiAutomation` (`cqi-auto.ts`) does `drafted++`
+    for each queued review whether or not the draft was written: `writeIncidentAnalysisInBackground` catches every
+    error, the gate's refusal included, and marks the incident failed, and `cqiTick` (`instrumentation.ts`) then
+    records "N analysis drafted". Dormant on the live data: no review is due.
+  - **A6-14** (the contract reader, and three sentences about the ceiling) (i) Nine handlers on the retired payers
+    contracts and sort pages (the `RETIRED_PAGE` entries of the test) still call contract readers, and the two test
+    reads among them (`testReader` and `proveReader`, on the retired Sort page) send without checking the ceiling
+    first; they do log their tokens, so the spend counts them afterwards. `src/lib/retired.ts` redirects the
+    addresses; delete the handlers with the pages. (ii) Three sentences say more than the code does: the Settings
+    status paragraph ("Nothing is being sent to Claude until the month rolls on or you raise it",
+    `settings/page.tsx`), the Today alarm in `alerts.ts` ("has been spent in the last month, so nothing further is
+    being sent — the manual will not be read, …"), and the refusal in `ai.ts` ("wait for the month to roll on").
+    "Monthly" is a rolling 31 days (`spend()` in `ai-spend.ts`), so spending drops out a day at a time and not all at
+    once when a month turns, and the alarm's claim about the manual is no longer true of anything that runs on its
+    own. Question for him: a calendar month, or a rolling 31 days? (8 October: with the manual's idle tick removed,
+    "the manual will not be read" is true of a press of "Put it right" only, which the ceiling does refuse; the
+    alarm was not edited. "Spent" is the site's own audit log of Claude calls priced at the stored rates, not the
+    Anthropic bill.)
+  - **A6-15** (what is sent) The Settings → Claude card says the key is used to read scanned CQI packets and draft
+    analyses, and its redaction sentence ("Prescription numbers and staff names are redacted from text sent for
+    drafting") covers drafting only, while `readInvoiceLines` sends the whole invoice PDF as it is. Whether a
+    supplier's invoice ever carries patient information is not known. Nor does the redaction take out a patient's
+    name: `redactText` replaces only digit runs of six or more and the staff names it is given, so a name typed into an
+    incident's description, or into the extra context for a draft, would go to the model as typed. Whether one is ever
+    typed there is not known; he has said he does not want the site to get patient names.
+  - **A6-16** ("short of the amount printed on it") The sentence compares the lines with the goods subtotal where one
+    can be read (`readGoodsSubtotalCents(text) ?? meta.printedTotalCents`) and with the total on file otherwise, and a
+    shortfall that nets to nothing across two halves of one invoice is stored as none (`shortCents` sums the halves,
+    and the row gets `linesShortCents: shortCents || null`).
+  - **A6-17** (the Feeds page's all-clear) The Feeds page prints "Nothing that should have arrived is missing."
+    whenever no feed is late or broken (`late` is the feeds in state late or broken), even if a feed that is switched
+    on has never delivered or has not been proved. True on 7 October, when none was late and none had never arrived.
+  - **A6-18** (the write-all press asks about the least important findings first) `openFindings()` and
+    `findingsForOthers()` (`manual-audit.ts`) order by `severity` and then `createdAt`, and `severity` is a text
+    column, so the order is blocking, note, should. The "Write every fix that needs no answer" press takes the first
+    six findings without text in that order, so the six "note" findings (wording) come before the 26 "should" ones
+    (weaknesses): on 7 October the first six it would ask about were all notes, across four sections. Fix: order by a
+    CASE expression in both places (blocking, then should, then note, as the audit's own instructions define them in
+    `reviewPolicy`) with a scratch-database test.
+  - **A6-19** ("could not write because a fact was missing" counts every finding without text) `blockedOnFacts()`
+    counts the open findings with an empty `suggestedBody`, and the manual page says of them "Those are the ones the
+    reviewer could not write because a fact was missing". A section longer than 4,000 characters
+    (`TOO_LONG_TO_REWRITE` in `reviewPolicy`) is "reviewed, not rewritten" and gives no text for any of its findings,
+    and the fallback path gives none either. On 7 October 29 of the 32 open findings without text were in four
+    sections longer than that (by the lengths of their bodies on that day) and the other 3 were in a section whose
+    body was empty, so the sentence describes few if any of them.
+  - **A6-20** (the same findings are asked again) The press asks about every finding without text, up to six, on each
+    press, and nothing records that one was already asked about, so a finding that always comes back needing a fact
+    uses up one of the six every time. Recording when it was asked needs a column. Question for him: should a finding
+    that has come back needing a fact wait until he answers it?
+  - **A6-21** (no price beside the button) The button's label and the card say "needs no answer" before anything has
+    been asked, and no price is shown beside the button. One measured finding-fix call cost $0.21 (9,391 tokens in,
+    6,573 out). The ceiling and the spend count only calls that returned (`logUsage` runs after the response is in
+    hand), and the ceiling is checked once per `client()` call, so a press can pass it by one call.
+  - **A6-22** (several findings in one section each rewrite the whole section) `applyFinding` saves the finding's
+    `suggestedBody` as the whole section body (`saveSection`, "applied from the audit, not yet reviewed") and does not
+    check that the section is unchanged since the text was written. Where several findings sit in one section (the 32
+    live ones are in five sections), applying a second written fix replaces the first, and a section edited by hand
+    after a fix was written is overwritten by it. Not checked: whether `saveSection` keeps the text it replaces.
+  - **A6-23** (the Claude row on the Feeds page is always "not proved") The Claude row in `feeds.ts`
+    (`state: !aiOn ? "off" : "unproven"`, `href: "/settings#claude"`) has no way to become anything else, because
+    nothing records when Test connection last ran or what it said. Record the time and result of the last test so the
+    row can read them. Registered, not built.
+  - **A6-24** (the Settings banner reads words, and a good save says little)
+    `blockedByCeiling = /ceiling/i.test(t.error ?? "")` in `settings/page.tsx` reads the text of the error and not its
+    class (`AiCapReachedError`), so any other message containing the word counts and a change of wording breaks it
+    silently. After a Save and test that succeeds the page redirects with only the ceiling sentence ("The monthly
+    ceiling is now ..."), so the banner never says that the connection test passed.
+  - **A6-25** (the Mailbox rows judge by the last try) The Mailbox row on the Feeds page (`feeds.ts`, `judgeFeed` on
+    `mail_last_sweep`) and the "Mailbox sweep" row on the automation list (`automation-status.ts`,
+    `judge("mail", ..., s.mail_last_sweep)`) decide on time or late from `mail_last_sweep`, which `sweepMailbox`
+    stamps at the end of every try, failed or not (`mailbox.ts`). `mail_last_result` is shown as the detail but the
+    state does not read it, and the morning check reads the result separately (`daily-check-store.ts`). That is the
+    corollary in rule 7: a time that moves when something fails is not a clock for whether it worked.
+  - **A6-26** (two pages name the Claude key's home differently, and both link the wrong page) `manual/page.tsx` says
+    "Settings → Claude" and links `/settings/connections`; `intake/page.tsx` says "Settings → Connections" and links
+    the same page. The Claude card (key, model, ceiling, Test connection, Save and test) is on `/settings`.
+  - **A6-27** (the manual's parked sections: six loose ends, five not showing on the live rows) The first five show on
+    no live row today (0 of the 75 sections the pharmacy owns are parked, read on 8 October, and nothing falls due
+    before 4 September 2027). The sixth shows in part (A6-28): the page lists three problems today and a press acts on
+    none of them (it has no section to read, no heading to fill and no marker to remove; it still rebuilds the
+    sections the site writes), so both buttons are offered although a press has nothing to do for the list; the notice
+    needs a pass that died, which can happen on any day, and the last pass finished. Four readers who had not seen the
+    change to the manual page found or sharpened them, and each was read back against the code. Most were there before
+    this change; the paragraph about the queue in (v) and the notice in (vi) are sentences this change wrote. (i)
+    `auditFailCount` counts failures over the section's whole life, not failures in a row: the branch of
+    `runManualAudit` that reads with the model clears `auditFailedOn` and `auditError` on a success but not the count
+    (the branch with no model does clear it), so a section that fails twice one year and once the next is parked on
+    the third and the page says "failed three times" as if they had come together. (ii) `rereadBlockedSections()`
+    clears `auditedOn`, `auditFailedOn` and `auditError` but not the count, so a parked section it queues is still
+    skipped by a press and, with no failure date, is no longer listed as stuck. (iii) `runManualAudit` writes "the
+    whole manual is current" into `manual_audit_result` when `due(9999)` is empty, and `due` leaves the parked
+    sections out, so a press that reads the last section it will read says the whole manual is current while parked
+    ones remain. (iv) The price under the button (`estimateSentence(audit_.due, …)`) and the "due" line in "What is
+    wrong with the manual" count the parked sections, which a press does not read; `AuditProgress.parked` is the
+    number to take off. (v) The list of sections that could not be read shows five names under a heading that counts
+    all of them, with no "and N more". The paragraph about the queue ("Nothing reads the manual unless you press it",
+    then "press it again after each pass, until only the N that a press skips are left") is shown whenever any section
+    is due, parked or not, so it is also shown when a press would read none of them, when there is no key to press
+    with, and to staff who have no button to press; and the N in it counts a section that (ii) leaves unlisted. (vi)
+    The notice "The last pass stopped before it finished" and both "Put it right" buttons test `problems.length > 0`,
+    and that list also counts the blocking and weaker findings and the review date, which a press neither answers nor
+    signs (`summarise` in `manual-job.ts` lists what a press does): the notice can say "Press Put it right to carry
+    on" when a press would do nothing, or point at a button that is greyed out (the card's whenever Claude is not
+    connected, the header's when Claude is not connected and no empty section or footnote marker is waiting), and with
+    nothing outstanding it stays on the page beside "nothing to carry on", because only a press clears it and none is
+    offered. Fix: zero the count when a read succeeds and in `rereadBlockedSections`; build the sentence in
+    `manual_audit_result` in a pure function from `remaining` and `parked`, with a test; take `parked` off the price
+    and the line; name the rest of the list; show the queue paragraph and the notice's advice only when a press has
+    something it will read or write and an enabled button to press (A6-28 is the same condition for the button
+    itself). The yearly nudge before the first sections fall due is question A6-Q3.
+  - **A6-28** (the manual page says one press fixes everything it lists, and a press acts on none of the three it
+    lists today) Observation, read on 8 October from the code and from the live rows (counts only; nothing was
+    rendered and no press was run): the card "What is wrong with the manual" lists three problems, 17 blocking
+    findings, 33 weaker findings and 75 sections with no review date; its subtitle says "Everything here is fixed by
+    one press, except the last line of each"; and "Put it right" is offered under the list. Should be: a button under
+    a list clears the list, or the list says which of its lines the button clears; the comment above the card in the
+    page's source says the button underneath "does all of it" so that the pharmacist-in-charge does not have to know
+    which operation fixes which symptom. Difference: a press (`putRight`) reads the sections that are due (none are),
+    fills the empty headings (none), removes the footnote markers (none) and rebuilds the sections the site writes, so
+    it acts on none of the three; the line under each says what does ("Applied or dismissed with a reason, one at a
+    time or all together", "Only you can sign that"), and the card's other buttons are "Apply all N suggested
+    rewrites" and "I have reviewed the manual — record today". The card and the button are as they were before this
+    change, which does not touch them. Not checked: what a press returns on these rows (the rebuild of the generated
+    sections was not run) and the page in a browser. Fix: say under the button which lines it clears, or offer it only
+    when a line it clears is present.
+  - **A6-Q1** (question for him) Which buttons may spend on his account? The Inbox's re-read, re-route, re-sort and
+    "Check for new mail now" buttons are deliberately not under `asked()` (wrapping them would make every filing
+    spend), so the Purchase Drill Down and the return policies the mailbox files can never be read by a press, while
+    the Inbox line for such a report says they can (A6-4). Either those buttons become asks with the price beside
+    them, or the Inbox line stops promising a button.
+  - **A6-Q2** (question for him) An invoice that Claude read and the code did not keep is sent again on every press
+    (A6-6). Should one try be the limit, with the invoice then shown for hand entry?
+  - **A6-Q3** (question for him) The first policy-manual sections fall due for their yearly reading on 4 September
+    2027. Nothing reads them unless he presses "Put it right", and nothing tells him beforehand: the manual page shows
+    how many are due only from that day. Should Today, or the weekly email, say that N sections fall due within 30
+    days?
