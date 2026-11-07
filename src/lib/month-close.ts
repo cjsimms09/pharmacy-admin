@@ -32,6 +32,13 @@ export type CloseCheck = {
   says: string;
   /** "document" gates arrive; "money" gates tie. Reported apart because the answers differ. */
   gate: "document" | "money";
+  /**
+   * A document that is not due yet and so cannot be waited for: the wholesaler's rebate statement for the month just ended comes around the
+   * 20th of the next month. The month closes on an estimate and says so; the statement books itself when it arrives and the figure is
+   * trued up. Until it is due this is not outstanding, and from the day it is due and has not come it is, like any other document.
+   * Never "done": nothing was measured, and the closed line names it.
+   */
+  estimated?: boolean;
 };
 
 export type CloseState = "before_books" | "running" | "waiting_on_documents" | "money_does_not_tie" | "closed";
@@ -55,7 +62,7 @@ export function judgeClose(input: { month: string; today: string; checks: CloseC
   const { month, today, checks } = input;
   const documents = checks.filter((c) => c.gate === "document");
   const money = checks.filter((c) => c.gate === "money");
-  const documentsOutstanding = documents.filter((c) => !c.done).length;
+  const documentsOutstanding = documents.filter((c) => !c.done && !c.estimated).length;
   const moneyOutstanding = money.filter((c) => !c.done).length;
   const base = { month, checks, documentsOutstanding, moneyOutstanding };
 
@@ -85,7 +92,7 @@ export function judgeClose(input: { month: string; today: string; checks: CloseC
     };
   }
   if (documentsOutstanding > 0) {
-    const names = documents.filter((c) => !c.done).map((c) => c.name);
+    const names = documents.filter((c) => !c.done && !c.estimated).map((c) => c.name);
     return {
       ...base,
       state: "waiting_on_documents",
@@ -100,9 +107,13 @@ export function judgeClose(input: { month: string; today: string; checks: CloseC
       says: `Everything for ${month} is on file and the figures do not agree yet: ${names.join(" ")}`,
     };
   }
+  const onEstimate = documents.filter((c) => !c.done && c.estimated);
   return {
     ...base,
     state: "closed",
-    says: `${month} is closed. Every document is on file and every figure ties: ${money.map((c) => c.says).join(" ")}`,
+    says:
+      onEstimate.length === 0
+        ? `${month} is closed. Every document is on file and every figure ties: ${money.map((c) => c.says).join(" ")}`
+        : `${month} is closed on an estimate. Every document that can be on file is, and every figure ties: ${money.map((c) => c.says).join(" ")} Still an estimate, to be trued up when it arrives: ${onEstimate.map((c) => c.says).join(" ")}`,
   };
 }

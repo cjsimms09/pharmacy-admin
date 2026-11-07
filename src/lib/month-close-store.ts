@@ -46,7 +46,7 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
    * It reads where a booked rebate is recorded: the receipt and the bill the statement writes, keyed on the statement's own period
    * (rebate-report-store.ts), and not the Inbox line that says a report arrived.
    */
-  const rebate = await rebateCheck(month);
+  const rebate = await rebateCheck(month, today);
   if (rebate) checks.push(rebate);
 
   /*
@@ -107,7 +107,7 @@ export async function monthClose(month: string, today: string): Promise<MonthClo
 }
 
 /** Whether the month's wholesaler rebate statement is booked, or null where this pharmacy has never booked one. */
-export async function rebateCheck(month: string): Promise<CloseCheck | null> {
+export async function rebateCheck(month: string, today: string = new Date().toISOString().slice(0, 10)): Promise<CloseCheck | null> {
   const from = `${month}-01`;
   const to = endOf(month);
   const receipts = await db.select({ key: schema.cashReceipts.sourceKey, out: schema.cashReceipts.outOfBooks }).from(schema.cashReceipts).where(like(schema.cashReceipts.sourceKey, "REBATE|%"));
@@ -120,6 +120,22 @@ export async function rebateCheck(month: string): Promise<CloseCheck | null> {
   if (booked) return { key: "wholesaler_rebate", name: "The wholesaler's rebate statement", done: true, says: `The wholesaler's rebate for ${month} is booked from its own statement.`, gate: "document" };
 
   const held = (await db.select({ imported: schema.inboxItems.imported, routedAs: schema.inboxItems.routedAs }).from(schema.inboxItems)).filter((r) => r.routedAs === "rebate_report" && r.imported === false);
+  /*
+   * Not due yet is not late. The statement for a month comes around the 20th of the next, so until then there is nothing to wait for: the month
+   * carries the ladder's estimate and closes on it, and the statement books itself when it comes. The owner, 6 November 2026: three months in,
+   * October was "waiting on" a document nobody had issued. A refused statement is different, and so is one past its usual day.
+   */
+  const usualDay = new Date(Date.parse(`${to}T00:00:00Z`) + 20 * 86_400_000).toISOString().slice(0, 10);
+  if (held.length === 0 && today <= usualDay) {
+    return {
+      key: "wholesaler_rebate",
+      name: "The wholesaler's rebate statement",
+      done: false,
+      estimated: true,
+      says: `The wholesaler's rebate statement for ${month} is not due yet (it usually comes around ${usualDay}). ${month} carries the ladder's estimate of the rebate until it arrives, and the figure is trued up then.`,
+      gate: "document",
+    };
+  }
   return {
     key: "wholesaler_rebate",
     name: "The wholesaler's rebate statement",

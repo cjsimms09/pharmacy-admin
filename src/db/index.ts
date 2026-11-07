@@ -14,6 +14,19 @@ declare global {
 }
 
 function createDb() {
+  /*
+   * A test must never open the live database.
+   *
+   * On 6 November 2026 a test file run directly (`tsx --test tests/on-hand.test.ts`, with no DATABASE_PATH) filed two invented counts into the
+   * real database, and the retention rule that runs on every filing deleted five real daily shelf counts. They were restored from the stored
+   * files the same hour. `npm test` has always run against a copy (scripts/test.mjs); the way round it was just to run a file by hand. The
+   * node test runner marks every test process, so a test process that resolves to the live file stops here instead of writing to it.
+   */
+  if (process.env.NODE_TEST_CONTEXT && !process.env.PHARMACY_ALLOW_LIVE_TEST && path.resolve(dbPath) === path.resolve("./data/pharmacy-admin.db")) {
+    throw new Error(
+      "A test tried to open the live database (./data/pharmacy-admin.db) and was stopped. Run tests with `npm test -- <file>`, which migrates a copy of its own, or point DATABASE_PATH at a scratch file.",
+    );
+  }
   fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
   // One connection, queries serialized: this is a single-pharmacy app and a single connection
   // means the PRAGMAs below apply to every query and SQLITE_BUSY cannot occur within the process.

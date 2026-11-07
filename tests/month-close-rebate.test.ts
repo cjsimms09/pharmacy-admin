@@ -67,3 +67,20 @@ describe("the wholesaler's rebate statement as a gate on closing a month", () =>
     assert.equal(await rebateCheck("2026-09"), null, "the only rebate on file is out of books, so none has ever been booked");
   });
 });
+
+describe("a rebate statement that is not due yet does not hold a month open", () => {
+  test("before the usual day it is an estimate, not outstanding; after it, it blocks again; a refused one always blocks", async () => {
+    await db.delete(schema.inboxItems);
+    await db.delete(schema.cashReceipts);
+    await receipt("r-sep2", "REBATE|sup-1|2026-09-01|2026-09-30", "2026-10-20");
+    const early = await rebateCheck("2026-10", "2026-11-06");
+    assert.equal(early!.done, false, "never done: nothing was measured");
+    assert.equal(early!.estimated, true);
+    assert.match(early!.says, /not due yet \(it usually comes around 2026-11-20\)/);
+    const late = await rebateCheck("2026-10", "2026-11-21");
+    assert.equal(late!.estimated, undefined, "past the usual day it is a document that has not come");
+    await db.insert(schema.inboxItems).values({ id: "i-2", messageId: "m-2", receivedAt: "2026-11-02T00:00:00Z", fromAddress: "x@example.test", subject: "s", fileName: "r.pdf", documentId: null, status: "stored", routedAs: "rebate_report", routeResult: "refused", imported: false });
+    const refused = await rebateCheck("2026-10", "2026-11-06");
+    assert.equal(refused!.estimated, undefined, "a refused statement is not 'not due yet'");
+  });
+});
