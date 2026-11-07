@@ -665,9 +665,9 @@ export async function register() {
   /**
    * Reads whatever has been put in the watched folders (the folder beside the database and OneDriveProviderPay).
    *
-   * The sweep that reads them lived only inside the Medicare MFP pull (mtfCycle), which returns at once when no MTF key is stored,
-   * so with none stored a file copied into OneDriveProviderPay was never read unless somebody pressed the button on /remits or ran
-   * a script. On 6 November 2026 forty-eight 835s, the Remit Summary and the Wells Fargo history were each read by hand. This is the
+   * The sweep that reads them lived only inside the daily Medicare MFP pull (mtfCycle), so a file copied into OneDriveProviderPay
+   * waited for that once-a-day run unless somebody pressed the button on /remits or ran a script. (An earlier version of this comment
+   * said no MTF key was stored. That was wrong: the key is stored and the daily pull works.) On 6 November 2026 forty-eight 835s, the Remit Summary and the Wells Fargo history were each read by hand. This is the
    * same sweep, on the half-hourly beat, and it touches the disk only: nothing here reaches the network or a model. It stays quiet
    * when the folders hold nothing, and anything it could not read is left in the folder, as the sweep already does.
    */

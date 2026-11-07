@@ -649,6 +649,45 @@ async function importOneRemittance(
     heldCount.set(k, (heldCount.get(k) ?? 0) + 1);
   }
 
+  /*
+   * The same remittance sent again under a new trace number is refused.
+   *
+   * On 6 November 2026 a RedSail 835 re-sent with a new trace and identical claim lines posted 125 payments and a $14,305.62 receipt a
+   * second time, because every held payment is keyed by trace. A trace is the sender's number, not the money's identity; the money is
+   * its payer, its pay date and its claim lines. So when two or more lines are to be posted and EVERY one of them is already held, same
+   * Rx, same amount, same pay date, under some other trace, it is the same remittance: nothing is posted and it is said. One line is
+   * never judged this way (a coincidence is likely), and a file with even one line not held is read as new.
+   */
+  if (keep.length >= 2 && r.paidOn && r.traceNumber) {
+    const sameDay = await db.query.claimPayments.findMany({
+      columns: { reference: true, rxNumber: true, amountCents: true },
+      where: eq(schema.claimPayments.receivedOn, r.paidOn),
+    });
+    const elsewhere = new Map<string, number>();
+    for (const h of sameDay) {
+      if ((h.reference ?? "").startsWith(`${r.traceNumber}/`) || h.reference === r.traceNumber) continue;
+      const k = `${h.rxNumber}|${h.amountCents}`;
+      elsewhere.set(k, (elsewhere.get(k) ?? 0) + 1);
+    }
+    let allHeld = true;
+    for (const p of keep) {
+      const k = `${p.rxNumber}|${p.paidCents}`;
+      const n = elsewhere.get(k) ?? 0;
+      if (n === 0) {
+        allHeld = false;
+        break;
+      }
+      elsewhere.set(k, n - 1);
+    }
+    if (allHeld) {
+      out.alreadyHeld = keep.length;
+      out.problems.push(
+        `Trace ${r.traceNumber} repeats a remittance already held under another trace: all ${keep.length} of its claim lines (same Rx, same amount, paid ${r.paidOn}) are already posted. Nothing was posted again.`,
+      );
+      return out;
+    }
+  }
+
   for (const p of keep) {
     const reference = [r.traceNumber, p.reference].filter(Boolean).join("/") || fileName;
     const heldKey = `${reference}|${p.rxNumber}|${p.paidCents}`;
