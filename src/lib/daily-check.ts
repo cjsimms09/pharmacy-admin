@@ -423,10 +423,24 @@ function bankedFingerprint(f: Facts): string {
  * The remittances this check cannot judge because the bank record on file stops before their deposits could appear, said as what they are:
  * not yet measurable, with the day the bank record ends, so that "advised and not banked" is never said of money nobody could have seen.
  */
+/**
+ * The bank record comes once a month, after the month ends (the owner, 10 November 2026: "bank records wont be updated until end of month").
+ * So money advised after the last bank line is not late for a record that is not due: the record that would show it is the statement for the
+ * month after the one the bank lines end in, and it is expected within ten days of that month's end (October's came on the 6th of November).
+ * Returns that day while it has not passed, and null once it has, or when no bank line is on the site at all.
+ */
+function bankRecordExpectedBy(f: Facts): string | null {
+  if (!f.bankLinesThrough) return null;
+  const next = new Date(Date.parse(`${f.bankLinesThrough}T00:00:00Z`));
+  const monthEnd = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 2, 0));
+  const due = new Date(monthEnd.getTime() + 10 * 86_400_000).toISOString().slice(0, 10);
+  return f.today <= due ? due : null;
+}
+
 function beyondBankSaid(f: Facts): string {
   const n = f.remittancesBeyondBank;
   const through = f.bankLinesThrough ? `the newest bank line on the site is ${f.bankLinesThrough}` : "no bank line is on the site";
-  return `${n} remittance${n === 1 ? "" : "s"} with a payment number, ${money(f.remittancesBeyondBankCents)}${n === 1 ? "" : " between them"}, ${n === 1 ? "was" : "were"} advised too late for the bank record on file to show ${n === 1 ? "its" : "their"} deposit (${through}), so ${n === 1 ? "it is" : "they are"} not yet checked: nothing is known to be missing${horizon(f)}`;
+  return `${n} remittance${n === 1 ? "" : "s"} with a payment number, ${money(f.remittancesBeyondBankCents)}${n === 1 ? "" : " between them"}, ${n === 1 ? "was" : "were"} advised too late for the bank record on file to show ${n === 1 ? "its" : "their"} deposit (${through}), so ${n === 1 ? "it is" : "they are"} not yet checked: nothing is known to be missing${bankRecordExpectedBy(f) ? `. The bank record comes once a month, after the month ends, and the next is expected by ${bankRecordExpectedBy(f)}: this is waiting, not late` : ""}${horizon(f)}`;
 }
 
 export function runDailyCheck(f: Facts): Check[] {
@@ -764,17 +778,19 @@ export function runDailyCheck(f: Facts): Check[] {
           : f.remittancesNumbered === 0
             ? `no remittance advised since the books began carries a payment number, so there is nothing for this check to compare${unnumberedSaid(f)}${notPositiveSaid(f)}${horizon(f)}`
             : `all ${f.remittancesNumbered} remittances with a payment number, advised since the books began, have their cash${sweptSaid(f, "of them")}${namedSaid(f, "of them")}${unnumberedSaid(f)}${notPositiveSaid(f)}${horizon(f)}`,
-    ok: f.remittancesNotBanked === 0 && f.remittancesBeyondBank === 0 && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
+    ok: f.remittancesNotBanked === 0 && (f.remittancesBeyondBank === 0 || bankRecordExpectedBy(f) !== null) && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
     difference:
       f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0
         ? "The register is empty while payments posted from remittances are on the books, so this check is measuring nothing. Re-read the Remit Summary export to fill it; until then neither this check nor the cash side can be trusted."
+        : f.remittancesNotBanked === 0 && f.remittancesBeyondBank > 0 && bankRecordExpectedBy(f) !== null
+          ? null
         : f.remittancesNotBanked === 0 && f.remittancesBeyondBank > 0
           ? `This is not measured, and it is not missing money: no bank line after ${f.bankLinesThrough ?? "the start of the books"} is on the site, so a deposit for any of these remittances could not show even if it had arrived. Nothing is known to be wrong. Load the bank record for the months after that (Money → upload the bank export) and this check judges them.`
         : f.remittancesNotBanked === 0
           ? null
           : `${money(f.remittancesNotBankedCents)} is advised as paid and no receipt carries its payment number. Two causes look the same here: the deposit has reached the bank and has not been tied to this payment number yet, or the payer has advised it and not yet paid it. A deposit of that amount on the bank statement, on or after the advice date, settles which — unless that deposit already stands for another remittance of the same amount, because two remittances of one amount are two deposits. ProviderPay's account history for the month shows each deposit by its payment number and each sweep to the bank; where it shows this remittance's deposit reaching a bank line, the remittance is banked and leaves this list, so one that is on it is one the history on file does not show, or does not yet reach. The Payments export, read, can tie a deposit too, but the site can refuse its receipt as the same money as a receipt it already holds of that amount within a week, so where one is already there the account history is what settles it. Each remittance named above says what stands for it and what the history can show.`,
     kind: "money",
-    task: f.remittancesNotBanked === 0 && f.remittancesBeyondBank > 0 && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
+    task: f.remittancesNotBanked === 0 && f.remittancesBeyondBank > 0 && bankRecordExpectedBy(f) === null && !(f.remittanceRegisterRows === 0 && f.remittancePaymentsPosted > 0),
   });
 
   return checks;

@@ -1225,7 +1225,7 @@ describe("the press on the card is wired to its two actions (read from the sourc
 });
 
 describe("remittances advised after the bank record on file ends are not yet measurable, and are never called unbanked", () => {
-  const beyond = { remittancesBeyondBank: 47, remittancesBeyondBankCents: 52_734_938, bankLinesThrough: "2026-09-30" };
+  const beyond = { remittancesBeyondBank: 47, remittancesBeyondBankCents: 52_734_938, bankLinesThrough: "2026-09-30", today: "2026-11-20", standingRebatePeriodTo: "2026-10-31" };
 
   test("only remittances the bank lines could not show: the check still fails, but says what is true and points at the bank record", () => {
     const c = check(beyond, BANKED);
@@ -1264,7 +1264,7 @@ describe("remittances advised after the bank record on file ends are not yet mea
 });
 
 describe("a check that is only waiting on a file is a job to do, not a problem", () => {
-  const beyond = { remittancesBeyondBank: 47, remittancesBeyondBankCents: 52_734_938, bankLinesThrough: "2026-09-30" };
+  const beyond = { remittancesBeyondBank: 47, remittancesBeyondBankCents: 52_734_938, bankLinesThrough: "2026-09-30", today: "2026-11-20", standingRebatePeriodTo: "2026-10-31" };
   test("it is marked as a task, and the summary says no problems and what to do, not 'all pass' and not 'failing'", () => {
     const checks = runDailyCheck({ ...wellRun, ...beyond });
     const c = checks.find((x) => x.what === BANKED)!;
@@ -1276,6 +1276,28 @@ describe("a check that is only waiting on a file is a job to do, not a problem",
   });
   test("one real finding is never a task, even beside a beyond-bank count", () => {
     const c = check({ ...beyond, remittancesNotBanked: 1, remittancesNotBankedCents: 150_000, unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-09-10", amountCents: 150_000, tie: null, history: { state: "none" } }] }, BANKED);
+    assert.equal(c.task, false);
+  });
+});
+
+describe("the bank record comes once a month, so money after its last line is waiting, not late", () => {
+  const waiting = { remittancesBeyondBank: 5, remittancesBeyondBankCents: 3_396_979, bankLinesThrough: "2026-10-30", today: "2026-11-10", standingRebatePeriodTo: "2026-10-31" };
+  test("before the next month's record is due it is not a problem and not a to-do, and the card says when it is expected", () => {
+    const checks = runDailyCheck({ ...wellRun, ...waiting });
+    const c = checks.find((x) => x.what === BANKED)!;
+    assert.equal(c.ok, true);
+    assert.equal(c.task, false);
+    assert.match(c.observed, /expected by 2026-12-10: this is waiting, not late/);
+    assert.match(summarise(checks), /^All \d+ checks pass/);
+  });
+  test("once that day has passed with no record loaded, it is a to-do again", () => {
+    const c = check({ ...waiting, today: "2026-12-11" }, BANKED);
+    assert.equal(c.ok, false);
+    assert.equal(c.task, true);
+  });
+  test("a real unbanked remittance is still a finding while the record is not due", () => {
+    const c = check({ ...waiting, remittancesNotBanked: 1, remittancesNotBankedCents: 150_000, unbankedRemittances: [{ payer: "Invented Payer A", remitOn: "2026-10-10", amountCents: 150_000, tie: null, history: { state: "none" } }] }, BANKED);
+    assert.equal(c.ok, false);
     assert.equal(c.task, false);
   });
 });

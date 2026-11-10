@@ -1,4 +1,4 @@
-import { test, describe, before, after } from "node:test";
+import { test, describe, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -199,7 +199,14 @@ describe("remittances not banked, gathered", () => {
     assert.doesNotMatch(c.observed, /Invented Payer A/, "the one nobody could have seen is not named as unbanked");
     await db.delete(schema.remittanceRegister);
     await remit(1, "Invented Payer A", "2026-09-20", 200_800, "EFT-99900001");
-    const only = (await ask(BANKED)).c;
+    /* The next bank record is due ten days after November ends; on a clock past that day it is a job, before it a wait (daily-check.ts). */
+    mock.timers.enable({ apis: ["Date"], now: new Date("2026-12-15T18:00:00Z") });
+    let only: Awaited<ReturnType<typeof ask>>["c"];
+    try {
+      only = (await ask(BANKED)).c;
+    } finally {
+      mock.timers.reset();
+    }
     assert.equal(only.task, true);
     assert.equal(only.href, "/money");
     assert.doesNotMatch(only.observed, /not banked/);
