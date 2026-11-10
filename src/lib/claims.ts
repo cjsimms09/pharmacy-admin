@@ -505,10 +505,23 @@ export async function importRxTransactions(file: Buffer, fileName: string, userI
    * The report's row takes over a fill PioneerRx supplied first: it gets the report's key, so a later reversal pairs
    * with it, and counts as reported from here. One fill, one paid row.
    */
+  /*
+   * The report's NDC too. A fill PioneerRx supplied first was read when it was billed; a claim reversed and billed again under another product
+   * (Rx 343320 on 20-23 October 2026, 342722 on 17-20 October) comes back in the report under the NDC that was finally paid, and the adopted
+   * row kept the old one, so the nightly proof said "2 claims disagree with the reports they were read from" and the profit sat on the wrong drug.
+   * Where the report carries an NDC it is the one the plan paid on; where it carries none the row keeps what it had.
+   */
+  const adoptNames = await drugNamesByNdc(plan.adopt.map((a) => a.txn.ndc11).filter((x): x is string => !!x));
   for (const a of plan.adopt) {
     await db
       .update(schema.claims)
-      .set({ transactionKey: a.txn.transactionKey, source: "transaction_report", importId, completedAt: a.txn.completedAt ? mdyToIso(a.txn.completedAt) : undefined })
+      .set({
+        transactionKey: a.txn.transactionKey,
+        source: "transaction_report",
+        importId,
+        completedAt: a.txn.completedAt ? mdyToIso(a.txn.completedAt) : undefined,
+        ...(a.txn.ndc11 ? { ndc11: a.txn.ndc11, itemName: adoptNames.get(a.txn.ndc11) ?? null } : {}),
+      })
       .where(eq(schema.claims.id, a.claimId));
   }
   await inBatches(
