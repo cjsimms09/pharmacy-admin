@@ -26,7 +26,31 @@ import zlib from "node:zlib";
  * marking next to the wrong item, which is the one mistake that matters here.
  */
 const TOKENS =
-  /(BT)\b|\/([A-Za-z0-9_.+-]+)\s+[\d.]+\s+Tf|([\d.-]+)\s+([\d.-]+)\s+T[dD]\b|(?:[\d.-]+\s+){4}([\d.-]+)\s+([\d.-]+)\s+Tm|(?:<([0-9A-Fa-f\s]+)>|\(((?:[^()\\]|\\.)*)\))\s*Tj/g;
+  /(BT)\b|\/([A-Za-z0-9_.+-]+)\s+[\d.]+\s+Tf|([\d.-]+)\s+([\d.-]+)\s+T[dD]\b|(?:[\d.-]+\s+){4}([\d.-]+)\s+([\d.-]+)\s+Tm|(?:<([0-9A-Fa-f\s]+)>|\(((?:[^()\\]|\\.)*)\))\s*Tj|\[((?:\((?:[^()\\]|\\.)*\)|<[0-9A-Fa-f\s]*>|[^\]()<>])*)\]\s*TJ/g;
+
+/**
+ * The text of one show-text operator: a plain string (Tj) or an array of strings and spacing numbers (TJ).
+ *
+ * A TJ array is how a producer kerns or splits a run, and is also where it puts some whole words: on 6 November 2026 an IPD invoice's
+ * "Ship Date: 11/06/2026" was drawn as "Ship Date: ", then a TJ array holding the "11", then a Tj holding "/06/2026", and a reader that
+ * only knew Tj lost the "11", so the invoice was filed undated. A spacing number of -250 or less (a quarter of an em or wider) is a gap,
+ * read as a space; a smaller one is kerning and joins.
+ */
+function showText(m: RegExpExecArray, font: FontMap | undefined): string {
+  const one = (hex: string | undefined, lit: string | undefined) => {
+    const bytes = hex ? Buffer.from(hex.replace(/\s+/g, ""), "hex") : Buffer.from(unescape(lit ?? ""), "latin1");
+    if (bytes.length === 0) return "";
+    return font ? decode(bytes, font) : plain(bytes);
+  };
+  if (m[9] === undefined) return one(m[7], m[8]);
+  let out = "";
+  for (const part of m[9].matchAll(/<([0-9A-Fa-f\s]*)>|\(((?:[^()\\]|\\.)*)\)|(-?[\d.]+)/g)) {
+    if (part[3] !== undefined) {
+      if (Number.parseFloat(part[3]) <= -250) out += " ";
+    } else out += one(part[1], part[2]);
+  }
+  return out;
+}
 
 function inflate(chunk: Buffer): string | null {
   try {
@@ -303,11 +327,7 @@ export function pdfItems(buf: Buffer): PdfItem[] {
       }
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
 
-      const bytes = m[7]
-        ? Buffer.from(m[7].replace(/\s+/g, ""), "hex")
-        : Buffer.from(unescape(m[8] ?? ""), "latin1");
-      if (bytes.length === 0) continue;
-      const piece = font ? decode(bytes, font) : plain(bytes);
+      const piece = showText(m, font);
       if (!piece.trim()) continue;
       items.push({ page, x, y, text: piece });
     }
@@ -383,17 +403,12 @@ export function pdfText(buf: Buffer): string {
       }
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
 
-      const bytes = m[7]
-        ? Buffer.from(m[7].replace(/\s+/g, ""), "hex")
-        : Buffer.from(unescape(m[8] ?? ""), "latin1");
-      if (bytes.length === 0) continue;
-
       /*
        * A subset font renumbers its glyphs, so the bytes are indexes rather than letters and the
        * font's own map is the only thing that can turn them back into words — read at the width
        * that font uses, one byte or two.
        */
-      const piece = font ? decode(bytes, font) : plain(bytes);
+      const piece = showText(m, font);
       if (!piece.trim()) continue;
 
       const key = y.toFixed(1);
