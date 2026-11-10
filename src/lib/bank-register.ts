@@ -40,6 +40,8 @@ export type RegisterRead =
       outstanding: { on: string; description: string; amountCents: number }[];
       entries: number;
       says: string;
+      /** A week's report rather than a month's: its opening and closing say nothing of the month's own, and it overlaps the monthly one. */
+      partial: boolean;
     }
   | { ok: false; why: string };
 
@@ -68,14 +70,99 @@ function fields(line: string): string[] {
   return out.map((f) => f.trim());
 }
 
+/** The weekly report from the same program: "Bank Register", one line to an entry, columns Account, Date, Document Number, Payee, Account, Deposit, Payment, Balance. */
+export function looksLikeWeeklyBankRegister(text: string): boolean {
+  const head = text.replace(/^﻿/, "").split(/\r?\n/).slice(0, 14).join("\n");
+  return /\bBank Register\b/i.test(head) && /Account\s*,\s*Date\s*,\s*Document Number\s*,\s*Payee/i.test(head) && /Deposit\s*,\s*Payment\s*,\s*Balance/i.test(head);
+}
+
 /** The title lines and the heading row that mark this export, within its first lines. */
 export function looksLikeBankRegister(text: string): boolean {
+  if (looksLikeWeeklyBankRegister(text)) return true;
   const head = text.replace(/^﻿/, "").split(/\r?\n/).slice(0, 14).join("\n");
   return /\bRegister\b/i.test(head) && /Date\s*,\s*Print\s*,\s*Number\s*,\s*Payee/i.test(head) && /Payment\s*,\s*Deposit\s*,\s*Balance/i.test(head);
 }
 
+/**
+ * The weekly "Bank Register": the account's own heading row carries the opening balance, then one line to an entry with its running balance.
+ *
+ * The proof is the same as the monthly report's: every line's balance is the one before it plus the line. There is no cleared flag in this layout,
+ * so every line is taken as the bank record, as the owner said of the register on 6 November 2026. A line with no payee is named by what the
+ * report does give: a deposit document (DEP...) reads as a counter deposit, and anything else by its document number and account.
+ */
+function readWeeklyRegister(text: string): RegisterRead {
+  const rows = text.replace(/^﻿/, "").split(/\r?\n/).map(fields);
+  const titleAt = rows.findIndex((r) => /Parent Company/i.test(r[0] ?? ""));
+  const company = (rows[Math.max(0, titleAt - 1)]?.[0] ?? "").replace(/\s+/g, " ");
+  const headAt = rows.findIndex((r) => /^Account$/i.test(r[0] ?? "") && /^Date$/i.test(r[1] ?? "") && /^Document Number$/i.test(r[2] ?? ""));
+  if (headAt < 0) return { ok: false, why: "The weekly register has no heading row (Account, Date, Document Number, Payee...), so its columns cannot be told apart." };
+  const heading = rows
+    .slice(headAt + 1)
+    .filter((r) => (r[0] ?? "") !== "" && !bankDate(r[1] ?? "") && !/^Cash in Bank$/i.test((r[0] ?? "").replace(/^\d+\s*-\s*/, "")) && !/^Total\b/i.test(r[0] ?? ""));
+  if (heading.length !== 1) return { ok: false, why: `The weekly register names ${heading.length} accounts, not one, so which is the bank record cannot be told. Nothing was used.` };
+  const account = heading[0][0].replace(/\s+/g, " ");
+  const openingCents = bankCents(heading[0][7] ?? "");
+  if (openingCents === null) return { ok: false, why: "The weekly register's opening balance could not be read." };
+  type E = { on: string; description: string; amountCents: number; balanceCents: number };
+  const entries: E[] = [];
+  for (let i = headAt + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const on = bankDate(r[1] ?? "");
+    if (!on) continue;
+    const dep = (r[5] ?? "") === "" ? 0 : bankCents(r[5]);
+    const pay = (r[6] ?? "") === "" ? 0 : bankCents(r[6]);
+    const bal = bankCents(r[7] ?? "");
+    if (dep === null || pay === null || bal === null) return { ok: false, why: `The weekly register could not be read in full: line ${i + 1} has an amount or balance that is not a figure. Nothing was used.` };
+    const doc = (r[2] ?? "").trim();
+    const payee = (r[3] ?? "").trim();
+    const acct = (r[4] ?? "").trim().replace(/^\d+\s*-\s*/, "");
+    const description = (payee || (/^DEP/i.test(doc) ? `Deposit - ${doc}` : `${doc} ${acct}`.trim()) || "no description").replace(/\s+/g, " ");
+    entries.push({ on, description, amountCents: dep - pay, balanceCents: bal });
+  }
+  if (entries.length === 0) return { ok: false, why: "The weekly register holds no entries." };
+  let running = openingCents;
+  for (let i = 0; i < entries.length; i++) {
+    running += entries[i].amountCents;
+    if (running !== entries[i].balanceCents) {
+      return {
+        ok: false,
+        why:
+          `The weekly register's running balance does not hold at line ${i + 1} (${entries[i].on}, ${entries[i].description.slice(0, 40)}): ` +
+          `the lines so far make ${money(running)} and the register prints ${money(entries[i].balanceCents)}. A line may be missing, so none of it was used.`,
+      };
+    }
+  }
+  const lines: BankLine[] = entries.map((e) => ({ on: e.on, description: e.description, amountCents: e.amountCents, key: lineKey(e.on, e.amountCents, e.description) }));
+  const dates = entries.map((e) => e.on).sort();
+  const closing = entries[entries.length - 1].balanceCents;
+  const says = `${company ? company + " " : ""}${account} weekly register: ${entries.length} entries, ${dates[0]} to ${dates[dates.length - 1]}, the running balance holds on every line (${money(openingCents)} to ${money(closing)}). Every line is taken as the bank record.`;
+  return { ok: true, account, periodFrom: dates[0], periodTo: dates[dates.length - 1], openingCents, registerClosingCents: closing, lines, outstanding: [], entries: entries.length, says, partial: true };
+}
+
+/**
+ * The lines of a register that the books do not already hold, by day and amount, counted one for one.
+ *
+ * A week's report overlaps the month's and the bank's own statement and names the same money differently, so the key (day, amount, description)
+ * cannot tell them apart; the money can. Two real same-day same-amount lines are both kept when only one is held.
+ */
+export function dropHeldLines<T extends { on: string; amountCents: number }>(lines: T[], held: { on: string; amountCents: number }[]): { fresh: T[]; already: number } {
+  const have = new Map<string, number>();
+  for (const h of held) have.set(`${h.on}|${h.amountCents}`, (have.get(`${h.on}|${h.amountCents}`) ?? 0) + 1);
+  const fresh = lines.filter((l) => {
+    const k = `${l.on}|${l.amountCents}`;
+    const n = have.get(k) ?? 0;
+    if (n > 0) {
+      have.set(k, n - 1);
+      return false;
+    }
+    return true;
+  });
+  return { fresh, already: lines.length - fresh.length };
+}
+
 export function readBankRegister(text: string): RegisterRead {
   if (!looksLikeBankRegister(text)) return { ok: false, why: "This is not a checking register export." };
+  if (looksLikeWeeklyBankRegister(text)) return readWeeklyRegister(text);
   const rows = text.replace(/^﻿/, "").split(/\r?\n/).map(fields);
   const titleAt = rows.findIndex((r) => /\bRegister\b/i.test(r[0] ?? ""));
   const account = (rows[titleAt]?.[0] ?? "Checking register").replace(/\s+/g, " ");
@@ -152,5 +239,5 @@ export function readBankRegister(text: string): RegisterRead {
           .slice(0, 3)
           .map((o) => `${o.on} ${o.description.slice(0, 28)} ${money(o.amountCents)}`)
           .join("; ")}${outstanding.length > 3 ? "…" : ""}.`);
-  return { ok: true, account, periodFrom: dates[0], periodTo: dates[dates.length - 1], openingCents, registerClosingCents, lines, outstanding, entries: entries.length, says };
+  return { ok: true, account, periodFrom: dates[0], periodTo: dates[dates.length - 1], openingCents, registerClosingCents, lines, outstanding, entries: entries.length, says, partial: false };
 }

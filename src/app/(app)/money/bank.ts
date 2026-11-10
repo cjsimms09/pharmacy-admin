@@ -587,10 +587,20 @@ export async function placeBankRegisterDocument(
   if (!read.ok) return { ok: false, why: read.why };
   const month = read.periodFrom.slice(0, 7);
   await db.update(schema.documents).set({ category: "bank_statement", title: `Bank statement (accounting register), ${month}`, effectiveOn: read.periodTo }).where(eq(schema.documents.id, documentId));
-  const placed = await placeStatementLines(read.lines, { documentId, fileName: doc.fileName, skipped: 0, user, back: "/money", quiet: true });
-  await recordMonthBalances(month, read.openingCents, read.registerClosingCents);
+  /*
+   * Never a line twice. A weekly report overlaps the monthly one and the bank's own statement, and names the same money differently (a payee
+   * where the monthly one gives the memo), so the line's key cannot tell them apart. The money can: the same day and the same amount. For each
+   * day-and-amount the lines already held are counted off against this file's, one for one, so two real same-day same-amount lines are both kept
+   * and a line the books already hold is not added again. The same file arriving twice is held by its keys as before.
+   */
+  const held = await db.query.bankLines.findMany({ columns: { on: true, amountCents: true }, where: and(gte(schema.bankLines.on, read.periodFrom), lte(schema.bankLines.on, read.periodTo)) });
+  const { dropHeldLines } = await import("@/lib/bank-register");
+  const { fresh, already } = dropHeldLines(read.lines, held);
+  const placed = fresh.length > 0 ? await placeStatementLines(fresh, { documentId, fileName: doc.fileName, skipped: 0, user, back: "/money", quiet: true }) : "";
+  /* A week's opening and closing are not the month's. */
+  if (!read.partial) await recordMonthBalances(month, read.openingCents, read.registerClosingCents);
   await db.update(schema.inboxItems).set({ imported: true }).where(eq(schema.inboxItems.documentId, documentId));
-  return { ok: true, said: `${read.says}${placed ? " " + placed : ""}`, month };
+  return { ok: true, said: `${read.says}${already > 0 ? ` ${already} of its lines were already held (same day, same amount) and were not added again.` : ""}${placed ? " " + placed : ""}`, month };
 }
 
 /** The statement lines that fall in the period: how many were placed, and the ones that were not. */

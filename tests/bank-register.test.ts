@@ -85,3 +85,79 @@ describe("the router and the label", () => {
     assert.equal(c.kind, "bank_register");
   });
 });
+
+/* The weekly report from the same program: one line to an entry, the account's own heading row carrying the opening balance. Invented names and figures. */
+const WEEK_HEAD = [
+  "Invented Practice P.A.",
+  "Parent Company (IP)",
+  "Bank Register",
+  '"October 25, 2026 - October 31, 2026"',
+  "",
+  "",
+  "Account ,Date ,Document Number ,Payee ,Account ,Deposit ,Payment ,Balance ",
+  "1000 - Cash in Bank,,,,,,,$0.00",
+  '1010 - Invented Checking (0000),,,,,,,"$10,000.00"',
+];
+const WEEK = [
+  ...WEEK_HEAD,
+  ',10/25/2026,AD 10.25.26,PAR000 Invented Wholesaler,2210 - Accounts Payable : General,,"$2,000.00","$8,000.00"',
+  ',10/26/2026,DEP90001,,4010 - Total Revenue : Revenue,"$1,500.00",,"$9,500.00"',
+  ',10/26/2026,JE9001,,4010 - Total Revenue : Revenue,$250.00,,"$9,750.00"',
+].join("\n");
+
+describe("the weekly Bank Register", () => {
+  test("is recognised and proved by its running balance from the account's opening balance", async () => {
+    const { looksLikeWeeklyBankRegister } = await import("../src/lib/bank-register");
+    assert.equal(looksLikeWeeklyBankRegister(WEEK), true);
+    assert.equal(looksLikeBankRegister(WEEK), true);
+    const r = readBankRegister(WEEK);
+    assert.ok(r.ok, JSON.stringify(r));
+    if (!r.ok) return;
+    assert.equal(r.partial, true);
+    assert.equal(r.openingCents, 1_000_000);
+    assert.equal(r.registerClosingCents, 975_000);
+    assert.deepEqual(r.lines.map((l) => l.amountCents), [-200_000, 150_000, 25_000]);
+  });
+
+  test("a deposit document with no payee reads as a counter deposit; another line with none is named by its document and account", () => {
+    const r = readBankRegister(WEEK);
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.lines[1].description, "Deposit - DEP90001");
+    assert.equal(r.lines[2].description, "JE9001 Total Revenue : Revenue");
+  });
+
+  test("a missing line breaks the running balance and nothing is used", () => {
+    const broken = WEEK.split("\n").filter((l) => !l.includes("DEP90001")).join("\n");
+    const r = readBankRegister(broken);
+    assert.equal(r.ok, false);
+  });
+
+  test("the monthly report is not partial", () => {
+    const r = readBankRegister(FILE(GOOD));
+    assert.ok(r.ok);
+    if (r.ok) assert.equal(r.partial, false);
+  });
+});
+
+describe("a line the books already hold is never added again", () => {
+  test("counted off by day and amount, one for one, whatever the line is called", async () => {
+    const { dropHeldLines } = await import("../src/lib/bank-register");
+    const lines = [
+      { on: "2026-10-25", amountCents: -200_000 },
+      { on: "2026-10-26", amountCents: 150_000 },
+      { on: "2026-10-26", amountCents: 150_000 },
+    ];
+    const out = dropHeldLines(lines, [{ on: "2026-10-25", amountCents: -200_000 }, { on: "2026-10-26", amountCents: 150_000 }]);
+    assert.equal(out.already, 2);
+    assert.deepEqual(out.fresh, [{ on: "2026-10-26", amountCents: 150_000 }], "two real same-day same-amount lines, one held: one is new");
+    assert.equal(dropHeldLines(lines, []).fresh.length, 3);
+  });
+});
+
+describe("the router and the weekly report", () => {
+  test("a weekly Bank Register is classified as a bank register by its contents", async () => {
+    const { classify } = await import("../src/lib/autoroute");
+    assert.equal(classify("report.csv", Buffer.from(WEEK)).kind, "bank_register");
+  });
+});
