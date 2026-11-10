@@ -179,6 +179,21 @@ describe("the lines September 2026 could not place, and what explains them", () 
     assert.match(placement.why, /More than one set/);
   });
 
+  test("a transfer ProviderPay's account history shows to the cent is banked by payment number, including a deposit the register does not hold yet", () => {
+    const sweeps = [{ on: "2026-10-07", cents: 2_007_000, deposits: [{ paymentNumber: "999000000000001", amountCents: 1_000_000 }, { paymentNumber: "999000000000009", amountCents: 1_007_000 }] }];
+    const reg = [{ id: "x1", payer: "SS&C HEALTH", remitOn: "2026-10-06", amountCents: 1_000_000, paymentNumber: "999000000000001", remitNumber: "7100000001" }];
+    const [{ placement }] = placeLines([{ on: "2026-10-07", description: "ProviderPay/EDI PYMNTS 489121084100001 West Wichita Family Ph", amountCents: 2_007_000, key: "pp" }], { ...base, remits: reg, sweeps, heldPaymentNumbers: ["999000000000001"] });
+    assert.equal(placement.kind, "banks_remits");
+    assert.deepEqual(placement.kind === "banks_remits" ? placement.remits.map((r) => r.id) : [], ["x1", "sweep:999000000000009"]);
+  });
+
+  test("a sweep deposit whose payment number already stands somewhere is not banked a second time", () => {
+    const sweeps = [{ on: "2026-10-07", cents: 1_007_000, deposits: [{ paymentNumber: "999000000000009", amountCents: 1_007_000 }] }];
+    const reg = [{ id: "x1", payer: "SS&C HEALTH", remitOn: "2026-10-06", amountCents: 5, paymentNumber: null, remitNumber: "7100000001" }];
+    const [{ placement }] = placeLines([{ on: "2026-10-07", description: "ProviderPay/EDI PYMNTS 489121084100001 West Wichita Family Ph", amountCents: 1_007_000, key: "pp" }], { ...base, remits: reg, sweeps, heldPaymentNumbers: ["999000000000009"] });
+    assert.equal(placement.kind, "psao_deposit");
+  });
+
   test("a bare counter deposit equal to a cheque-paying payer's remittance is that cheque", () => {
     const [{ placement }] = placeLines([{ on: "2026-09-30", description: "Deposit", amountCents: 1_448, key: "dep" }], { ...base, remits });
     assert.equal(placement.kind, "banks_remits");

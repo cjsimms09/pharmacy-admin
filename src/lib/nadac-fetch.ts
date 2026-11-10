@@ -279,8 +279,14 @@ export async function fetchNadac(onProgress?: (text: string) => void | Promise<v
  * The history remains available deliberately, from the back-fill button, where somebody has asked
  * for it and is told what it costs.
  */
-export function weeklySources(override?: string | null): string[] {
-  return [override?.trim(), ...weeklyFileUrls()].filter(Boolean) as string[];
+export function weeklySources(override?: string | null, today: Date = new Date()): string[] {
+  /*
+   * The next Wednesday's file is tried first, because CMS posts it on the Tuesday before: the file named 11-11-2026 was posted 10 November 2026,
+   * and the site, asking only for the most recent Wednesday's file (the 4th), found that one "already loaded" every day and never asked for the
+   * 11th, so the prices stood a week behind and the morning list said the feed had stopped. Before it is posted the address is a 404 and is skipped.
+   */
+  const next = weeklyFileUrls(new Date(today.getTime() + 7 * 86_400_000), 1);
+  return [override?.trim(), ...next, ...weeklyFileUrls(today)].filter(Boolean) as string[];
 }
 
 /** The Wednesday a weekly file's address is for, as ISO, or null for any other address. */

@@ -296,6 +296,13 @@ export type MatchContext = {
   standing?: { name: string; amountCents: number; paidDay: number | null; month?: string }[];
   /** Remittances in the register that no cash receipt stands for yet — what a PSAO deposit or a counter deposit may be. */
   remits?: RegisterRemit[];
+  /**
+   * ProviderPay's own account history: each transfer to the bank (a sweep that balances) and the deposits it carried, by payer payment number.
+   * A ProviderPay credit equal to one sweep is those deposits, whatever the register holds.
+   */
+  sweeps?: { on: string; cents: number; deposits: { paymentNumber: string; amountCents: number }[] }[];
+  /** Payer payment numbers (digits) that already stand in the register or on a receipt; a sweep's deposit under one is never banked a second time. */
+  heldPaymentNumbers?: string[];
   /** Rebate receipts the rebate statement banked and no bank line has confirmed. */
   rebateReceipts?: { id: string; amountCents: number; receivedOn: string | null }[];
   /** The books' first day. Before it there is nothing on file, by decision. */
@@ -644,6 +651,37 @@ export function placeLine(line: BankLine, ctx: MatchContext): Placement {
           const nearest = sets.map(latest).sort().at(-1)!;
           const near = sets.filter((s) => latest(s) === nearest);
           if (near.length === 1) sets = near;
+        }
+        /*
+         * No single set of register remittances adds to the deposit, or two do: ProviderPay's account history says what the deposit was made of.
+         * A sweep that balances and equals this credit, landing within a few days, names every payment number in it. Those in the register are
+         * banked as the remittances they are; one the register does not hold yet is banked under its payment number alone, so the money is in
+         * the cash account now and the remittance, when it is read, finds its receipt by that number. Never where a deposit's number already
+         * stands in the register or on a receipt: that money is banked, and banking it again counts it twice.
+         */
+        if (sets.length !== 1 && !viaAccessHealth && ctx.sweeps) {
+          const dg = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
+          const held = new Set(ctx.heldPaymentNumbers ?? []);
+          const cands = ctx.sweeps.filter((w) => w.cents === line.amountCents && daysBetween(w.on, line.on) >= 0 && daysBetween(w.on, line.on) <= 3);
+          if (cands.length === 1 && cands[0].deposits.length > 0) {
+            const parts: RegisterRemit[] = [];
+            let ok = true;
+            for (const dep of cands[0].deposits) {
+              const pn = dg(dep.paymentNumber);
+              const reg = ctx.remits.find((r) => dg(r.paymentNumber) === pn && r.amountCents === dep.amountCents && !parts.some((x) => x.id === r.id));
+              if (reg) parts.push(reg);
+              else if (pn.length >= 6 && !held.has(pn)) parts.push({ id: `sweep:${pn}`, payer: "ProviderPay (payer not yet known)", remitOn: cands[0].on, amountCents: dep.amountCents, paymentNumber: pn, remitNumber: pn });
+              else ok = false;
+            }
+            if (ok && parts.reduce((n, r) => n + r.amountCents, 0) === line.amountCents) {
+              const unknown = parts.filter((r) => r.id.startsWith("sweep:")).length;
+              return {
+                kind: "banks_remits",
+                remits: parts,
+                why: `${meaning.says} ProviderPay's account history shows this transfer of ${cands[0].on} carrying ${parts.length} deposit${parts.length === 1 ? "" : "s"}, by payment number, to the cent${unknown ? `; ${unknown} of them have no remittance in the register yet and are banked under their payment number until it is read` : ""}.`,
+              };
+            }
+          }
         }
         if (sets.length === 1) {
           const set = sets[0];

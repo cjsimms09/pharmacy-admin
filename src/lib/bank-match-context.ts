@@ -44,7 +44,7 @@ export async function matchContext(months: string[] = []): Promise<MatchContext>
     vendors(),
     unpaid(),
     db.query.supplierInvoices.findMany({ columns: { id: true, invoiceNumber: true, supplierId: true, supplier: true, totalCents: true, invoiceDate: true, paidOn: true } }),
-    db.query.cashReceipts.findMany({ columns: { payer: true, sourceKey: true } }),
+    db.query.cashReceipts.findMany({ columns: { payer: true, sourceKey: true, reference: true } }),
   ]);
   const payers = new Set<string>();
   for (const c of claims) for (const n of [c.pbmName, c.payerLabel]) if (n && n.trim().length >= 4) payers.add(n.trim());
@@ -94,6 +94,29 @@ export async function matchContext(months: string[] = []): Promise<MatchContext>
     .filter(({ row, banked }) => row.remitOn && row.amountCents > 0 && !banked)
     .map(({ row: r }) => ({ id: r.id, payer: r.payerName ?? "payer", remitOn: r.remitOn!, amountCents: r.amountCents, paymentNumber: r.paymentNumber && /\d{6}/.test(r.paymentNumber) ? r.paymentNumber : null, remitNumber: r.remitNumber }))
     .filter((r) => !keyed.has(remitReceiptKey(r)));
+  /*
+   * ProviderPay's account history: its balanced transfers and the deposits each carried, and the payment numbers already standing somewhere
+   * (a register row, or a receipt's reference or key), so a sweep's deposit is never banked a second time (bank-statement.ts, psao_remittance).
+   */
+  const { accountHistories } = await import("./engine/remit-sweep");
+  const sweepKeys = new Set<string>();
+  const sweeps: NonNullable<MatchContext["sweeps"]> = [];
+  for (const m of await accountHistories()) {
+    for (const w of m.sweeps) {
+      if (!w.agrees) continue;
+      const k = [w.on, w.transferredCents, ...w.deposits.map((d) => `${d.date}|${d.paymentNumber ?? ""}|${d.amountCents}`).sort()].join("#");
+      if (sweepKeys.has(k)) continue;
+      sweepKeys.add(k);
+      sweeps.push({ on: w.on, cents: w.transferredCents, deposits: w.deposits.map((d) => ({ paymentNumber: d.paymentNumber ?? "", amountCents: d.amountCents })) });
+    }
+  }
+  const heldNumbers = new Set<string>();
+  const dg = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
+  for (const r of await db.query.remittanceRegister.findMany({ columns: { paymentNumber: true } })) if (dg(r.paymentNumber).length >= 6) heldNumbers.add(dg(r.paymentNumber));
+  for (const r of receipts) {
+    if (dg(r.reference).length >= 6) heldNumbers.add(dg(r.reference));
+    for (const part of (r.sourceKey ?? "").split("|")) if (dg(part).length >= 12 && dg(part) === part.trim()) heldNumbers.add(dg(part));
+  }
   /* The rebate statement's receipts no bank line has confirmed: what a day's HEW credits add up to. */
   const confirmedReceipts = await receiptsConfirmedByBank();
   const rebateReceipts = (await db.query.cashReceipts.findMany({ where: like(schema.cashReceipts.sourceKey, "REBATE|%"), columns: { id: true, amountCents: true, receivedOn: true } })).filter((r) => !confirmedReceipts.has(r.id));
@@ -112,6 +135,8 @@ export async function matchContext(months: string[] = []): Promise<MatchContext>
   return {
     standing,
     remits,
+    sweeps,
+    heldPaymentNumbers: [...heldNumbers],
     rebateReceipts,
     registerDeposits,
     cadences: await cadences(),
