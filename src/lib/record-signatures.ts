@@ -143,7 +143,10 @@ export type RecordSignature = typeof schema.recordSignatures.$inferSelect;
 
 /** A fingerprint of what was on the page, so a later change to the figures is detectable. */
 export function fingerprint(content: string): string {
-  return sha256(Buffer.from(content, "utf8")).slice(0, 16);
+  // A browser turns every "\n" in a form field into "\r\n" on the way back, so the content a page sends to be signed is never byte for byte what
+  // the page (or an alert) builds again afterwards. A signature bound to the CRLF form looked "changed" the moment it was made. Line endings are
+  // not content, so both are read as "\n".
+  return sha256(Buffer.from(content.replace(/\r\n?/g, "\n"), "utf8")).slice(0, 16);
 }
 
 export async function signatureFor(kind: string, recordKey: string): Promise<RecordSignature | null> {
@@ -325,7 +328,10 @@ export function mayCertifyAgain(
 /** True when the record has changed since it was signed, so the page can say so plainly. */
 export function contentChanged(sig: RecordSignature | null, content: string | undefined): boolean {
   if (!sig?.contentHash || !content) return false;
-  return sig.contentHash !== fingerprint(content);
+  // Signatures made before line endings were ignored were hashed with the browser's "\r\n"; those still stand against the same version.
+  const lf = content.replace(/\r\n?/g, "\n");
+  const legacy = sha256(Buffer.from(lf.replace(/\n/g, "\r\n"), "utf8")).slice(0, 16);
+  return sig.contentHash !== fingerprint(content) && sig.contentHash !== legacy;
 }
 
 /**

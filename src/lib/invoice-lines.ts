@@ -308,9 +308,9 @@ const IPD = new RegExp(
   String.raw`^(\d{5,})` + // item number and NDC, run together, or the item number on its own
     String.raw`\s+(\d+)` + // quantity shipped
     String.raw`\s+(\d+)([A-Z]{2,6})` + // back-ordered quantity, then the unit of measure, run together
-    String.raw`\s+(${MONEY})` + // unit price
-    String.raw`\s+([\d.]+)\s*%?` + // discount, with or without its sign
-    String.raw`(?:\s+(${MONEY}))?\s*$`, // extension, where it printed at all
+    String.raw`\s*(${MONEY})` + // unit price, with or without a space after the unit (IPD prints "0EACH117.99")
+    String.raw`\s+([\d.]+)(?:\s*%)?` + // discount, with or without its sign
+    String.raw`(?:(?:(?<=%)|\s+)(${MONEY}))?\s*$`, // extension, where it printed at all, with or without a space after the sign ("%117.99")
 );
 
 /**
@@ -345,9 +345,9 @@ const IPD_NAMED = new RegExp(
     String.raw`([A-Za-z][^\r\n]{2,60}?)` + // the product name, run onto the digits
     String.raw`\s+(\d+)` + // quantity shipped
     String.raw`\s+(\d+)([A-Z]{2,6})` + // back-ordered quantity and the unit of measure
-    String.raw`\s+(${MONEY})` + // unit price
-    String.raw`\s+([\d.]+)\s*%?` + // discount
-    String.raw`(?:\s+(${MONEY}))?\s*$`, // extension, where it printed at all
+    String.raw`\s*(${MONEY})` + // unit price, with or without a space after the unit (IPD prints "0EACH117.99")
+    String.raw`\s+([\d.]+)(?:\s*%)?` + // discount
+    String.raw`(?:(?:(?<=%)|\s+)(${MONEY}))?\s*$`, // extension, where it printed at all, with or without a space after the sign ("%117.99")
 );
 
 /**
@@ -366,9 +366,9 @@ const IPD_BARE = new RegExp(
   String.raw`^([A-Za-z][^\r\n]{2,60}?)` + // the product name, with no digits before it
     String.raw`\s+(\d+)` + // quantity shipped
     String.raw`\s+(\d+)([A-Z]{2,6})` + // back-ordered quantity and the unit of measure
-    String.raw`\s+(${MONEY})` + // unit price
-    String.raw`\s+([\d.]+)\s*%?` + // discount
-    String.raw`(?:\s+(${MONEY}))?\s*$`, // extension, where it printed at all
+    String.raw`\s*(${MONEY})` + // unit price, with or without a space after the unit (IPD prints "0EACH117.99")
+    String.raw`\s+([\d.]+)(?:\s*%)?` + // discount
+    String.raw`(?:(?:(?<=%)|\s+)(${MONEY}))?\s*$`, // extension, where it printed at all, with or without a space after the sign ("%117.99")
 );
 
 /** "CII Subtotal:$3,022.32" and "Non-CII Subtotal:$233.38", which close each half of an IPD invoice. */

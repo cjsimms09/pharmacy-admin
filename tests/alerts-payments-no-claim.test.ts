@@ -64,17 +64,12 @@ describe("the alerts about payments tied to no claim", () => {
     assert.equal(page.length, 2, "the alert counts what its group on the page counts");
   });
 
-  test("payments that name no drug and no fill are the other alert, and a fill date in the future is said", async () => {
+  test("payments that name no drug and no fill are programme pay and raise no alert, and are not counted as stranded", async () => {
     await db.insert(schema.claimPayments).values([
       payment("930020001", { fillNumber: null, ndc11: null, dateFilled: "2099-12-31", amountCents: 500 }),
       payment("930020002", { fillNumber: null, ndc11: null, dateFilled: "2099-12-31", amountCents: 1_000 }),
     ]);
-    const a = await find("payments-not-a-fill");
-    assert.ok(a, "payments-not-a-fill");
-    assert.equal(a.level, "soon");
-    assert.equal(a.title, "2 payments on a remittance that belong to no fill, $15.00");
-    assert.match(a.why, /every one dated in the future/);
-    assert.equal(a.href, "/claims/no-claim#not_a_fill");
+    assert.equal(await find("payments-not-a-fill"), undefined);
     assert.equal((await find("payments-stranded"))?.title, "2 payments for a prescription with no claim on file, $65.00", "and they are not counted as the first");
   });
 

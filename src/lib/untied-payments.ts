@@ -282,13 +282,13 @@ export function causeInfo(cause: UntiedCause, feedFrom: string | null): CauseInf
       };
     case "not_a_fill":
       return {
-        label: "Name no drug and no fill",
-        needs: "look",
-        asks: "Find out what the payer itemised it against.",
+        label: "Programme or incentive payments",
+        needs: "nothing",
+        asks: "Nothing. They are programme pay, not claim payments.",
         short: ["that names no drug and no fill", "that name no drug and no fill"],
         why:
-          "The line carries neither a drug nor a fill number, so there is no prescription behind it to find. It is money the payer itemised against something else: an administration fee, " +
-          "an incentive, a programme payment. What it is decides whether it is revenue and where, and the figures cannot say.",
+          "The line carries neither a drug nor a fill number, so there is no prescription behind it to find. The owner identified these on 11 November 2026 as programme or incentive " +
+          "pay (a flat $5 or $10 a line, on the month-end Health Mart Atlas EFTs). They are listed so none is lost, and no claim is ever coming for them.",
       };
     case "will_attach":
       return {

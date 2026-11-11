@@ -299,26 +299,11 @@ export async function alerts(): Promise<Alert[]> {
     }
 
     /*
-     * Not a claim payment that failed to match. These carry no drug, no fill number, a nine-digit identifier where this pharmacy's
-     * prescription numbers are six, flat amounts, and a fill date in the future, which is a stand-in something substituted and not a
-     * day anything was dispensed. They are money on a remittance that belongs to no fill, and the thing to do is to find out what it is.
+     * Payments that name no drug and no fill are not an alarm. The owner said on 11 November 2026 what they are: programme or incentive pay, $5 and $10 a
+     * line, on the month-end Health Mart Atlas EFTs, carrying a nine-digit number and the 835's placeholder date of 31 December. A line of that kind
+     * cannot be matched to a claim, and nobody can act on it, so an alert for it could never clear and taught him to ignore the rest. The page still
+     * lists them (untied-payments.ts, "not_a_fill", needs nothing).
      */
-    if (notAFill.length > 0) {
-      const cents = notAFill.reduce((n, p) => n + p.amountCents, 0);
-      const future = notAFill.filter((p) => (p.dateFilled ?? "") > today).length;
-      out.push({
-        key: "payments-not-a-fill",
-        level: "soon",
-        title: `${notAFill.length} payment${notAFill.length === 1 ? "" : "s"} on a remittance that belong to no fill, ${money(cents)}`,
-        why:
-          `From ${payersOf(notAFill)}, with no drug and no fill number against them` +
-          `${future > 0 ? `, and ${future === notAFill.length ? "every one" : `${future}`} dated in the future, which is a stand-in rather than a day anything was dispensed` : ""}. ` +
-          `So these are not claim payments that failed to match — there is no prescription behind them to find. They are money the payer itemised against something else: an administration ` +
-          `fee, an incentive, a programme payment. What they are decides whether they are revenue and where, and nothing here can read that off the figures.`,
-        href: "/claims/no-claim#not_a_fill",
-        action: "See the lines",
-      });
-    }
   } catch (e) {
     couldNotCheck(out, "check-failed-no-claim", "The payments that tie to no claim", "/claims/no-claim", e);
   }

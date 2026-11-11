@@ -73,6 +73,15 @@ describe("binding a signature to what was signed", () => {
     assert.equal(contentChanged(sig, content + "\nKim|hipaa:2026-03-01"), true);
   });
 
+  test("a browser's line endings are not a change: the form returns \\r\\n, the page builds \\n", () => {
+    const fromForm = content.replace(/\n/g, "\r\n");
+    assert.equal(fingerprint(fromForm), fingerprint(content));
+    assert.equal(contentChanged({ contentHash: fingerprint(fromForm) } as never, content), false);
+    // a signature stored before this was fixed holds the hash of the CRLF text itself
+    const legacy = { contentHash: "x" } as never;
+    assert.equal(contentChanged(legacy, content), true);
+  });
+
   test("no signature and no content is not a change", () => {
     assert.equal(contentChanged(null, content), false);
     assert.equal(contentChanged({ contentHash: null } as never, content), false);

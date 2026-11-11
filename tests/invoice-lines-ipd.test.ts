@@ -80,6 +80,20 @@ describe("IPD's own invoice", () => {
     assert.equal(l.controlled, false);
   });
 
+  test("a line with no space after the unit or after the sign is read (IPD 1042796: '0EACH117.99 0 %117.99')", () => {
+    const text = [
+      "CII",
+      "9094370010000501 1 0EACH117.99  0 %117.99",
+      "9094670010000801DEXMETHYLPHENIDATE HCL ER 25MG  1 0EACH 179.99  0 % 179.99",
+      "CII Subtotal:$297.98",
+    ].join("\n");
+    const p = parseInvoiceLines(text, null);
+    assert.equal(p.unreadable.length, 0);
+    assert.equal(p.lines.length, 2);
+    assert.equal(p.lines.reduce((n, l) => n + (l.extendedCents ?? 0), 0), 29798);
+    assert.equal(p.sections[0].readCents, 29798);
+  });
+
   test("a half whose subtotal never printed leaves its lines unmarked rather than guessed", () => {
     const noClose = invoice.slice(0, invoice.indexOf("Non-CII Subtotal"));
     const p = parseInvoiceLines(noClose, null);
