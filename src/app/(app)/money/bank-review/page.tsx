@@ -4,7 +4,11 @@ import { bankReview, monthsWithStatements, recentPayerNames } from "@/lib/bank-r
 import { categories, vendors } from "@/lib/expenses";
 import { allStandingCosts } from "@/lib/standing-costs";
 import { BankLineDecider } from "@/components/bank-line-decider";
-import { nameBankLine } from "./actions";
+import { nameBankLine, nameBankGroup } from "./actions";
+import { db, schema } from "@/db";
+import { eq } from "drizzle-orm";
+import { groupByPayee, suggestFor } from "@/lib/bank-payee";
+import { allSuppliers } from "@/lib/suppliers-registry";
 import { formatCents } from "@/lib/money";
 import { fmt, todayIso } from "@/lib/dates";
 import { familyTabs } from "@/lib/families";
@@ -50,6 +54,21 @@ export default async function BankReviewPage({ searchParams }: { searchParams: P
   const categoryNames = cats.map((c) => c.name).sort((a, b) => a.localeCompare(b));
   const vendorNames = vends.map((v) => v.name).sort((a, b) => a.localeCompare(b));
   const standingNames = standing.map((s) => s.name);
+  /*
+   * The lines nobody has named, together by payee, in every month. Naming a payee once names its lines in all of them, and (ticked) the
+   * payee's later lines too, so what is asked here is one question per payee and not one per line.
+   */
+  const unnamed = await db.select({ id: schema.bankLines.id, on: schema.bankLines.on, description: schema.bankLines.description, amountCents: schema.bankLines.amountCents }).from(schema.bankLines).where(eq(schema.bankLines.placedAs, "unplaced"));
+  const suppliers = await allSuppliers();
+  const catById = new Map(cats.map((c) => [c.id, c.name]));
+  const groups = groupByPayee(unnamed).map((g) => ({
+    g,
+    suggestion: suggestFor(g, {
+      suppliers: suppliers.map((s) => ({ name: s.name, aliases: s.aliases ?? null })),
+      vendors: vends.map((v) => ({ name: v.name, categoryName: v.categoryId ? (catById.get(v.categoryId) ?? null) : null })),
+      standing: standing.map((s) => ({ name: s.name })),
+    }),
+  }));
   const q = (askedQ ?? "").trim().toLowerCase();
   /* One sentence at rest; the rest behind a press. */
   const firstSentence = (s: string) => s.replace(/\s+/g, " ").split(/(?<=\.)\s/)[0];
@@ -137,6 +156,41 @@ export default async function BankReviewPage({ searchParams }: { searchParams: P
               </p>
             </Card>
           </div>
+
+          {groups.length > 0 && (
+            <Card title="Name them by payee" count={groups.length} className="mb-4">
+              <p className="mb-3 text-sm text-ink-2">
+                One answer per payee names all of its lines, in every month. Leave &ldquo;keep this answer&rdquo; ticked and the next statement&rsquo;s lines from the same payee name themselves.
+              </p>
+              <ul className="rows">
+                {groups.map(({ g, suggestion }) => (
+                  <li key={`${g.direction}|${g.stem}`} id={`group-${encodeURIComponent(g.stem)}`} className="py-3">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-sm font-medium">{g.example}</span>
+                      <span className="text-sm tabular-nums">
+                        {g.lines.length} line{g.lines.length === 1 ? "" : "s"}, {formatCents(g.totalCents)}
+                        <span className="ml-2 text-xs text-ink-3">{g.from === g.to ? fmt(g.from) : `${fmt(g.from)} to ${fmt(g.to)}`}</span>
+                      </span>
+                    </div>
+                    {suggestion && <p className="mt-0.5 text-xs text-ink-2">Probably: {suggestion.because}</p>}
+                    <BankLineDecider
+                      lineIds={g.lines.map((l) => l.id)}
+                      stem={g.stem}
+                      direction={g.direction}
+                      initial={suggestion ?? undefined}
+                      month={month}
+                      amountCents={g.direction === "out" ? -1 : 1}
+                      categories={categoryNames}
+                      vendors={vendorNames}
+                      payers={payers}
+                      standing={standingNames}
+                      action={nameBankGroup}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           <Card
             title={`Every line in ${month}`}

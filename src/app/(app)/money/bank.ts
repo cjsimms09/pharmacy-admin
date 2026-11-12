@@ -25,6 +25,9 @@ import { receiptsConfirmedByBank } from "@/lib/bank-confirmed";
 import { remitReceiptKey } from "@/lib/engine/remit-standing";
 import { engineAfter } from "@/lib/engine/run";
 import { recordMonthBalances } from "@/lib/engine/month";
+import { parseRules, ruleFor } from "@/lib/bank-payee";
+import { decisionFromForm } from "@/lib/bank-decision-form";
+import { getSettings } from "@/lib/settings";
 
 /** The two systems spell one wholesaler several ways; compared with the noise removed, as cash-cogs.ts does. */
 const fold = (s: string | null | undefined) => (s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -533,6 +536,7 @@ async function placeStatementLines(
    * `revalidatePath` outside a request throws, and `redirect` outside one is a thrown error nobody catches.
    */
   /* Today reads the engine, not the ledger: what this placed is on the list the moment the engine has run. */
+  await applyPayeeRules(user);
   engineAfter("bank placement");
   if (o.quiet) return said;
   for (const p of ["/money", "/money/monthly", "/expenses", "/inventory/invoices"]) revalidatePath(p);
@@ -704,4 +708,28 @@ export async function decideBankLine(
   await audit({ action: "bank.line_decided", userId: user.id, userName: user.name, entity: "bank_line", entityId: lineId, details: `${line.on} ${money(line.amountCents)} ${line.description.slice(0, 60)}: ${decision.kind} — ${decision.note}` });
   engineAfter("bank line decided");
   return { ok: true, said: `${line.on} ${money(line.amountCents)}: ${decision.kind.replace("_", " ")}.` };
+}
+
+/**
+ * Names every unplaced line whose payee he has already answered for, the way he answered.
+ *
+ * Run as each statement is placed, so a payee he has named once is never asked about again. A rule is applied through the same `decideBankLine` the
+ * form uses, so a line named by a rule and a line named by hand are one record, with the rule's sentence on it. A line the rule refuses (a deposit
+ * under a cost rule, a category since archived) is left unplaced with nothing written. Returns how many it named.
+ */
+export async function applyPayeeRules(user: { id: string; name: string }): Promise<number> {
+  const rules = parseRules((await getSettings()).bank_payee_rules);
+  if (rules.length === 0) return 0;
+  const rows = await db.query.bankLines.findMany({ where: eq(schema.bankLines.placedAs, "unplaced") });
+  let named = 0;
+  for (const row of rows) {
+    const rule = ruleFor(rules, row.description, row.amountCents);
+    if (!rule) continue;
+    const said = `By the rule you gave for "${rule.stem}": ${rule.by}.`;
+    const read = decisionFromForm({ what: rule.what, category: rule.category, vendor: rule.vendor, standing: rule.standing, payer: rule.payer, receiptKind: rule.receiptKind }, row.amountCents, said);
+    if (!read.ok) continue;
+    const r = await decideBankLine(row.id, read.decision, user);
+    if (r.ok) named++;
+  }
+  return named;
 }

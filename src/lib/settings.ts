@@ -474,6 +474,8 @@ export const SETTING_KEYS = [
   "pioneer_pull_register_on",
   "pioneer_pull_register_result",
   "pioneer_register_check",
+  /** The owner's answers on payees of bank lines, as JSON: one rule per payee and direction (bank-payee.ts). Never printed. */
+  "bank_payee_rules",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 export type Settings = Record<SettingKey, string>;
