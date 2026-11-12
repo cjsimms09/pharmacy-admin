@@ -209,9 +209,10 @@ export type PLInputs = {
   waitingPastFortnightRevenueCents?: number | null;
   /** The day the bin was counted, for the sentence; absent on an account built without one. */
   waitingAsOf?: string | null;
-  /** Every fill billed in the month, picked up or not, as PioneerRx's "transmitted" report counts them: the revenue and the acquisition cost, before rebates. */
-  billedRevenueCents?: number | null;
-  billedCostCents?: number | null;
+  /** Counted, and billed inside the last fortnight with nobody yet collecting them: they become returns if nobody does. */
+  uncollectedFills?: number;
+  uncollectedRevenueCents?: number | null;
+  uncollectedCostCents?: number | null;
   /** Whether the month had not ended when this was computed: its figures are partial and will rise. */
   monthInProgress?: boolean;
   /** The value on the shelf at the first and last count of the month, for the independent check. */
@@ -727,21 +728,21 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * the account did with it and names the one act there is — return the ones past the fortnight to stock.
    */
   /*
-   * Not a fault, the other side of the account: PioneerRx's Rx Transaction Summary counts every claim transmitted, and this account counts a fill
-   * when it is collected. The owner, 12 November 2026, shown the two ($25,926.80 there, $12,675.91 here): "our gross profit doesn't match this at
-   * all." They agree on the claims themselves (billed in full, this account's figure was $25,926 to within a dollar); the difference is the
-   * fills in the bin. Counting them is not the answer: of October's paid claims, 863 were never collected and are still "paid", $116k of billing
-   * and $101k of stock with one payment tied to any of them. So the account says both, and says which is which.
+   * Counted as billed, like PioneerRx's Rx Transaction Summary, and the account says what part of that is not yet collected.
+   *
+   * The owner, 12 November 2026: "I thought we settled on billed." A fill is counted in the month it was billed. Those billed inside the last
+   * fortnight and not yet collected are in the figures, and named here with their money, because a fill nobody collects is returned to stock and
+   * its claim reversed, which takes it back out. Those uncollected past the fortnight are already out (the sentence below).
    */
-  if (i.billedRevenueCents != null && (i.waitingFills ?? 0) > 0) {
-    const billedGp = i.billedRevenueCents - (i.billedCostCents ?? 0);
-    const wait = i.waitingFills ?? 0;
+  if ((i.uncollectedFills ?? 0) > 0) {
     caveats.push(
-      `${i.monthInProgress ? "This month is not over, so its figures are partial and rise as prescriptions are collected. " : ""}` +
-        `Counted as PioneerRx's Rx Transaction Summary counts them, every claim billed in the month whether or not it has been collected, revenue is ${formatCents(i.billedRevenueCents)}, acquisition cost ${formatCents(i.billedCostCents ?? 0)} and gross profit ${formatCents(billedGp)}, before rebates. ` +
-        `This account counts ${(i.claimsCount ?? 0).toLocaleString("en-US")} collected prescriptions and leaves out the ${wait.toLocaleString("en-US")} that are not, which is the whole difference: billing is not revenue until the drug is taken away, and fills nobody collects are reversed.`,
+      `${i.monthInProgress ? "This month is not over, so its figures are partial and rise as more is billed. " : ""}` +
+        `Counted as billed, as PioneerRx's Rx Transaction Summary counts them, before rebates. ${(i.uncollectedFills ?? 0).toLocaleString("en-US")} of the ${(i.claimsCount ?? 0).toLocaleString("en-US")} prescriptions counted ` +
+        `(${formatCents(i.uncollectedRevenueCents ?? 0)} of revenue, ${formatCents(i.uncollectedCostCents ?? 0)} of cost) were billed in the last fortnight and have not been collected yet. ` +
+        `One still uncollected after a fortnight is returned to stock and its claim reversed, and is then taken out of both.`,
     );
   }
+
   if (i.waitingFills && (i.waitingRevenueCents ?? 0) > 0) {
     const past = i.waitingPastFortnightFills ?? 0;
     const dayWord = (d: string) => new Date(Date.parse(`${d}T00:00:00Z`)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -1295,19 +1296,34 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
    * finished. And a month in progress always understates, because today's fills have not been
    * collected yet — that is not a fault to be corrected but the point of the basis.
    */
-  const monthFills = fills.filter((f) => (f.soldOn ?? "").startsWith(month));
   /*
-   * Filled this month and still in the bin: named, never counted.
+   * Which fills the month counts: every fill billed in it, less those nobody collected within a fortnight.
+   *
+   * The owner, 12 November 2026, shown PioneerRx's Rx Transaction Summary ($25,926.80 gross profit, every claim billed) against this account's
+   * $12,675.91 on collected fills alone: "I thought we settled on billed." So a fill belongs to the month it was BILLED in, as in that report,
+   * and a month in progress is complete on the day. What keeps this from flattering: a fill uncollected for a fortnight is a return to stock
+   * and a claim to reverse, and it is left out of both sides and named (October 2026: 863 of its paid claims, $116k of billing and $101k of
+   * stock, were never collected and were still "paid", with one payment tied to any of them). A fill collected after that fortnight is counted
+   * again, in the month it was billed.
+   */
+  const fortnightAgo = new Date(Date.parse(`${shared.today}T00:00:00Z`) - 14 * 86_400_000).toISOString().slice(0, 10);
+  const billedFills = fills.filter((f) => f.dateFilled.startsWith(month));
+  const monthFills = billedFills.filter((f) => f.soldOn || f.dateFilled > fortnightAgo);
+  /* Billed, inside the fortnight, not yet collected: counted, and said, because they become returns if nobody comes. */
+  const uncollected = monthFills.filter((f) => !f.soldOn);
+  const uncollectedRevenueCents = uncollected.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0);
+  const uncollectedCostCents = uncollected.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0);
+  /*
+   * Billed and not collected for a fortnight: left out of revenue and of cost together, named, never counted.
    *
    * Reported rather than dropped in silence, because the difference between "we sold less" and "we
    * have not been paid for it yet" is the difference between a bad month and a full bin.
    */
-  const waiting = fills.filter((f) => !f.soldOn && f.dateFilled.startsWith(month));
+  const waiting = billedFills.filter((f) => !f.soldOn && f.dateFilled <= fortnightAgo);
   const waitingRevenueCents = waiting.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0);
   const waitingCostCents = waiting.reduce((n, f) => n + (f.acquisitionCents ?? 0), 0);
-  /* Past the fortnight by the day this was computed: the ones to return to stock, which is the act the sentence has to name. */
-  const fortnightAgo = new Date(Date.parse(`${shared.today}T00:00:00Z`) - 14 * 86_400_000).toISOString().slice(0, 10);
-  const waitingPast = waiting.filter((f) => f.dateFilled <= fortnightAgo);
+  /* The ones to return to stock, which is the act the sentence has to name. */
+  const waitingPast = waiting;
   const waitingPastFortnightRevenueCents = waitingPast.reduce((n, f) => n + f.remitCents + f.patientPaidCents, 0);
   /*
    * A fill whose cost nobody knows is left out of both sides, which is what this file has always
@@ -1496,8 +1512,9 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     waitingPastFortnightFills: waitingPast.length,
     waitingPastFortnightRevenueCents,
     waitingAsOf: shared.today,
-    billedRevenueCents: (claimsRevenueCents ?? 0) + waitingRevenueCents,
-    billedCostCents: (dispensedCostCents ?? 0) + waitingCostCents,
+    uncollectedFills: uncollected.length,
+    uncollectedRevenueCents,
+    uncollectedCostCents,
     monthInProgress: shared.today <= `${month}-31`,
     claimsCount: monthFills.length,
     dispensedCostCents,
