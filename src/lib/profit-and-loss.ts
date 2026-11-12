@@ -209,6 +209,11 @@ export type PLInputs = {
   waitingPastFortnightRevenueCents?: number | null;
   /** The day the bin was counted, for the sentence; absent on an account built without one. */
   waitingAsOf?: string | null;
+  /** Every fill billed in the month, picked up or not, as PioneerRx's "transmitted" report counts them: the revenue and the acquisition cost, before rebates. */
+  billedRevenueCents?: number | null;
+  billedCostCents?: number | null;
+  /** Whether the month had not ended when this was computed: its figures are partial and will rise. */
+  monthInProgress?: boolean;
   /** The value on the shelf at the first and last count of the month, for the independent check. */
   openingStockCents?: number | null;
   closingStockCents?: number | null;
@@ -721,6 +726,22 @@ export function monthlyPL(given: PLInputs): MonthlyPL {
    * be revenue at all": "still see this". A bin is a fact of the month, not a fault in it; the sentence states what
    * the account did with it and names the one act there is — return the ones past the fortnight to stock.
    */
+  /*
+   * Not a fault, the other side of the account: PioneerRx's Rx Transaction Summary counts every claim transmitted, and this account counts a fill
+   * when it is collected. The owner, 12 November 2026, shown the two ($25,926.80 there, $12,675.91 here): "our gross profit doesn't match this at
+   * all." They agree on the claims themselves (billed in full, this account's figure was $25,926 to within a dollar); the difference is the
+   * fills in the bin. Counting them is not the answer: of October's paid claims, 863 were never collected and are still "paid", $116k of billing
+   * and $101k of stock with one payment tied to any of them. So the account says both, and says which is which.
+   */
+  if (i.billedRevenueCents != null && (i.waitingFills ?? 0) > 0) {
+    const billedGp = i.billedRevenueCents - (i.billedCostCents ?? 0);
+    const wait = i.waitingFills ?? 0;
+    caveats.push(
+      `${i.monthInProgress ? "This month is not over, so its figures are partial and rise as prescriptions are collected. " : ""}` +
+        `Counted as PioneerRx's Rx Transaction Summary counts them, every claim billed in the month whether or not it has been collected, revenue is ${formatCents(i.billedRevenueCents)}, acquisition cost ${formatCents(i.billedCostCents ?? 0)} and gross profit ${formatCents(billedGp)}, before rebates. ` +
+        `This account counts ${(i.claimsCount ?? 0).toLocaleString("en-US")} collected prescriptions and leaves out the ${wait.toLocaleString("en-US")} that are not, which is the whole difference: billing is not revenue until the drug is taken away, and fills nobody collects are reversed.`,
+    );
+  }
   if (i.waitingFills && (i.waitingRevenueCents ?? 0) > 0) {
     const past = i.waitingPastFortnightFills ?? 0;
     const dayWord = (d: string) => new Date(Date.parse(`${d}T00:00:00Z`)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -1475,6 +1496,9 @@ export function monthInputs(month: string, basis: "accrual" | "cash", shared: Sh
     waitingPastFortnightFills: waitingPast.length,
     waitingPastFortnightRevenueCents,
     waitingAsOf: shared.today,
+    billedRevenueCents: (claimsRevenueCents ?? 0) + waitingRevenueCents,
+    billedCostCents: (dispensedCostCents ?? 0) + waitingCostCents,
+    monthInProgress: shared.today <= `${month}-31`,
     claimsCount: monthFills.length,
     dispensedCostCents,
     purchasesCents,

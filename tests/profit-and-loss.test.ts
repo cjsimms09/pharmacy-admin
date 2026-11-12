@@ -389,6 +389,25 @@ describe("what the cash account is allowed to carry", () => {
     assert.ok(said.includes("$66,604.44 of stock on the shelf"), "and the stock behind it");
     assert.ok(said.includes("reversed"), "and that one unclaimed for a fortnight is reversed");
   });
+  test("the account says what PioneerRx's transmitted report would say, and that the difference is the uncollected fills", () => {
+    // November 2026 to the 12th: collected 1,090 fills; PioneerRx's report counts 2,783 billed for $300,631.02 and $274,704.22 of cost.
+    const r = monthlyPL({
+      ...base,
+      claimsCount: 1_090,
+      waitingFills: 1_557,
+      waitingRevenueCents: 22_882_902,
+      waitingCostCents: 21_232_200,
+      billedRevenueCents: 29_063_050,
+      billedCostCents: 26_437_894,
+      monthInProgress: true,
+    });
+    const said = r.caveats.join(" ");
+    assert.ok(said.includes("This month is not over"), "a month in progress says it is partial");
+    assert.ok(said.includes("revenue is $290,630.50"), "billed revenue");
+    assert.ok(said.includes("gross profit $26,251.56"), "billed gross profit, the figure that ties to PioneerRx's report");
+    assert.ok(said.includes("leaves out the 1,557 that are not"), "and the whole difference is named");
+    assert.ok(!monthlyPL({ ...base, waitingFills: 0, billedRevenueCents: 100, billedCostCents: 50 }).caveats.join(" ").includes("Rx Transaction Summary"), "nothing to reconcile when nothing is waiting");
+  });
   test("a bin counted on a day names what is past the fortnight and the act: return them to stock", () => {
     const r = monthlyPL({ ...base, waitingFills: 322, waitingRevenueCents: 5_527_845, waitingCostCents: 5_061_672, waitingPastFortnightFills: 18, waitingPastFortnightRevenueCents: 312_000, waitingAsOf: "2026-10-02" });
     const said = r.caveats.join(" ");
