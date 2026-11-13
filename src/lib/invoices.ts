@@ -1609,7 +1609,18 @@ export async function invoiceLines(invoiceId: string) {
  *
  * He was right, and it was not the reader — the reader had never been asked.
  */
-const HAS_NO_LINES = or(isNull(schema.supplierInvoices.linesRead), eq(schema.supplierInvoices.linesRead, 0));
+/*
+ * An invoice that billed nothing has no lines to read.
+ *
+ * The owner, 12 November 2026, three McKesson documents (a DEA return kit with a recall notice: quantity 0, "temporarily out", total $0.00) counted
+ * as "3 invoices have not had their item lines read as numbers", and pressing the button would have sent each to Claude, at the pharmacy's
+ * expense, to find lines that are not there. A printed total of nought is the document saying so. A total that was never read is null, and
+ * still counts.
+ */
+const HAS_NO_LINES = and(
+  or(isNull(schema.supplierInvoices.linesRead), eq(schema.supplierInvoices.linesRead, 0)),
+  or(isNull(schema.supplierInvoices.totalCents), sql`${schema.supplierInvoices.totalCents} <> 0`),
+);
 
 /**
  * Reads the lines off every invoice the line reader has not been run on.
