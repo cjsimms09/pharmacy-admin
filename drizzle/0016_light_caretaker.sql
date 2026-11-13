@@ -1,0 +1,1 @@
+ALTER TABLE `documents` ADD `cs_discrepancy_id` text;

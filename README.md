@@ -17,7 +17,11 @@ The full design and roadmap is in [`docs/PLAN.md`](docs/PLAN.md).
    `.env.example` to `.env` for local development (git-ignored).
 4. **`main` is protected.** Work happens on branches and lands by pull request.
 
-## First-time setup on a machine
+## Running it at the pharmacy
+
+See [`docs/RUNNING.md`](docs/RUNNING.md): clone once, then double-click **Start Pharmacy Admin**. Updates install from Settings → Updates.
+
+## Developer setup
 
 ```bash
 git clone <this repo> ~/pharmacy-admin

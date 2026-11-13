@@ -1,0 +1,1 @@
+ALTER TABLE `claim_payments` ADD `revenue_cents` integer;

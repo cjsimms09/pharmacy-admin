@@ -1,0 +1,104 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+2 0 obj
+<< /Length 1538 >>
+stream
+BT
+/F1 11 Tf
+13 TL
+54 740 Td
+(PROVINGTOWN HEALTH PLAN) Tj T*
+(PHARMACY NETWORK AGREEMENT) Tj T*
+() Tj T*
+(This Pharmacy Network Agreement \(the Agreement\) is entered into between) Tj T*
+(Provingtown Health Plan, Inc. \(the Plan\) and the Pharmacy named on the signature page,) Tj T*
+(and is administered on the Plan's behalf by Proving Benefit Managers LLC \(the PBM\).) Tj T*
+() Tj T*
+(1. Term. This Agreement is effective January 1, 2026 and continues through December 31, 2026.) Tj T*
+(It renews automatically for successive one-year terms unless either party gives written) Tj T*
+(notice of non-renewal at least ninety \(90\) days before the end of the then-current term.) Tj T*
+() Tj T*
+(2. Network. The Pharmacy participates in the Provingtown Preferred Network. Claims are) Tj T*
+(identified by BIN 999123, PCN PRVTEST and Group PROVE1. This Exhibit governs only) Tj T*
+(pharmacies with PSAO chain code 605 or 630.) Tj T*
+() Tj T*
+(3. Pricing. Reimbursement for covered claims is set out in Exhibit B. All AWP references) Tj T*
+(are to Medi-Span AWP as of the date of service.) Tj T*
+() Tj T*
+(4. MAC appeals. The Pharmacy may appeal a MAC price within fourteen \(14\) days of the date of) Tj T*
+(adjudication by submitting the claim number, NDC, date of service and a copy of the) Tj T*
+(wholesaler invoice through the PBM's provider portal at https://appeals.proving.invalid.) Tj T*
+(The PBM shall respond within seven \(7\) business days. An adjustment applies retroactively) Tj T*
+(to the date of the appealed claim.) Tj T*
+ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 6 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+4 0 obj
+<< /Length 1622 >>
+stream
+BT
+/F1 11 Tf
+13 TL
+54 740 Td
+(EXHIBIT B  REIMBURSEMENT SCHEDULE) Tj T*
+(Effective January 1, 2026. This Exhibit B supersedes Exhibit B dated January 1, 2025.) Tj T*
+() Tj T*
+(Provingtown Preferred Network, 1-34 day supply:) Tj T*
+(Brand drugs: AWP minus 17.0% plus a dispensing fee of $1.50 per claim.) Tj T*
+(Generic drugs: the lesser of MAC or AWP minus 45.0%, plus a dispensing fee of $2.00 per claim.) Tj T*
+() Tj T*
+(Provingtown Preferred Network, 35-90 day supply:) Tj T*
+(Brand drugs: AWP minus 18.0% plus a dispensing fee of $1.00 per claim.) Tj T*
+(Generic drugs: the lesser of MAC or AWP minus 47.0%, plus a dispensing fee of $1.00 per claim.) Tj T*
+() Tj T*
+(Generic Effective Rate. The PBM guarantees an aggregate Generic Effective Rate of AWP minus) Tj T*
+(84.0% measured across all participating pharmacies over each calendar year and reconciled) Tj T*
+(by the Plan by March 31 of the following year. This guarantee is not a per-claim rate.) Tj T*
+() Tj T*
+(Network Performance Fee. A fee of 3.0% of ingredient cost is assessed each quarter on all) Tj T*
+(claims where the Pharmacy's generic dispensing rate for the quarter is below 85%, and is) Tj T*
+(collected by offset against the next remittance.) Tj T*
+() Tj T*
+(Payment. The Plan pays clean claims by EFT twice monthly and provides an electronic) Tj T*
+(remittance advice \(835\). EFT and ERA enrollment changes are made on the PBM's provider) Tj T*
+(portal. Questions on payment go to payments@proving.invalid.) Tj T*
+() Tj T*
+(Disputes. A remittance not disputed within sixty \(60\) days of the remittance date is deemed) Tj T*
+(accepted.) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 6 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 6 0 R >>
+endobj
+8 0 obj
+<< /Title (Proving agreement) /Producer (pharmacy-admin make-proving-pdf) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000112 00000 n 
+0000001702 00000 n 
+0000001828 00000 n 
+0000003502 00000 n 
+0000003628 00000 n 
+0000003691 00000 n 
+0000003740 00000 n 
+trailer
+<< /Size 9 /Root 7 0 R /Info 8 0 R >>
+startxref
+3832
+%%EOF
